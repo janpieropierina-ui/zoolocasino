@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.4 - Ticket compacto por horarios
+ZOOLO CASINO CLOUD v5.4 - Ticket Compacto (CORREGIDO)
 """
 
 import os
 import sys
 import json
-import csv
-import io
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, render_template_string, request, session, redirect, jsonify
 from collections import defaultdict
+from flask import Flask, render_template_string, request, session, redirect, jsonify
 
-# ==================== CONFIGURACION SUPABASE ====================
+# ==================== CONFIGURACION ====================
+# IMPORTANTE: Configura estas variables en tu servidor (Render)
+# O cámbialas aquí directamente si es para pruebas locales
+
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE')
 
 app = Flask(__name__)
-app.secret_key = "zoolo_casino_cloud_2025"
+app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
 
-# Configuracion de negocio
+# Configuración de negocio
 PAGO_ANIMAL_NORMAL = 35      
 PAGO_LECHUZA = 70           
 PAGO_ESPECIAL = 2           
@@ -42,7 +43,7 @@ HORARIOS_VENEZUELA = [
     "06:00 PM", "07:00 PM", "08:00 PM"
 ]
 
-# 42 Animales
+# Animales
 ANIMALES = {
     "00": "Ballena", "0": "Delfin", "1": "Carnero", "2": "Toro",
     "3": "Ciempies", "4": "Alacran", "5": "Leon", "6": "Rana",
@@ -63,15 +64,6 @@ ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19",
 # ==================== FUNCIONES AUXILIARES ====================
 def ahora_peru():
     return datetime.utcnow() - timedelta(hours=5)
-
-def parse_fecha_ticket(fecha_str):
-    try:
-        return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
-    except:
-        try:
-            return datetime.strptime(fecha_str, "%d/%m/%Y")
-        except:
-            return None
 
 def get_color(num):
     if num in ["0", "00"]: 
@@ -103,27 +95,28 @@ def verificar_horario_bloqueo(hora_sorteo):
     except:
         return True
 
-def calcular_premio_animal(monto_apostado, numero_animal):
-    if str(numero_animal) == "40":
-        return monto_apostado * PAGO_LECHUZA
-    else:
-        return monto_apostado * PAGO_ANIMAL_NORMAL
+def calcular_premio_animal(monto, numero):
+    """Calcula premio: Lechuza(40) paga x70, otros x35"""
+    if str(numero) == "40":
+        return monto * PAGO_LECHUZA
+    return monto * PAGO_ANIMAL_NORMAL
 
 def supabase_request(table, method="GET", data=None, filters=None):
-    url = f"{SUPABASE_URL}/rest/v1/{table}"
-    
-    if filters:
-        filter_str = "&".join([f"{k}=eq.{v}" for k, v in filters.items()])
-        url += "?" + filter_str
-    
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-    }
-    
+    """Hace peticiones a Supabase"""
     try:
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        
+        if filters:
+            filter_str = "&".join([f"{k}=eq.{v}" for k, v in filters.items()])
+            url += "?" + filter_str
+        
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        
         if method == "GET":
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as response:
@@ -139,11 +132,8 @@ def supabase_request(table, method="GET", data=None, filters=None):
             with urllib.request.urlopen(req, timeout=15) as response:
                 return True
                 
-    except urllib.error.HTTPError as e:
-        print(f"HTTP Error: {e.code} - {e.read().decode()}")
-        return None
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error Supabase: {e}")
         return None
 
 # ==================== DECORADORES ====================
@@ -248,6 +238,7 @@ def procesar_venta():
         fecha = ahora_peru().strftime("%d/%m/%Y %I:%M %p")
         total = sum(j['monto'] for j in jugadas)
         
+        # Guardar ticket
         ticket_data = {
             "serial": serial,
             "agencia_id": session['user_id'],
@@ -263,6 +254,7 @@ def procesar_venta():
         
         ticket_id = result[0]['id']
         
+        # Guardar jugadas
         for j in jugadas:
             jugada_data = {
                 "ticket_id": ticket_id,
@@ -274,7 +266,7 @@ def procesar_venta():
             supabase_request("jugadas", method="POST", data=jugada_data)
         
         # ==================== FORMATO COMPACTO DEL TICKET ====================
-        # Agrupar jugadas por hora
+        # Agrupar por hora
         jugadas_por_hora = defaultdict(list)
         for j in jugadas:
             jugadas_por_hora[j['hora']].append(j)
@@ -296,29 +288,27 @@ def procesar_venta():
             idx = HORARIOS_PERU.index(hora_peru)
             hora_ven = HORARIOS_VENEZUELA[idx]
             
-            # Formato: ZOOLO PERU/09:AM...VZLA/10:AM
+            # Formato compacto de hora: 09:00 AM -> 09:am
             hora_peru_corta = hora_peru.replace(' ', '').replace('00', '').lower()
             hora_ven_corta = hora_ven.replace(' ', '').replace('00', '').lower()
+            
             lineas.append(f"*ZOOLO.PERU/{hora_peru_corta}...VZLA/{hora_ven_corta}*")
             
-            # Agrupar jugadas de esta hora en una sola línea
+            # Juntar todas las jugadas de esta hora
             jugadas_hora = jugadas_por_hora[hora_peru]
             texto_jugadas = []
             
             for j in jugadas_hora:
                 if j['tipo'] == 'animal':
-                    # Formato: ZOR 15x10 (abreviatura del animal + numero x monto)
-                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()  # Primeras 3 letras
-                    if j['seleccion'] == "40":
-                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
-                    else:
-                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
+                    # Abreviatura: 3 primeras letras + numero x monto
+                    nombre = ANIMALES.get(j['seleccion'], '')
+                    abrev = nombre[0:3].upper() if nombre else 'ANI'
+                    texto_jugadas.append(f"{abrev}{j['seleccion']}x{int(j['monto'])}")
                 else:
-                    # Formato especial: ROJx10 o NEGx10
-                    tipo_corto = j['seleccion'][0:3]
-                    texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
+                    # Especial: ROJ, NEG, PAR, IMP
+                    abrev = j['seleccion'][0:3]
+                    texto_jugadas.append(f"{abrev}x{int(j['monto'])}")
             
-            # Unir todas las jugadas de esta hora con espacios
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")  # Línea en blanco entre horarios
         
@@ -340,6 +330,7 @@ def procesar_venta():
         })
         
     except Exception as e:
+        print(f"Error en procesar_venta: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/verificar-ticket', methods=['POST'])
@@ -518,139 +509,6 @@ def caja_agencia():
             'comision': round(comision, 2),
             'balance': round(balance, 2),
             'tickets_pendientes': tickets_pendientes
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/caja-historico', methods=['POST'])
-@agencia_required
-def caja_historico():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        agencias = supabase_request("agencias", filters={"id": session['user_id']})
-        comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        dias_data = {}
-        tickets_pendientes_cobro = []
-        total_ventas = total_premios = 0
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 
-                    'tickets': 0, 
-                    'premios': 0,
-                    'pendientes': 0
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            total_ventas += t['total']
-            
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_key})
-            resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-            
-            if t['pagado']:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                premio_ticket = 0
-                for j in jugadas:
-                    wa = resultados.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            premio_ticket += calcular_premio_animal(j['monto'], wa)
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
-                            num = int(wa)
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                premio_ticket += j['monto'] * PAGO_ESPECIAL
-                
-                dias_data[dia_key]['premios'] += premio_ticket
-                total_premios += premio_ticket
-            else:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                tiene_premio = 0
-                for j in jugadas:
-                    wa = resultados.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            tiene_premio += calcular_premio_animal(j['monto'], wa)
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
-                            num = int(wa)
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                tiene_premio += j['monto'] * PAGO_ESPECIAL
-                
-                if tiene_premio > 0:
-                    dias_data[dia_key]['pendientes'] += 1
-                    tickets_pendientes_cobro.append({
-                        'serial': t['serial'],
-                        'fecha': t['fecha'],
-                        'monto': t['total'],
-                        'premio': round(tiene_premio, 2)
-                    })
-        
-        resumen_dias = []
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            comision_dia = datos['ventas'] * comision_pct
-            balance_dia = datos['ventas'] - datos['premios'] - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'tickets': datos['tickets'],
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(datos['premios'], 2),
-                'comision': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'pendientes': datos['pendientes']
-            })
-        
-        total_comision = total_ventas * comision_pct
-        balance_total = total_ventas - total_premios - total_comision
-        
-        return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comision': round(total_comision, 2),
-                'balance': round(balance_total, 2),
-                'tickets_pendientes_cobro': len(tickets_pendientes_cobro),
-                'total_pendiente_cobro': round(sum(t['premio'] for t in tickets_pendientes_cobro), 2)
-            },
-            'tickets_pendientes': tickets_pendientes_cobro[:10]
         })
         
     except Exception as e:
@@ -835,177 +693,7 @@ def riesgo():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/estadisticas-rango', methods=['POST'])
-@admin_required
-def estadisticas_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        dias_data = {}
-        tickets_rango = []
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            tickets_rango.append(t)
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0, 
-                    'comisiones': 0, 'ids_tickets': []
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            dias_data[dia_key]['ids_tickets'].append(t['id'])
-        
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        resumen_dias = []
-        total_ventas = total_premios = total_tickets = 0
-        
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            resultados_dia = resultados_por_dia.get(dia_key, {})
-            
-            premios_dia = 0
-            for ticket_id in datos['ids_tickets'][:50]:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id})
-                ticket_info = next((t for t in tickets_rango if t['id'] == ticket_id), None)
-                
-                if ticket_info and ticket_info['pagado']:
-                    for j in jugadas:
-                        wa = resultados_dia.get(j['hora'])
-                        if wa:
-                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios_dia += calcular_premio_animal(j['monto'], wa)
-                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                                num = int(wa)
-                                sel = j['seleccion']
-                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                                   (sel == 'PAR' and num % 2 == 0) or \
-                                   (sel == 'IMPAR' and num % 2 != 0):
-                                    premios_dia += j['monto'] * PAGO_ESPECIAL
-            
-            comision_dia = datos['ventas'] * COMISION_AGENCIA
-            balance_dia = datos['ventas'] - premios_dia - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(premios_dia, 2),
-                'comisiones': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'tickets': datos['tickets']
-            })
-            
-            total_ventas += datos['ventas']
-            total_premios += premios_dia
-            total_tickets += datos['tickets']
-        
-        return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comisiones': round(total_ventas * COMISION_AGENCIA, 2),
-                'balance': round(total_ventas - total_premios - (total_ventas * COMISION_AGENCIA), 2),
-                'tickets': total_tickets
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/top-animales-rango', methods=['POST'])
-@admin_required
-def top_animales_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        ticket_ids = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                ticket_ids.append(t['id'])
-        
-        if not ticket_ids:
-            return jsonify({'top_animales': []})
-        
-        apuestas = {}
-        for ticket_id in ticket_ids[:100]:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
-            for j in jugadas:
-                sel = j['seleccion']
-                if sel not in apuestas:
-                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
-                apuestas[sel]['monto'] += j['monto']
-                apuestas[sel]['cantidad'] += 1
-        
-        top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
-        resultado = []
-        
-        for sel, data in top[:20]:
-            nombre = ANIMALES.get(sel, sel)
-            resultado.append({
-                'numero': sel,
-                'nombre': nombre,
-                'total_apostado': round(data['monto'], 2),
-                'cantidad_jugadas': data['cantidad'],
-                'pago_potencial': round(data['monto'] * (PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL), 2)
-            })
-        
-        return jsonify({'top_animales': resultado})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== TEMPLATES HTML ====================
+# ==================== TEMPLATES ====================
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -1051,7 +739,6 @@ LOGIN_HTML = '''
             background: rgba(255,0,0,0.2); color: #ff6b6b;
             padding: 10px; border-radius: 5px; margin-bottom: 20px;
         }
-        .info { margin-top: 20px; font-size: 0.85rem; color: #666; }
     </style>
 </head>
 <body>
@@ -1071,9 +758,6 @@ LOGIN_HTML = '''
             </div>
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
-        <div class="info">
-            Sistema ZOOLO CASINO v5.4 - Ticket Compacto
-        </div>
     </div>
 </body>
 </html>
@@ -1117,7 +801,6 @@ POS_HTML = '''
         .btn-esp { 
             flex: 1; padding: 10px 4px; border: none; border-radius: 4px; 
             font-weight: bold; cursor: pointer; color: white; font-size: 0.75rem;
-            -webkit-tap-highlight-color: transparent;
         }
         .btn-rojo { background: #c0392b; }
         .btn-negro { background: #2c3e50; border: 1px solid #555; }
@@ -1128,13 +811,11 @@ POS_HTML = '''
             flex: 1; display: grid; 
             grid-template-columns: repeat(7, 1fr);
             gap: 3px; padding: 5px; overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
         }
         .animal-card {
             background: #1a1a2e; border: 2px solid; border-radius: 6px;
             padding: 6px 2px; text-align: center; cursor: pointer; 
-            transition: all 0.1s; min-height: 55px; display: flex; flex-direction: column; justify-content: center;
-            -webkit-tap-highlight-color: transparent; user-select: none;
+            min-height: 55px; display: flex; flex-direction: column; justify-content: center;
             position: relative;
         }
         .animal-card:active { transform: scale(0.95); }
@@ -1160,13 +841,11 @@ POS_HTML = '''
         .horarios {
             display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px;
             padding: 5px; max-height: 160px; overflow-y: auto; flex-shrink: 0;
-            -webkit-overflow-scrolling: touch;
         }
         .btn-hora {
             padding: 6px 3px; background: #222; border: 1px solid #444;
             border-radius: 4px; color: #ccc; cursor: pointer; 
             font-size: 0.65rem; text-align: center; line-height: 1.3;
-            -webkit-tap-highlight-color: transparent; user-select: none;
         }
         .btn-hora.active { background: #27ae60; color: white; font-weight: bold; border-color: #27ae60; }
         .btn-hora.expired { background: #400000; color: #666; text-decoration: line-through; pointer-events: none; }
@@ -1174,7 +853,7 @@ POS_HTML = '''
             flex: 1; background: #000; margin: 0 5px 5px; border-radius: 4px;
             padding: 8px; font-family: monospace; font-size: 0.72rem;
             overflow-y: auto; white-space: pre-wrap; border: 1px solid #333;
-            line-height: 1.4; -webkit-overflow-scrolling: touch;
+            line-height: 1.4;
         }
         .action-btns { 
             display: grid; grid-template-columns: repeat(3, 1fr); 
@@ -1183,7 +862,6 @@ POS_HTML = '''
         .action-btns button {
             padding: 10px 3px; border: none; border-radius: 4px;
             font-weight: bold; cursor: pointer; font-size: 0.68rem;
-            -webkit-tap-highlight-color: transparent;
         }
         .btn-agregar { background: #27ae60; color: white; grid-column: span 3; }
         .btn-vender { background: #2980b9; color: white; grid-column: span 3; }
@@ -1212,7 +890,6 @@ POS_HTML = '''
             background: #c0392b; color: white; border: none; 
             padding: 5px 12px; border-radius: 4px; cursor: pointer;
         }
-        
         .tabs { display: flex; gap: 5px; margin-bottom: 15px; border-bottom: 1px solid #444; }
         .tab-btn { 
             background: transparent; border: none; color: #888; 
@@ -1222,18 +899,6 @@ POS_HTML = '''
         .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        
-        .form-group { margin-bottom: 10px; }
-        .form-group label { display: block; color: #888; font-size: 0.8rem; margin-bottom: 4px; }
-        .form-group input, .form-group select {
-            width: 100%; padding: 8px; background: #000; border: 1px solid #444;
-            color: white; border-radius: 4px; font-size: 0.85rem;
-        }
-        .btn-consultar {
-            background: #27ae60; color: white; border: none; padding: 10px;
-            width: 100%; border-radius: 4px; font-weight: bold; cursor: pointer;
-            margin-top: 10px;
-        }
         .stats-box {
             background: #0a0a0a; padding: 15px; border-radius: 8px; margin: 10px 0;
             border: 1px solid #333;
@@ -1247,18 +912,10 @@ POS_HTML = '''
         .stat-value { color: #ffd700; font-weight: bold; }
         .stat-value.negative { color: #c0392b; }
         .stat-value.positive { color: #27ae60; }
-        
-        table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin-top: 10px; }
-        th, td { padding: 6px; text-align: left; border-bottom: 1px solid #333; }
-        th { background: #222; color: #ffd700; }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
         .alert-box {
             background: rgba(243, 156, 18, 0.2); border: 1px solid #f39c12;
             padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 0.85rem;
         }
-        .alert-box strong { color: #f39c12; }
-        
         @media (max-width: 768px) {
             .main-container { flex-direction: column; }
             .right-panel { width: 100%; height: 42vh; border-left: none; border-top: 1px solid #333; }
@@ -1268,7 +925,6 @@ POS_HTML = '''
             .animals-grid { grid-template-columns: repeat(6, 1fr); }
             .animal-card { min-height: 50px; padding: 4px 1px; }
             .animal-card .num { font-size: 0.9rem; }
-            .animal-card .name { font-size: 0.55rem; }
         }
     </style>
 </head>
@@ -1327,12 +983,10 @@ POS_HTML = '''
                 <h3>ESTADO DE CAJA</h3>
                 <button class="btn-close" onclick="cerrarModal()">X</button>
             </div>
-            
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab('hoy')">Hoy</button>
                 <button class="tab-btn" onclick="switchTab('historico')">Histórico</button>
             </div>
-
             <div id="tab-hoy" class="tab-content active">
                 <div class="stats-box">
                     <div class="stat-row">
@@ -1340,11 +994,11 @@ POS_HTML = '''
                         <span class="stat-value" id="caja-ventas">S/0.00</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Premios Pagados:</span>
+                        <span class="stat-label">Premios:</span>
                         <span class="stat-value negative" id="caja-premios">S/0.00</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Tu Comisión:</span>
+                        <span class="stat-label">Comisión:</span>
                         <span class="stat-value" id="caja-comision">S/0.00</span>
                     </div>
                     <div class="stat-row">
@@ -1352,60 +1006,31 @@ POS_HTML = '''
                         <span class="stat-value" id="caja-balance">S/0.00</span>
                     </div>
                 </div>
-                
                 <div id="alerta-pendientes" class="alert-box" style="display:none;">
-                    <strong>⚠️ Tickets por Cobrar:</strong>
+                    <strong>⚠️ Pendientes:</strong>
                     <div id="info-pendientes"></div>
                 </div>
-                
-                <div style="margin-top: 15px; font-size: 0.75rem; color: #666; text-align: center;">
-                    Reglas: Animales x35 | Lechuza(40) x70 | Especiales x2
-                </div>
             </div>
-
             <div id="tab-historico" class="tab-content">
-                <div class="form-group">
-                    <label>Desde:</label>
-                    <input type="date" id="hist-fecha-inicio">
+                <div style="margin-bottom:10px;">
+                    <label style="color:#888;font-size:0.8rem;">Desde:</label>
+                    <input type="date" id="hist-fecha-inicio" style="width:100%;padding:8px;background:#000;border:1px solid #444;color:white;border-radius:4px;">
                 </div>
-                <div class="form-group">
-                    <label>Hasta:</label>
-                    <input type="date" id="hist-fecha-fin">
+                <div style="margin-bottom:10px;">
+                    <label style="color:#888;font-size:0.8rem;">Hasta:</label>
+                    <input type="date" id="hist-fecha-fin" style="width:100%;padding:8px;background:#000;border:1px solid #444;color:white;border-radius:4px;">
                 </div>
-                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR</button>
-                
-                <div id="resultado-historico" style="display:none; margin-top: 15px;">
+                <button onclick="consultarHistoricoCaja()" style="width:100%;padding:10px;background:#27ae60;color:white;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">CONSULTAR</button>
+                <div id="resultado-historico" style="display:none;margin-top:15px;">
                     <div class="stats-box">
                         <div class="stat-row">
-                            <span class="stat-label">Total Ventas:</span>
+                            <span class="stat-label">Ventas:</span>
                             <span class="stat-value" id="hist-ventas">S/0.00</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total Premios:</span>
-                            <span class="stat-value negative" id="hist-premios">S/0.00</span>
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Balance:</span>
                             <span class="stat-value" id="hist-balance">S/0.00</span>
                         </div>
-                    </div>
-
-                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Ventas</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico-caja"></tbody>
-                        </table>
-                    </div>
-
-                    <div id="hist-alerta-pendientes" class="alert-box" style="display:none;">
-                        <strong>💰 Pendiente por Cobrar:</strong>
-                        <div id="hist-info-pendientes"></div>
                     </div>
                 </div>
             </div>
@@ -1423,7 +1048,6 @@ POS_HTML = '''
             document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {hour: '2-digit', minute:'2-digit', hour12: true});
             
             let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
-            
             horasPeru.forEach((h, idx) => {
                 let partes = h.split(/[: ]/);
                 let hora = parseInt(partes[0]);
@@ -1492,11 +1116,8 @@ POS_HTML = '''
                 txt += "\\n--- SELECCION ---\\n";
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
                 for (let h of horariosSel) {
-                    for (let a of seleccionados) {
-                        let indicador = a.k === "40" ? " [x70!]" : "";
-                        txt += "> " + h + " | " + a.k + " " + a.nombre + indicador + "\\n";
-                    }
-                    for (let e of especiales) txt += "> " + h + " | " + e + " [x2]\\n";
+                    for (let a of seleccionados) txt += "> " + h + " | " + a.k + " " + a.nombre + "\\n";
+                    for (let e of especiales) txt += "> " + h + " | " + e + "\\n";
                 }
             }
             txt += "\\nTOTAL: S/" + total;
@@ -1541,24 +1162,19 @@ POS_HTML = '''
                 document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
                 document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
                 document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
-                
                 let balanceEl = document.getElementById('caja-balance');
                 balanceEl.textContent = 'S/' + d.balance.toFixed(2);
                 balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
-                
                 let alertaDiv = document.getElementById('alerta-pendientes');
-                let infoDiv = document.getElementById('info-pendientes');
                 if (d.tickets_pendientes > 0) {
                     alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar. Pasa a pagar!`;
+                    document.getElementById('info-pendientes').innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.`;
                 } else {
                     alertaDiv.style.display = 'none';
                 }
-                
                 document.getElementById('modal-caja').style.display = 'block';
             })
             .catch(e => alert('Error: ' + e));
-            
             let hoy = new Date().toISOString().split('T')[0];
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
@@ -1574,562 +1190,11 @@ POS_HTML = '''
         function consultarHistoricoCaja() {
             let inicio = document.getElementById('hist-fecha-inicio').value;
             let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                alert('Seleccione ambas fechas');
-                return;
-            }
-            
+            if (!inicio || !fin) { alert('Seleccione fechas'); return; }
             fetch('/api/caja-historico', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
             })
             .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    alert('Error: ' + d.error);
-                    return;
-                }
-                
-                document.getElementById('resultado-historico').style.display = 'block';
-                document.getElementById('hist-ventas').textContent = 'S/' + d.totales.ventas.toFixed(2);
-                document.getElementById('hist-premios').textContent = 'S/' + d.totales.premios.toFixed(2);
-                
-                let balanceEl = document.getElementById('hist-balance');
-                balanceEl.textContent = 'S/' + d.totales.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.totales.balance >= 0 ? 'positive' : 'negative');
-                
-                let tbody = document.getElementById('tabla-historico-caja');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td style="color:${color}">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                let alertaDiv = document.getElementById('hist-alerta-pendientes');
-                let infoDiv = document.getElementById('hist-info-pendientes');
-                if (d.totales.tickets_pendientes_cobro > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `${d.totales.tickets_pendientes_cobro} ticket(s) sin cobrar por <strong>S/${d.totales.total_pendiente_cobro.toFixed(2)}</strong>`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
-            })
-            .catch(e => alert('Error de conexion: ' + e));
-        }
-        
-        function cerrarModal() { 
-            document.getElementById('modal-caja').style.display = 'none';
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelector('.tab-btn').classList.add('active');
-            document.getElementById('tab-hoy').classList.add('active');
-        }
-        
-        function pagar() {
-            let serial = prompt('Ingrese SERIAL:'); if (!serial) return;
-            fetch('/api/verificar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) { alert(d.error); return; }
-                
-                let msg = "=== RESULTADO ===\\n\\n";
-                let total = d.total_ganado;
-                
-                for (let det of d.detalles) {
-                    let premioTxt = det.gano ? ('S/' + det.premio.toFixed(2)) : 'No';
-                    let especial = det.es_lechuza ? ' 🦉x70!' : '';
-                    msg += det.hora + " | " + det.sel + " -> " + premioTxt + especial + "\\n";
-                }
-                
-                msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
-                
-                if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
-                    fetch('/api/pagar-ticket', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ticket_id: d.ticket_id})
-                    }).then(() => alert('✅ Ticket pagado correctamente'));
-                } else {
-                    alert(msg);
-                }
-            });
-        }
-        
-        function anular() {
-            let serial = prompt('SERIAL a anular:'); if (!serial) return;
-            if (!confirm('¿ANULAR ' + serial + '?')) return;
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => { if (d.error) alert(d.error); else alert('Anulado'); });
-        }
-        
-        function borrarTodo() {
-            seleccionados = []; especiales = []; horariosSel = []; carrito = [];
-            document.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
-            updateTicket();
-        }
-        
-        document.getElementById('modal-caja').addEventListener('click', function(e) {
-            if (e.target === this) cerrarModal();
-        });
-        
-        document.addEventListener('dblclick', function(e) { e.preventDefault(); }, { passive: false });
-    </script>
-</body>
-</html>
-'''
-
-ADMIN_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Admin - ZOOLO CASINO</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #0a0a0a; color: white; font-family: 'Segoe UI', sans-serif; }
-        .navbar {
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 10px 15px; display: flex; justify-content: space-between; align-items: center;
-            border-bottom: 2px solid #ffd700; flex-wrap: wrap; gap: 10px;
-        }
-        .navbar h2 { color: #ffd700; font-size: 1.2rem; }
-        .nav-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
-        .nav-tabs button {
-            padding: 8px 12px; background: #333; border: none; color: white;
-            cursor: pointer; border-radius: 4px; font-size: 0.8rem;
-        }
-        .nav-tabs button.active { background: #ffd700; color: black; font-weight: bold; }
-        .logout-btn { background: #c0392b !important; }
-        .content { padding: 15px; max-width: 1200px; margin: 0 auto; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .stats-grid {
-            display: grid; grid-template-columns: repeat(2, 1fr);
-            gap: 10px; margin-bottom: 20px;
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 15px; border-radius: 8px; border: 1px solid #ffd700; text-align: center;
-        }
-        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 5px; }
-        .stat-card p { color: #ffd700; font-size: 1.3rem; font-weight: bold; }
-        .form-box { background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .form-box h3 { color: #ffd700; margin-bottom: 10px; font-size: 1rem; }
-        .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
-        .form-row input, .form-row select {
-            flex: 1; min-width: 120px; padding: 8px; background: #000;
-            border: 1px solid #444; color: white; border-radius: 4px; font-size: 0.85rem;
-        }
-        .btn-submit {
-            background: #27ae60; color: white; border: none;
-            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
-        }
-        .btn-secondary {
-            background: #2980b9; color: white; border: none;
-            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-right: 5px;
-        }
-        table { width: 100%; border-collapse: collapse; background: #1a1a2e; border-radius: 8px; overflow: hidden; font-size: 0.8rem; margin-top: 10px; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
-        th { background: #ffd700; color: black; }
-        tr:hover { background: rgba(255,215,0,0.1); }
-        .riesgo-item {
-            background: #1a1a2e; padding: 10px; margin-bottom: 8px;
-            border-radius: 4px; border-left: 3px solid #c0392b; font-size: 0.85rem;
-        }
-        .riesgo-item.lechuza {
-            border-left-color: #ffd700;
-            background: rgba(255, 215, 0, 0.1);
-        }
-        .riesgo-item b { color: #ffd700; }
-        .mensaje {
-            padding: 10px; margin: 10px 0; border-radius: 4px; display: none;
-            font-size: 0.85rem;
-        }
-        .mensaje.success { background: rgba(39,174,96,0.3); border: 1px solid #27ae60; display: block; }
-        .mensaje.error { background: rgba(192,57,43,0.3); border: 1px solid #c0392b; display: block; }
-        .info-pago {
-            background: #0a0a0a; padding: 10px; border-radius: 4px; margin: 10px 0;
-            font-size: 0.8rem; color: #888; text-align: center;
-            border: 1px solid #333;
-        }
-        @media (min-width: 768px) {
-            .stats-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-    </style>
-</head>
-<body>
-    <div class="navbar">
-        <h2>PANEL ADMIN</h2>
-        <div class="nav-tabs">
-            <button onclick="showTab('dashboard')" class="active">Dashboard</button>
-            <button onclick="showTab('historico')">Histórico</button>
-            <button onclick="showTab('riesgo')">Riesgo</button>
-            <button onclick="showTab('reporte')">Reporte</button>
-            <button onclick="showTab('resultados')">Resultados</button>
-            <button onclick="showTab('agencias')">Agencias</button>
-            <button onclick="location.href='/logout'" class="logout-btn">Salir</button>
-        </div>
-    </div>
-    <div class="content">
-        <div id="mensaje" class="mensaje"></div>
-        
-        <div class="info-pago">
-            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2
-        </div>
-        
-        <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px;">RESUMEN DE HOY</h3>
-            <div class="stats-grid">
-                <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS</h3><p id="stat-premios">S/0</p></div>
-                <div class="stat-card"><h3>COMISIONES</h3><p id="stat-comisiones">S/0</p></div>
-                <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
-            </div>
-        </div>
-
-        <div id="historico" class="tab-content">
-            <div class="form-box">
-                <h3>CONSULTA HISTÓRICA POR RANGO</h3>
-                <div class="form-row">
-                    <input type="date" id="hist-fecha-inicio" value="">
-                    <input type="date" id="hist-fecha-fin" value="">
-                    <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
-                </div>
-                <div class="form-row" style="margin-top: 10px;">
-                    <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">Últimos 7 días</button>
-                    <button class="btn-secondary" onclick="setRango('mes')">Este mes</button>
-                </div>
-                
-                <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 15px;">
-                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL TICKETS</h3><p id="hist-total-tickets">0</p></div>
-                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 20px 0 10px;">DETALLE POR DÍA</h3>
-                    <div style="overflow-x: auto;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios</th>
-                                    <th>Comisiones</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico"></tbody>
-                        </table>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 20px 0 10px;">TOP ANIMALES DEL PERÍODO</h3>
-                    <div id="top-animales-hist" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
-                        <p style="color: #888;">Cargando...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="riesgo" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">ANIMALES MAS JUGADOS HOY</h3>
-            <div id="lista-riesgo"><p style="color: #888; font-size: 0.85rem;">Cargando...</p></div>
-        </div>
-
-        <div id="reporte" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">REPORTE POR AGENCIA (HOY)</h3>
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead><tr><th>Agencia</th><th>Ventas</th><th>Premios</th><th>Comision</th><th>Balance</th></tr></thead>
-                    <tbody id="tabla-reporte"><tr><td colspan="5" style="text-align:center;color:#888;">Cargando...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="resultados" class="tab-content">
-            <div class="form-box">
-                <h3>CARGAR RESULTADO</h3>
-                <div class="form-row">
-                    <select id="res-hora">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
-                    <select id="res-animal">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
-                    <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="agencias" class="tab-content">
-            <div class="form-box">
-                <h3>CREAR AGENCIA</h3>
-                <div class="form-row">
-                    <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contrasena">
-                    <input type="text" id="new-nombre" placeholder="Nombre">
-                    <button class="btn-submit" onclick="crearAgencia()">CREAR</button>
-                </div>
-            </div>
-            <h3 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">AGENCIAS</h3>
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comision</th></tr></thead>
-                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888;">Cargando...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let historicoData = null;
-        let fechasConsulta = { inicio: null, fin: null };
-
-        function showTab(tab) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.nav-tabs button').forEach(b => b.classList.remove('active'));
-            document.getElementById(tab).classList.add('active');
-            event.target.classList.add('active');
-            
-            if (tab === 'riesgo') cargarRiesgo();
-            if (tab === 'reporte') cargarReporte();
-            if (tab === 'agencias') cargarAgencias();
-            if (tab === 'dashboard') cargarDashboard();
-        }
-
-        function showMensaje(msg, tipo) {
-            let div = document.getElementById('mensaje');
-            div.textContent = msg; 
-            div.className = 'mensaje ' + tipo;
-            setTimeout(() => div.className = 'mensaje', 3000);
-        }
-
-        function setRango(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
-            
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
-            }
-            
-            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
-            
-            consultarHistorico();
-        }
-
-        function consultarHistorico() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            fechasConsulta = { inicio, fin };
-            showMensaje('Consultando datos...', 'success');
-            
-            fetch('/admin/estadisticas-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                historicoData = d;
-                document.getElementById('historico-resumen').style.display = 'block';
-                
-                document.getElementById('hist-total-ventas').textContent = 'S/' + d.totales.ventas.toFixed(0);
-                document.getElementById('hist-total-premios').textContent = 'S/' + d.totales.premios.toFixed(0);
-                document.getElementById('hist-total-tickets').textContent = d.totales.tickets;
-                document.getElementById('hist-total-balance').textContent = 'S/' + d.totales.balance.toFixed(0);
-                
-                let tbody = document.getElementById('tabla-historico');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(2)}</td>
-                        <td>S/${dia.premios.toFixed(2)}</td>
-                        <td>S/${dia.comisiones.toFixed(2)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(2)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                cargarTopAnimalesHistorico(inicio, fin);
-            })
-            .catch(e => showMensaje('Error de conexión', 'error'));
-        }
-
-        function cargarTopAnimalesHistorico(inicio, fin) {
-            fetch('/admin/top-animales-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let container = document.getElementById('top-animales-hist');
-                if (!d.top_animales || d.top_animales.length === 0) {
-                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.top_animales.slice(0, 10).forEach((a, idx) => {
-                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
-                    let esLechuza = a.numero === "40";
-                    let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
-                    
-                    html += `<div class="${clase}" style="margin-bottom: 0;">
-                        <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
-                        <small>Apostado: S/${a.total_apostado} | Si sale pagaría: S/${a.pago_potencial}</small>
-                    </div>`;
-                });
-                container.innerHTML = html;
-            });
-        }
-
-        function cargarDashboard() {
-            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
-                if (d.global) {
-                    document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
-                    document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
-                    document.getElementById('stat-comisiones').textContent = 'S/' + d.global.comisiones.toFixed(0);
-                    document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
-                }
-            }).catch(() => showMensaje('Error de conexion', 'error'));
-        }
-
-        function cargarRiesgo() {
-            fetch('/admin/riesgo').then(r => r.json()).then(d => {
-                let container = document.getElementById('lista-riesgo');
-                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas</p>'; 
-                    return;
-                }
-                let html = '';
-                for (let [k, v] of Object.entries(d.riesgo)) {
-                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
-                    html += `<div class="${clase}"><b>${k}${extra}</b><br>Apostado: S/${v.apostado.toFixed(2)} | Pagaria: S/${v.pagaria.toFixed(2)}</div>`;
-                }
-                container.innerHTML = html;
-            });
-        }
-
-        function cargarReporte() {
-            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
-                let tbody = document.getElementById('tabla-reporte');
-                if (!d.agencias || d.agencias.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay agencias</td></tr>'; 
-                    return;
-                }
-                let html = '';
-                for (let a of d.agencias) {
-                    html += '<tr><td>' + a.nombre + '</td><td>S/' + a.ventas.toFixed(2) + '</td><td>S/' + a.premios.toFixed(2) + '</td><td>S/' + a.comision.toFixed(2) + '</td><td style="color:' + (a.balance >= 0 ? '#27ae60' : '#c0392b') + '">S/' + a.balance.toFixed(2) + '</td></tr>';
-                }
-                html += '<tr style="background:rgba(255,215,0,0.2);font-weight:bold;"><td>TOTAL</td><td>S/' + d.global.ventas.toFixed(2) + '</td><td>S/' + d.global.pagos.toFixed(2) + '</td><td>S/' + d.global.comisiones.toFixed(2) + '</td><td>S/' + d.global.balance.toFixed(2) + '</td></tr>';
-                tbody.innerHTML = html;
-            });
-        }
-
-        function guardarResultado() {
-            let form = new FormData();
-            form.append('hora', document.getElementById('res-hora').value);
-            form.append('animal', document.getElementById('res-animal').value);
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') showMensaje('Guardado', 'success');
-                else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        function cargarAgencias() {
-            fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
-                let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { tbody.innerHTML = '<tr><td colspan="4">No hay agencias</td></tr>'; return; }
-                let html = '';
-                for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
-                tbody.innerHTML = html;
-            });
-        }
-
-        function crearAgencia() {
-            let form = new FormData();
-            form.append('usuario', document.getElementById('new-usuario').value.trim());
-            form.append('password', document.getElementById('new-password').value.trim());
-            form.append('nombre', document.getElementById('new-nombre').value.trim());
-            fetch('/admin/crear-agencia', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('Creada', 'success');
-                    document.getElementById('new-usuario').value = '';
-                    document.getElementById('new-password').value = '';
-                    document.getElementById('new-nombre').value = '';
-                    cargarAgencias();
-                } else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-        });
-
-        cargarDashboard();
-    </script>
-</body>
-</html>
-'''
-
-# ==================== MAIN ====================
-if __name__ == '__main__':
-    print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.4")
-    print("  TICKET COMPACTO - Lechuza x70")
-    print("=" * 60)
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+            .then(d =>
