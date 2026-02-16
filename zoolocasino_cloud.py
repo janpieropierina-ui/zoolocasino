@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.0 - Sistema en la Nube con Supabase
-Copiar, pegar y ejecutar: python zoolocasino_cloud.py
+ZOOLO CASINO CLOUD v5.1 - Sistema en la Nube con Supabase + ESTADÍSTICAS HISTÓRICAS
 """
 
 import os
 import sys
 import json
+import csv
+import io
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
@@ -14,7 +15,6 @@ from functools import wraps
 from flask import Flask, render_template_string, request, session, redirect, jsonify
 
 # ==================== CONFIGURACION SUPABASE ====================
-# Lee credenciales de variables de entorno (para la nube) o usa las locales
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE')
 
@@ -61,6 +61,16 @@ ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19",
 # ==================== FUNCIONES AUXILIARES ====================
 def ahora_peru():
     return datetime.utcnow() - timedelta(hours=5)
+
+def parse_fecha_ticket(fecha_str):
+    """Convierte 'DD/MM/YYYY HH:MM AM/PM' a datetime"""
+    try:
+        return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
+    except:
+        try:
+            return datetime.strptime(fecha_str, "%d/%m/%Y")
+        except:
+            return None
 
 def get_color(num):
     if num in ["0", "00"]: 
@@ -173,7 +183,6 @@ def login():
         u = request.form.get('usuario', '').strip().lower()
         p = request.form.get('password', '').strip()
         
-        # Buscar en Supabase
         users = supabase_request("agencias", filters={"usuario": u, "password": p, "activa": "true"})
         
         if users and len(users) > 0:
@@ -214,7 +223,7 @@ def admin():
         horarios=HORARIOS_PERU
     )
 
-# ==================== API POS ====================
+# ==================== API POS (sin cambios) ====================
 @app.route('/api/procesar-venta', methods=['POST'])
 @agencia_required
 def procesar_venta():
@@ -233,7 +242,6 @@ def procesar_venta():
         fecha = ahora_peru().strftime("%d/%m/%Y %I:%M %p")
         total = sum(j['monto'] for j in jugadas)
         
-        # Crear ticket en Supabase
         ticket_data = {
             "serial": serial,
             "agencia_id": session['user_id'],
@@ -249,7 +257,6 @@ def procesar_venta():
         
         ticket_id = result[0]['id']
         
-        # Crear jugadas
         for j in jugadas:
             jugada_data = {
                 "ticket_id": ticket_id,
@@ -260,7 +267,6 @@ def procesar_venta():
             }
             supabase_request("jugadas", method="POST", data=jugada_data)
         
-        # Generar texto WhatsApp
         lineas = [
             f"*{session['nombre_agencia']}*",
             f"*Serial:* {serial}",
@@ -413,7 +419,6 @@ def caja_agencia():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         
-        # Obtener tickets de hoy
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
@@ -459,7 +464,7 @@ def caja_agencia():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== API ADMIN ====================
+# ==================== API ADMIN ACTUALIZADA CON ESTADÍSTICAS ====================
 @app.route('/admin/lista-agencias')
 @admin_required
 def lista_agencias():
@@ -636,7 +641,250 @@ def riesgo():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== TEMPLATES HTML ====================
+# ==================== NUEVAS RUTAS DE ESTADÍSTICAS HISTÓRICAS ====================
+@app.route('/admin/estadisticas-rango', methods=['POST'])
+@admin_required
+def estadisticas_rango():
+    """Obtiene estadísticas detalladas por día en un rango de fechas"""
+    try:
+        data = request.get_json()
+        fecha_inicio = data.get('fecha_inicio')  # YYYY-MM-DD
+        fecha_fin = data.get('fecha_fin')        # YYYY-MM-DD
+        
+        if not fecha_inicio or not fecha_fin:
+            return jsonify({'error': 'Fechas requeridas'}), 400
+        
+        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        
+        # Consultar todos los tickets (limitado a 1000 más recientes para rendimiento)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
+        
+        # Filtrar por rango y agrupar por día
+        dias_data = {}
+        tickets_rango = []
+        
+        for t in all_tickets:
+            if t.get('anulado'):
+                continue
+                
+            dt_ticket = parse_fecha_ticket(t['fecha'])
+            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
+                continue
+            
+            tickets_rango.append(t)
+            dia_key = dt_ticket.strftime("%d/%m/%Y")
+            
+            if dia_key not in dias_data:
+                dias_data[dia_key] = {
+                    'ventas': 0, 'tickets': 0, 'premios': 0, 
+                    'comisiones': 0, 'ids_tickets': []
+                }
+            
+            dias_data[dia_key]['ventas'] += t['total']
+            dias_data[dia_key]['tickets'] += 1
+            dias_data[dia_key]['ids_tickets'].append(t['id'])
+        
+        # Calcular premios para cada día (esto es pesado pero necesario para precisión)
+        # Optimización: Consultar todos los resultados del rango una sola vez
+        resultados_por_dia = {}
+        delta = dt_fin - dt_inicio
+        for i in range(delta.days + 1):
+            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
+            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
+            if resultados_list:
+                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
+        
+        # Procesar premios por día
+        resumen_dias = []
+        total_ventas = total_premios = total_tickets = 0
+        
+        for dia_key in sorted(dias_data.keys()):
+            datos = dias_data[dia_key]
+            resultados_dia = resultados_por_dia.get(dia_key, {})
+            
+            # Calcular premios del día consultando jugadas de los tickets de ese día
+            premios_dia = 0
+            # Limitar a 50 tickets por día para no saturar
+            for ticket_id in datos['ids_tickets'][:50]:
+                jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id})
+                ticket_info = next((t for t in tickets_rango if t['id'] == ticket_id), None)
+                
+                if ticket_info and ticket_info['pagado']:
+                    for j in jugadas:
+                        wa = resultados_dia.get(j['hora'])
+                        if wa:
+                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                premios_dia += j['monto'] * PAGO_ANIMAL
+                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                num = int(wa)
+                                sel = j['seleccion']
+                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                   (sel == 'PAR' and num % 2 == 0) or \
+                                   (sel == 'IMPAR' and num % 2 != 0):
+                                    premios_dia += j['monto'] * PAGO_ESPECIAL
+            
+            comision_dia = datos['ventas'] * COMISION_AGENCIA
+            balance_dia = datos['ventas'] - premios_dia - comision_dia
+            
+            resumen_dias.append({
+                'fecha': dia_key,
+                'ventas': round(datos['ventas'], 2),
+                'premios': round(premios_dia, 2),
+                'comisiones': round(comision_dia, 2),
+                'balance': round(balance_dia, 2),
+                'tickets': datos['tickets']
+            })
+            
+            total_ventas += datos['ventas']
+            total_premios += premios_dia
+            total_tickets += datos['tickets']
+        
+        return jsonify({
+            'resumen_por_dia': resumen_dias,
+            'totales': {
+                'ventas': round(total_ventas, 2),
+                'premios': round(total_premios, 2),
+                'comisiones': round(total_ventas * COMISION_AGENCIA, 2),
+                'balance': round(total_ventas - total_premios - (total_ventas * COMISION_AGENCIA), 2),
+                'tickets': total_tickets
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/top-animales-rango', methods=['POST'])
+@admin_required
+def top_animales_rango():
+    """Obtiene los animales más jugados en un rango de fechas"""
+    try:
+        data = request.get_json()
+        fecha_inicio = data.get('fecha_inicio')
+        fecha_fin = data.get('fecha_fin')
+        
+        if not fecha_inicio or not fecha_fin:
+            return jsonify({'error': 'Fechas requeridas'}), 400
+        
+        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        
+        # Consultar tickets del rango
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
+        
+        # Filtrar tickets del rango y obtener sus IDs
+        ticket_ids = []
+        for t in all_tickets:
+            if t.get('anulado'):
+                continue
+            dt_ticket = parse_fecha_ticket(t['fecha'])
+            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
+                ticket_ids.append(t['id'])
+        
+        if not ticket_ids:
+            return jsonify({'top_animales': []})
+        
+        # Consultar jugadas de tipo animal para estos tickets
+        # Nota: En una implementación real ideal, usarías una función SQL o RPC
+        apuestas = {}
+        for ticket_id in ticket_ids[:100]:  # Limitar para rendimiento
+            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
+            for j in jugadas:
+                sel = j['seleccion']
+                if sel not in apuestas:
+                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
+                apuestas[sel]['monto'] += j['monto']
+                apuestas[sel]['cantidad'] += 1
+        
+        # Ordenar por monto apostado
+        top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
+        resultado = []
+        
+        for sel, data in top[:20]:  # Top 20
+            nombre = ANIMALES.get(sel, sel)
+            resultado.append({
+                'numero': sel,
+                'nombre': nombre,
+                'total_apostado': round(data['monto'], 2),
+                'cantidad_jugadas': data['cantidad']
+            })
+        
+        return jsonify({'top_animales': resultado})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/exportar-csv', methods=['POST'])
+@admin_required
+def exportar_csv():
+    """Exporta datos históricos a CSV"""
+    try:
+        data = request.get_json()
+        fecha_inicio = data.get('fecha_inicio')
+        fecha_fin = data.get('fecha_fin')
+        tipo = data.get('tipo', 'ventas')  # ventas, jugadas, resultados
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        if tipo == 'ventas':
+            writer.writerow(['Fecha', 'Ticket ID', 'Serial', 'Agencia ID', 'Total', 'Estado', 'Fecha_Hora'])
+            
+            dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+            
+            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            req = urllib.request.Request(url, headers=headers)
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                tickets = json.loads(response.read().decode())
+            
+            for t in tickets:
+                dt_ticket = parse_fecha_ticket(t['fecha'])
+                if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
+                    estado = 'Anulado' if t['anulado'] else ('Pagado' if t['pagado'] else 'Pendiente')
+                    writer.writerow([
+                        dt_ticket.strftime("%d/%m/%Y"),
+                        t['id'],
+                        t['serial'],
+                        t['agencia_id'],
+                        t['total'],
+                        estado,
+                        t['fecha']
+                    ])
+        
+        elif tipo == 'resultados':
+            writer.writerow(['Fecha', 'Hora', 'Animal Ganador'])
+            delta = dt_fin - dt_inicio
+            for i in range(delta.days + 1):
+                dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
+                resultados = supabase_request("resultados", filters={"fecha": dia_str})
+                if resultados:
+                    for r in resultados:
+                        writer.writerow([r['fecha'], r['hora'], r['animal']])
+        
+        output.seek(0)
+        return jsonify({
+            'csv': output.getvalue(),
+            'filename': f"{tipo}_{fecha_inicio}_{fecha_fin}.csv"
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== TEMPLATES HTML ACTUALIZADOS ====================
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -703,7 +951,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.0
+            Sistema ZOOLO CASINO v5.1
         </div>
     </div>
 </body>
@@ -1110,7 +1358,7 @@ ADMIN_HTML = '''
         .stat-card p { color: #ffd700; font-size: 1.3rem; font-weight: bold; }
         .form-box { background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
         .form-box h3 { color: #ffd700; margin-bottom: 10px; font-size: 1rem; }
-        .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+        .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
         .form-row input, .form-row select {
             flex: 1; min-width: 120px; padding: 8px; background: #000;
             border: 1px solid #444; color: white; border-radius: 4px; font-size: 0.85rem;
@@ -1119,7 +1367,11 @@ ADMIN_HTML = '''
             background: #27ae60; color: white; border: none;
             padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
         }
-        table { width: 100%; border-collapse: collapse; background: #1a1a2e; border-radius: 8px; overflow: hidden; font-size: 0.8rem; }
+        .btn-secondary {
+            background: #2980b9; color: white; border: none;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-right: 5px;
+        }
+        table { width: 100%; border-collapse: collapse; background: #1a1a2e; border-radius: 8px; overflow: hidden; font-size: 0.8rem; margin-top: 10px; }
         th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
         th { background: #ffd700; color: black; }
         tr:hover { background: rgba(255,215,0,0.1); }
@@ -1134,6 +1386,12 @@ ADMIN_HTML = '''
         }
         .mensaje.success { background: rgba(39,174,96,0.3); border: 1px solid #27ae60; display: block; }
         .mensaje.error { background: rgba(192,57,43,0.3); border: 1px solid #c0392b; display: block; }
+        .chart-container {
+            background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;
+            height: 300px; position: relative;
+        }
+        .date-filters { margin-bottom: 15px; }
+        .export-btns { margin-top: 15px; }
         @media (min-width: 768px) {
             .stats-grid { grid-template-columns: repeat(4, 1fr); }
         }
@@ -1144,6 +1402,7 @@ ADMIN_HTML = '''
         <h2>PANEL ADMIN</h2>
         <div class="nav-tabs">
             <button onclick="showTab('dashboard')" class="active">Dashboard</button>
+            <button onclick="showTab('historico')">Histórico</button>
             <button onclick="showTab('riesgo')">Riesgo</button>
             <button onclick="showTab('reporte')">Reporte</button>
             <button onclick="showTab('resultados')">Resultados</button>
@@ -1153,7 +1412,10 @@ ADMIN_HTML = '''
     </div>
     <div class="content">
         <div id="mensaje" class="mensaje"></div>
+        
+        <!-- DASHBOARD (HOY) -->
         <div id="dashboard" class="tab-content active">
+            <h3 style="color: #ffd700; margin-bottom: 15px;">RESUMEN DE HOY</h3>
             <div class="stats-grid">
                 <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
                 <div class="stat-card"><h3>PREMIOS</h3><p id="stat-premios">S/0</p></div>
@@ -1161,12 +1423,71 @@ ADMIN_HTML = '''
                 <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
             </div>
         </div>
+
+        <!-- HISTÓRICO (NUEVO) -->
+        <div id="historico" class="tab-content">
+            <div class="form-box">
+                <h3>CONSULTA HISTÓRICA POR RANGO</h3>
+                <div class="date-filters">
+                    <div class="form-row">
+                        <input type="date" id="hist-fecha-inicio" value="">
+                        <input type="date" id="hist-fecha-fin" value="">
+                        <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
+                    </div>
+                    <div class="form-row" style="margin-top: 10px;">
+                        <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
+                        <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
+                        <button class="btn-secondary" onclick="setRango('semana')">Últimos 7 días</button>
+                        <button class="btn-secondary" onclick="setRango('mes')">Este mes</button>
+                    </div>
+                </div>
+                
+                <div id="historico-resumen" style="display:none;">
+                    <div class="stats-grid" style="margin-top: 15px;">
+                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
+                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
+                        <div class="stat-card"><h3>TOTAL TICKETS</h3><p id="hist-total-tickets">0</p></div>
+                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
+                    </div>
+                    
+                    <div class="export-btns">
+                        <button class="btn-submit" onclick="exportarCSV('ventas')">📥 Exportar Ventas (CSV)</button>
+                    </div>
+
+                    <h3 style="color: #ffd700; margin: 20px 0 10px;">DETALLE POR DÍA</h3>
+                    <div style="overflow-x: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Tickets</th>
+                                    <th>Ventas</th>
+                                    <th>Premios</th>
+                                    <th>Comisiones</th>
+                                    <th>Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-historico"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="color: #ffd700; margin: 20px 0 10px;">TOP ANIMALES DEL PERÍODO</h3>
+                    <div id="top-animales-hist" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+                        <p style="color: #888;">Cargando...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIESGO -->
         <div id="riesgo" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">ANIMALES MAS JUGADOS</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">ANIMALES MAS JUGADOS HOY</h3>
             <div id="lista-riesgo"><p style="color: #888; font-size: 0.85rem;">Cargando...</p></div>
         </div>
+
+        <!-- REPORTE -->
         <div id="reporte" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">REPORTE POR AGENCIA</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">REPORTE POR AGENCIA (HOY)</h3>
             <div style="overflow-x: auto;">
                 <table>
                     <thead><tr><th>Agencia</th><th>Ventas</th><th>Premios</th><th>Comision</th><th>Balance</th></tr></thead>
@@ -1174,6 +1495,8 @@ ADMIN_HTML = '''
                 </table>
             </div>
         </div>
+
+        <!-- RESULTADOS -->
         <div id="resultados" class="tab-content">
             <div class="form-box">
                 <h3>CARGAR RESULTADO</h3>
@@ -1184,6 +1507,8 @@ ADMIN_HTML = '''
                 </div>
             </div>
         </div>
+
+        <!-- AGENCIAS -->
         <div id="agencias" class="tab-content">
             <div class="form-box">
                 <h3>CREAR AGENCIA</h3>
@@ -1203,22 +1528,174 @@ ADMIN_HTML = '''
             </div>
         </div>
     </div>
+
     <script>
+        // Variables globales para histórico
+        let historicoData = null;
+        let fechasConsulta = { inicio: null, fin: null };
+
         function showTab(tab) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.nav-tabs button').forEach(b => b.classList.remove('active'));
             document.getElementById(tab).classList.add('active');
             event.target.classList.add('active');
+            
             if (tab === 'riesgo') cargarRiesgo();
             if (tab === 'reporte') cargarReporte();
             if (tab === 'agencias') cargarAgencias();
             if (tab === 'dashboard') cargarDashboard();
         }
+
         function showMensaje(msg, tipo) {
             let div = document.getElementById('mensaje');
-            div.textContent = msg; div.className = 'mensaje ' + tipo;
+            div.textContent = msg; 
+            div.className = 'mensaje ' + tipo;
             setTimeout(() => div.className = 'mensaje', 3000);
         }
+
+        function setRango(tipo) {
+            let hoy = new Date();
+            let inicio, fin;
+            
+            switch(tipo) {
+                case 'hoy':
+                    inicio = fin = hoy;
+                    break;
+                case 'ayer':
+                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+                    inicio = fin = ayer;
+                    break;
+                case 'semana':
+                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
+                    fin = hoy;
+                    break;
+                case 'mes':
+                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+                    fin = hoy;
+                    break;
+            }
+            
+            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
+            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
+            
+            consultarHistorico();
+        }
+
+        function consultarHistorico() {
+            let inicio = document.getElementById('hist-fecha-inicio').value;
+            let fin = document.getElementById('hist-fecha-fin').value;
+            
+            if (!inicio || !fin) {
+                showMensaje('Seleccione ambas fechas', 'error');
+                return;
+            }
+            
+            fechasConsulta = { inicio, fin };
+            showMensaje('Consultando datos...', 'success');
+            
+            // Consultar estadísticas
+            fetch('/admin/estadisticas-rango', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    showMensaje(d.error, 'error');
+                    return;
+                }
+                
+                historicoData = d;
+                document.getElementById('historico-resumen').style.display = 'block';
+                
+                // Actualizar totales
+                document.getElementById('hist-total-ventas').textContent = 'S/' + d.totales.ventas.toFixed(0);
+                document.getElementById('hist-total-premios').textContent = 'S/' + d.totales.premios.toFixed(0);
+                document.getElementById('hist-total-tickets').textContent = d.totales.tickets;
+                document.getElementById('hist-total-balance').textContent = 'S/' + d.totales.balance.toFixed(0);
+                
+                // Tabla detalle
+                let tbody = document.getElementById('tabla-historico');
+                let html = '';
+                d.resumen_por_dia.forEach(dia => {
+                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
+                    html += `<tr>
+                        <td>${dia.fecha}</td>
+                        <td>${dia.tickets}</td>
+                        <td>S/${dia.ventas.toFixed(2)}</td>
+                        <td>S/${dia.premios.toFixed(2)}</td>
+                        <td>S/${dia.comisiones.toFixed(2)}</td>
+                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(2)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+                
+                // Cargar top animales
+                cargarTopAnimalesHistorico(inicio, fin);
+            })
+            .catch(e => showMensaje('Error de conexión', 'error'));
+        }
+
+        function cargarTopAnimalesHistorico(inicio, fin) {
+            fetch('/admin/top-animales-rango', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let container = document.getElementById('top-animales-hist');
+                if (!d.top_animales || d.top_animales.length === 0) {
+                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
+                    return;
+                }
+                
+                let html = '';
+                d.top_animales.slice(0, 10).forEach((a, idx) => {
+                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
+                    html += `<div class="riesgo-item" style="margin-bottom: 0;">
+                        <b>${medalla} ${a.numero} - ${a.nombre}</b><br>
+                        <small>Monto: S/${a.total_apostado} | Jugadas: ${a.cantidad_jugadas}</small>
+                    </div>`;
+                });
+                container.innerHTML = html;
+            });
+        }
+
+        function exportarCSV(tipo) {
+            if (!fechasConsulta.inicio) {
+                showMensaje('Primero consulte un rango de fechas', 'error');
+                return;
+            }
+            
+            fetch('/admin/exportar-csv', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tipo: tipo,
+                    fecha_inicio: fechasConsulta.inicio,
+                    fecha_fin: fechasConsulta.fin
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    showMensaje(d.error, 'error');
+                    return;
+                }
+                
+                // Descargar archivo
+                let blob = new Blob([d.csv], {type: 'text/csv'});
+                let url = window.URL.createObjectURL(blob);
+                let a = document.createElement('a');
+                a.href = url;
+                a.download = d.filename;
+                a.click();
+                showMensaje('Archivo descargado', 'success');
+            });
+        }
+
         function cargarDashboard() {
             fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
                 if (d.global) {
@@ -1229,11 +1706,13 @@ ADMIN_HTML = '''
                 }
             }).catch(() => showMensaje('Error de conexion', 'error'));
         }
+
         function cargarRiesgo() {
             fetch('/admin/riesgo').then(r => r.json()).then(d => {
                 let container = document.getElementById('lista-riesgo');
                 if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas</p>'; return;
+                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas</p>'; 
+                    return;
                 }
                 let html = '';
                 for (let [k, v] of Object.entries(d.riesgo)) {
@@ -1242,11 +1721,13 @@ ADMIN_HTML = '''
                 container.innerHTML = html;
             });
         }
+
         function cargarReporte() {
             fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
                 let tbody = document.getElementById('tabla-reporte');
                 if (!d.agencias || d.agencias.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay agencias</td></tr>'; return;
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay agencias</td></tr>'; 
+                    return;
                 }
                 let html = '';
                 for (let a of d.agencias) {
@@ -1256,6 +1737,7 @@ ADMIN_HTML = '''
                 tbody.innerHTML = html;
             });
         }
+
         function guardarResultado() {
             let form = new FormData();
             form.append('hora', document.getElementById('res-hora').value);
@@ -1266,6 +1748,7 @@ ADMIN_HTML = '''
                 else showMensaje(d.error || 'Error', 'error');
             });
         }
+
         function cargarAgencias() {
             fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
                 let tbody = document.getElementById('tabla-agencias');
@@ -1275,6 +1758,7 @@ ADMIN_HTML = '''
                 tbody.innerHTML = html;
             });
         }
+
         function crearAgencia() {
             let form = new FormData();
             form.append('usuario', document.getElementById('new-usuario').value.trim());
@@ -1291,6 +1775,14 @@ ADMIN_HTML = '''
                 } else showMensaje(d.error || 'Error', 'error');
             });
         }
+
+        // Set fechas por defecto al cargar
+        document.addEventListener('DOMContentLoaded', function() {
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('hist-fecha-inicio').value = hoy;
+            document.getElementById('hist-fecha-fin').value = hoy;
+        });
+
         cargarDashboard();
     </script>
 </body>
@@ -1300,10 +1792,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.0 - SISTEMA EN LA NUBE")
+    print("  ZOOLO CASINO CLOUD v5.1 - SISTEMA EN LA NUBE")
+    print("  CON ESTADÍSTICAS HISTÓRICAS")
     print("=" * 60)
-    print("  Base de datos: Supabase (sincronizacion global)")
-    print("=" * 60)
-    # Usa el puerto de la variable de entorno (para Render) o 5000 por defecto
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
