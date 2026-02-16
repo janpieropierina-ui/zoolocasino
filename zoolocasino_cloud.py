@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.3 - Sistema con pagos especiales: Lechuza x70, Especiales x2
+ZOOLO CASINO CLOUD v5.4 - Ticket compacto por horarios
 """
 
 import os
@@ -13,6 +13,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template_string, request, session, redirect, jsonify
+from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
@@ -21,10 +22,10 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 app = Flask(__name__)
 app.secret_key = "zoolo_casino_cloud_2025"
 
-# Configuracion de negocio - REGLAS DE PAGO ACTUALIZADAS
-PAGO_ANIMAL_NORMAL = 35      # Todos los animales del 00-39
-PAGO_LECHUZA = 70           # Animal 40 paga doble
-PAGO_ESPECIAL = 2           # Rojo/Negro/Par/Impar pagan el doble (x2)
+# Configuracion de negocio
+PAGO_ANIMAL_NORMAL = 35      
+PAGO_LECHUZA = 70           
+PAGO_ESPECIAL = 2           
 COMISION_AGENCIA = 0.15
 MINUTOS_BLOQUEO = 5
 
@@ -64,7 +65,6 @@ def ahora_peru():
     return datetime.utcnow() - timedelta(hours=5)
 
 def parse_fecha_ticket(fecha_str):
-    """Convierte 'DD/MM/YYYY HH:MM AM/PM' a datetime"""
     try:
         return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
     except:
@@ -104,18 +104,12 @@ def verificar_horario_bloqueo(hora_sorteo):
         return True
 
 def calcular_premio_animal(monto_apostado, numero_animal):
-    """
-    Calcula el premio según el animal:
-    - 40 (Lechuza) paga x70
-    - Todos los demás pagan x35
-    """
     if str(numero_animal) == "40":
         return monto_apostado * PAGO_LECHUZA
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
 def supabase_request(table, method="GET", data=None, filters=None):
-    """Hace peticiones a Supabase REST API"""
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
     if filters:
@@ -279,37 +273,59 @@ def procesar_venta():
             }
             supabase_request("jugadas", method="POST", data=jugada_data)
         
+        # ==================== FORMATO COMPACTO DEL TICKET ====================
+        # Agrupar jugadas por hora
+        jugadas_por_hora = defaultdict(list)
+        for j in jugadas:
+            jugadas_por_hora[j['hora']].append(j)
+        
         lineas = [
             f"*{session['nombre_agencia']}*",
-            f"*Serial:* {serial}",
-            f"*Ticket N:* {ticket_id}",
-            "",
-            "*--- JUEGA Y GANA ---*",
+            f"*TICKET:* #{ticket_id}",
+            f"*SERIAL:* {serial}",
+            fecha,
+            "------------------------",
             ""
         ]
         
-        for j in jugadas:
-            idx = HORARIOS_PERU.index(j['hora'])
+        # Procesar cada horario
+        for hora_peru in HORARIOS_PERU:
+            if hora_peru not in jugadas_por_hora:
+                continue
+                
+            idx = HORARIOS_PERU.index(hora_peru)
             hora_ven = HORARIOS_VENEZUELA[idx]
-            if j['tipo'] == 'animal':
-                nombre = ANIMALES.get(j['seleccion'], j['seleccion'])
-                # Indicar si es lechuza (pago especial)
-                if j['seleccion'] == "40":
-                    lineas.append(f"🦉 *{j['seleccion']} - {nombre} (Paga x70!)*")
+            
+            # Formato: ZOOLO PERU/09:AM...VZLA/10:AM
+            hora_peru_corta = hora_peru.replace(' ', '').replace('00', '').lower()
+            hora_ven_corta = hora_ven.replace(' ', '').replace('00', '').lower()
+            lineas.append(f"*ZOOLO.PERU/{hora_peru_corta}...VZLA/{hora_ven_corta}*")
+            
+            # Agrupar jugadas de esta hora en una sola línea
+            jugadas_hora = jugadas_por_hora[hora_peru]
+            texto_jugadas = []
+            
+            for j in jugadas_hora:
+                if j['tipo'] == 'animal':
+                    # Formato: ZOR 15x10 (abreviatura del animal + numero x monto)
+                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()  # Primeras 3 letras
+                    if j['seleccion'] == "40":
+                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
+                    else:
+                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
                 else:
-                    lineas.append(f"{j['hora']} PERU / {hora_ven} VEN")
-                    lineas.append(f"{j['seleccion']} - {nombre}")
-                lineas.append(f"Apuesta: S/{j['monto']}")
-                lineas.append("")
-            else:
-                lineas.append(f"{j['hora']} PERU / {hora_ven} VEN")
-                lineas.append(f"*{j['seleccion']}* (Paga x2)")
-                lineas.append(f"Apuesta: S/{j['monto']}")
-                lineas.append("")
+                    # Formato especial: ROJx10 o NEGx10
+                    tipo_corto = j['seleccion'][0:3]
+                    texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
+            
+            # Unir todas las jugadas de esta hora con espacios
+            lineas.append(" ".join(texto_jugadas))
+            lineas.append("")  # Línea en blanco entre horarios
         
-        lineas.append(f"*TOTAL: S/{total}*")
+        lineas.append("------------------------")
+        lineas.append(f"*TOTAL: S/{int(total)}*")
         lineas.append("")
-        lineas.append("Buena Suerte!")
+        lineas.append("Buena Suerte! 🍀")
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
@@ -357,7 +373,6 @@ def verificar_ticket():
             premio = 0
             if wa:
                 if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                    # Aplicar regla especial: Lechuza (40) paga x70, otros x35
                     premio = calcular_premio_animal(j['monto'], wa)
                 elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                     sel = j['seleccion']
@@ -366,7 +381,7 @@ def verificar_ticket():
                        (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                        (sel == 'PAR' and num % 2 == 0) or \
                        (sel == 'IMPAR' and num % 2 != 0):
-                        premio = j['monto'] * PAGO_ESPECIAL  # x2
+                        premio = j['monto'] * PAGO_ESPECIAL
             
             total_ganado += premio
             detalles.append({
@@ -454,7 +469,6 @@ def caja_agencia():
         
         for t in tickets:
             if t['agencia_id'] == session['user_id'] and not t['anulado']:
-                # Verificar si hay premios pendientes (no pagados)
                 if not t['pagado']:
                     jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                     resultados_list = supabase_request("resultados", filters={"fecha": hoy})
@@ -477,7 +491,6 @@ def caja_agencia():
                     if tiene_premio:
                         tickets_pendientes += 1
                 
-                # Calcular premios pagados
                 if t['pagado']:
                     jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                     resultados_list = supabase_request("resultados", filters={"fecha": hoy})
@@ -487,7 +500,7 @@ def caja_agencia():
                         wa = resultados.get(j['hora'])
                         if wa:
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios += calcular_premio_animal(j['monto'], wa)  # Usar nueva función
+                                premios += calcular_premio_animal(j['monto'], wa)
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                                 sel = j['seleccion']
                                 num = int(wa)
@@ -495,7 +508,7 @@ def caja_agencia():
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
                                    (sel == 'IMPAR' and num % 2 != 0):
-                                    premios += j['monto'] * PAGO_ESPECIAL  # x2
+                                    premios += j['monto'] * PAGO_ESPECIAL
         
         balance = ventas - premios - comision
         
@@ -513,7 +526,6 @@ def caja_agencia():
 @app.route('/api/caja-historico', methods=['POST'])
 @agencia_required
 def caja_historico():
-    """Obtiene el historial de caja de la agencia para un rango de fechas"""
     try:
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
@@ -571,7 +583,7 @@ def caja_historico():
                     wa = resultados.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            premio_ticket += calcular_premio_animal(j['monto'], wa)  # Nueva función
+                            premio_ticket += calcular_premio_animal(j['monto'], wa)
                         elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                             sel = j['seleccion']
                             num = int(wa)
@@ -579,7 +591,7 @@ def caja_historico():
                                (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                (sel == 'PAR' and num % 2 == 0) or \
                                (sel == 'IMPAR' and num % 2 != 0):
-                                premio_ticket += j['monto'] * PAGO_ESPECIAL  # x2
+                                premio_ticket += j['monto'] * PAGO_ESPECIAL
                 
                 dias_data[dia_key]['premios'] += premio_ticket
                 total_premios += premio_ticket
@@ -590,7 +602,7 @@ def caja_historico():
                     wa = resultados.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            tiene_premio += calcular_premio_animal(j['monto'], wa)  # Nueva función
+                            tiene_premio += calcular_premio_animal(j['monto'], wa)
                         elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                             sel = j['seleccion']
                             num = int(wa)
@@ -598,7 +610,7 @@ def caja_historico():
                                (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                (sel == 'PAR' and num % 2 == 0) or \
                                (sel == 'IMPAR' and num % 2 != 0):
-                                tiene_premio += j['monto'] * PAGO_ESPECIAL  # x2
+                                tiene_premio += j['monto'] * PAGO_ESPECIAL
                 
                 if tiene_premio > 0:
                     dias_data[dia_key]['pendientes'] += 1
@@ -750,7 +762,7 @@ def reporte_agencias():
                         wa = resultados.get(j['hora'])
                         if wa:
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios += calcular_premio_animal(j['monto'], wa)  # Nueva función
+                                premios += calcular_premio_animal(j['monto'], wa)
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                                 sel = j['seleccion']
                                 num = int(wa)
@@ -758,7 +770,7 @@ def reporte_agencias():
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
                                    (sel == 'IMPAR' and num % 2 != 0):
-                                    premios += j['monto'] * PAGO_ESPECIAL  # x2
+                                    premios += j['monto'] * PAGO_ESPECIAL
             
             balance = ventas - premios - comision
             
@@ -812,7 +824,6 @@ def riesgo():
         riesgo = {}
         for sel, monto in apuestas_ordenadas:
             nombre = ANIMALES.get(sel, sel)
-            # Calcular riesgo según el animal (Lechuza 40 tiene mayor riesgo)
             multiplicador = PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL
             riesgo[f"{sel} - {nombre}"] = {
                 "apostado": round(monto, 2),
@@ -827,7 +838,6 @@ def riesgo():
 @app.route('/admin/estadisticas-rango', methods=['POST'])
 @admin_required
 def estadisticas_rango():
-    """Obtiene estadísticas detalladas por día en un rango de fechas"""
     try:
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
@@ -870,7 +880,6 @@ def estadisticas_rango():
             dias_data[dia_key]['tickets'] += 1
             dias_data[dia_key]['ids_tickets'].append(t['id'])
         
-        # Calcular premios para cada día
         resultados_por_dia = {}
         delta = dt_fin - dt_inicio
         for i in range(delta.days + 1):
@@ -896,7 +905,7 @@ def estadisticas_rango():
                         wa = resultados_dia.get(j['hora'])
                         if wa:
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios_dia += calcular_premio_animal(j['monto'], wa)  # Nueva función
+                                premios_dia += calcular_premio_animal(j['monto'], wa)
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                                 num = int(wa)
                                 sel = j['seleccion']
@@ -904,7 +913,7 @@ def estadisticas_rango():
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
                                    (sel == 'IMPAR' and num % 2 != 0):
-                                    premios_dia += j['monto'] * PAGO_ESPECIAL  # x2
+                                    premios_dia += j['monto'] * PAGO_ESPECIAL
             
             comision_dia = datos['ventas'] * COMISION_AGENCIA
             balance_dia = datos['ventas'] - premios_dia - comision_dia
@@ -939,7 +948,6 @@ def estadisticas_rango():
 @app.route('/admin/top-animales-rango', methods=['POST'])
 @admin_required
 def top_animales_rango():
-    """Obtiene los animales más jugados en un rango de fechas"""
     try:
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
@@ -997,7 +1005,7 @@ def top_animales_rango():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== TEMPLATES HTML (igual que antes, solo actualizado versión) ====================
+# ==================== TEMPLATES HTML ====================
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -1064,7 +1072,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.3 - Lechuza x70
+            Sistema ZOOLO CASINO v5.4 - Ticket Compacto
         </div>
     </div>
 </body>
@@ -1133,7 +1141,6 @@ POS_HTML = '''
         .animal-card.active { box-shadow: 0 0 10px white; border-color: #ffd700 !important; background: #2a2a4e; }
         .animal-card .num { font-size: 1rem; font-weight: bold; line-height: 1; }
         .animal-card .name { font-size: 0.6rem; color: #aaa; line-height: 1; margin-top: 3px; }
-        /* Indicador especial para Lechuza */
         .animal-card.lechuza::after {
             content: "x70";
             position: absolute;
@@ -1251,12 +1258,6 @@ POS_HTML = '''
             padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 0.85rem;
         }
         .alert-box strong { color: #f39c12; }
-        
-        .premio-especial {
-            background: rgba(255, 215, 0, 0.2);
-            border-left: 3px solid #ffd700;
-            padding-left: 5px;
-        }
         
         @media (max-width: 768px) {
             .main-container { flex-direction: column; }
@@ -1790,7 +1791,7 @@ ADMIN_HTML = '''
         <div id="mensaje" class="mensaje"></div>
         
         <div class="info-pago">
-            💰 REGLAS DE PAGO: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2
+            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2
         </div>
         
         <div id="dashboard" class="tab-content active">
@@ -2127,8 +2128,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.3")
-    print("  REGLAS: Animales x35 | Lechuza(40) x70 | Especiales x2")
+    print("  ZOOLO CASINO CLOUD v5.4")
+    print("  TICKET COMPACTO - Lechuza x70")
     print("=" * 60)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
