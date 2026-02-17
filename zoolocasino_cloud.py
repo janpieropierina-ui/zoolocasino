@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.5.1 - Riesgo por Sorteo (Fix filtrado)
+ZOOLO CASINO CLOUD v5.5 - Riesgo por sorteo + Resultados en POS
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co ')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE')
 
 app = Flask(__name__)
@@ -382,7 +382,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -886,9 +886,6 @@ def riesgo():
         hoy = ahora_peru().strftime("%d/%m/%Y")
         proximo_sorteo = obtener_proximo_sorteo()
         
-        print(f"[DEBUG] Próximo sorteo detectado: {proximo_sorteo}")
-        print(f"[DEBUG] Hora actual Perú: {ahora_peru().strftime('%I:%M %p')}")
-        
         if not proximo_sorteo:
             return jsonify({
                 'riesgo': {},
@@ -896,51 +893,32 @@ def riesgo():
                 'mensaje': 'No hay más sorteos disponibles para hoy'
             })
         
-        # Obtener todos los tickets de hoy no anulados
+        # Obtener solo tickets del próximo sorteo específico
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25&anulado=eq.false"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
         with urllib.request.urlopen(req, timeout=15) as response:
             tickets = json.loads(response.read().decode())
         
-        if not tickets:
-            return jsonify({
-                'riesgo': {},
-                'proximo_sorteo': proximo_sorteo,
-                'mensaje': 'No hay tickets vendidos hoy',
-                'total_apostado': 0
-            })
-        
-        print(f"[DEBUG] Tickets encontrados hoy: {len(tickets)}")
-        
-        # Obtener jugadas de tipo animal para estos tickets
-        # Filtrar manualmente por el próximo sorteo para evitar problemas de encoding
         apuestas = {}
         total_apostado_sorteo = 0
-        total_jugadas_contadas = 0
         
         for t in tickets:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
+            # Filtrar solo jugadas del próximo sorteo
+            jugadas = supabase_request("jugadas", filters={
+                "ticket_id": t['id'], 
+                "tipo": "animal",
+                "hora": proximo_sorteo
+            })
             
             for j in jugadas:
-                if j.get('hora') == proximo_sorteo:
-                    sel = j.get('seleccion')
-                    monto = j.get('monto', 0)
-                    if sel:
-                        if sel not in apuestas:
-                            apuestas[sel] = 0
-                        apuestas[sel] += monto
-                        total_apostado_sorteo += monto
-                        total_jugadas_contadas += 1
+                sel = j['seleccion']
+                if sel not in apuestas:
+                    apuestas[sel] = 0
+                apuestas[sel] += j['monto']
+                total_apostado_sorteo += j['monto']
         
-        print(f"[DEBUG] Jugadas para {proximo_sorteo}: {total_jugadas_contadas}")
-        print(f"[DEBUG] Total apostado: {total_apostado_sorteo}")
-        
-        # Ordenar por monto mayor
         apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
         
         riesgo = {}
@@ -958,14 +936,9 @@ def riesgo():
             'riesgo': riesgo,
             'proximo_sorteo': proximo_sorteo,
             'total_apostado': round(total_apostado_sorteo, 2),
-            'hora_actual': ahora_peru().strftime("%I:%M %p"),
-            'cantidad_jugadas': total_jugadas_contadas
+            'hora_actual': ahora_peru().strftime("%I:%M %p")
         })
-        
     except Exception as e:
-        print(f"[ERROR] En riesgo: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/estadisticas-rango', methods=['POST'])
@@ -1205,7 +1178,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.5.1 - Riesgo por Sorteo
+            Sistema ZOOLO CASINO v5.5 - Riesgo por Sorteo
         </div>
     </div>
 </body>
@@ -2270,4 +2243,136 @@ ADMIN_HTML = '''
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
             })
- 
+            .then(r => r.json())
+            .then(d => {
+                let container = document.getElementById('top-animales-hist');
+                if (!d.top_animales || d.top_animales.length === 0) {
+                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
+                    return;
+                }
+                
+                let html = '';
+                d.top_animales.slice(0, 10).forEach((a, idx) => {
+                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
+                    let esLechuza = a.numero === "40";
+                    let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
+                    let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
+                    
+                    html += `<div class="${clase}" style="margin-bottom: 0;">
+                        <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
+                        <small>Apostado: S/${a.total_apostado} | Si sale pagaría: S/${a.pago_potencial}</small>
+                    </div>`;
+                });
+                container.innerHTML = html;
+            });
+        }
+
+        function cargarDashboard() {
+            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
+                if (d.global) {
+                    document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
+                    document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
+                    document.getElementById('stat-comisiones').textContent = 'S/' + d.global.comisiones.toFixed(0);
+                    document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
+                }
+            }).catch(() => showMensaje('Error de conexion', 'error'));
+        }
+
+        function cargarRiesgo() {
+            fetch('/admin/riesgo').then(r => r.json()).then(d => {
+                // Actualizar próximo sorteo
+                if (d.proximo_sorteo) {
+                    document.getElementById('proximo-sorteo-hora').textContent = d.proximo_sorteo;
+                } else {
+                    document.getElementById('proximo-sorteo-hora').textContent = 'No hay más sorteos hoy';
+                }
+                
+                let container = document.getElementById('lista-riesgo');
+                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
+                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para el próximo sorteo</p>'; 
+                    return;
+                }
+                let html = '';
+                for (let [k, v] of Object.entries(d.riesgo)) {
+                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
+                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
+                    html += `<div class="${clase}"><b>${k}${extra}</b><br>Apostado: S/${v.apostado.toFixed(2)} | Pagaria: S/${v.pagaria.toFixed(2)} | ${v.porcentaje}% del total</div>`;
+                }
+                container.innerHTML = html;
+            });
+        }
+
+        function cargarReporte() {
+            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
+                let tbody = document.getElementById('tabla-reporte');
+                if (!d.agencias || d.agencias.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay agencias</td></tr>'; 
+                    return;
+                }
+                let html = '';
+                for (let a of d.agencias) {
+                    html += '<tr><td>' + a.nombre + '</td><td>S/' + a.ventas.toFixed(2) + '</td><td>S/' + a.premios.toFixed(2) + '</td><td>S/' + a.comision.toFixed(2) + '</td><td style="color:' + (a.balance >= 0 ? '#27ae60' : '#c0392b') + '">S/' + a.balance.toFixed(2) + '</td></tr>';
+                }
+                html += '<tr style="background:rgba(255,215,0,0.2);font-weight:bold;"><td>TOTAL</td><td>S/' + d.global.ventas.toFixed(2) + '</td><td>S/' + d.global.pagos.toFixed(2) + '</td><td>S/' + d.global.comisiones.toFixed(2) + '</td><td>S/' + d.global.balance.toFixed(2) + '</td></tr>';
+                tbody.innerHTML = html;
+            });
+        }
+
+        function guardarResultado() {
+            let form = new FormData();
+            form.append('hora', document.getElementById('res-hora').value);
+            form.append('animal', document.getElementById('res-animal').value);
+            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
+            .then(r => r.json()).then(d => {
+                if (d.status === 'ok') showMensaje('Guardado', 'success');
+                else showMensaje(d.error || 'Error', 'error');
+            });
+        }
+
+        function cargarAgencias() {
+            fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
+                let tbody = document.getElementById('tabla-agencias');
+                if (!d || d.length === 0) { tbody.innerHTML = '<tr><td colspan="4">No hay agencias</td></tr>'; return; }
+                let html = '';
+                for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
+                tbody.innerHTML = html;
+            });
+        }
+
+        function crearAgencia() {
+            let form = new FormData();
+            form.append('usuario', document.getElementById('new-usuario').value.trim());
+            form.append('password', document.getElementById('new-password').value.trim());
+            form.append('nombre', document.getElementById('new-nombre').value.trim());
+            fetch('/admin/crear-agencia', {method: 'POST', body: form})
+            .then(r => r.json()).then(d => {
+                if (d.status === 'ok') {
+                    showMensaje('Creada', 'success');
+                    document.getElementById('new-usuario').value = '';
+                    document.getElementById('new-password').value = '';
+                    document.getElementById('new-nombre').value = '';
+                    cargarAgencias();
+                } else showMensaje(d.error || 'Error', 'error');
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('hist-fecha-inicio').value = hoy;
+            document.getElementById('hist-fecha-fin').value = hoy;
+        });
+
+        cargarDashboard();
+    </script>
+</body>
+</html>
+'''
+
+# ==================== MAIN ====================
+if __name__ == '__main__':
+    print("=" * 60)
+    print("  ZOOLO CASINO CLOUD v5.5")
+    print("  RIESGO POR SORTEO + RESULTADOS EN POS")
+    print("=" * 60)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
