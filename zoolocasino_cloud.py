@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.5.1 - Riesgo por Sorteo (Fix filtrado)
+ZOOLO CASINO CLOUD v5.6 - Admin Completo + Riesgo por Sorteo
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co ')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE')
 
 app = Flask(__name__)
@@ -169,6 +169,31 @@ def obtener_proximo_sorteo():
             return hora_str
     
     return None
+
+def obtener_sorteo_en_curso():
+    """Devuelve el sorteo que está actualmente en curso (dentro de la hora actual)"""
+    ahora = ahora_peru()
+    actual_minutos = ahora.hour * 60 + ahora.minute
+    
+    for hora_str in HORARIOS_PERU:
+        partes = hora_str.replace(':', ' ').split()
+        hora = int(partes[0])
+        minuto = int(partes[1])
+        ampm = partes[2]
+        
+        if ampm == 'PM' and hora != 12:
+            hora += 12
+        elif ampm == 'AM' and hora == 12:
+            hora = 0
+            
+        sorteo_minutos = hora * 60 + minuto
+        
+        # Si estamos dentro de la hora del sorteo (entre la hora exacta y 59 min)
+        if actual_minutos >= sorteo_minutos and actual_minutos < (sorteo_minutos + 60):
+            return hora_str
+    
+    # Si no hay sorteo en curso, devolver el próximo
+    return obtener_proximo_sorteo()
 
 # ==================== DECORADORES ====================
 def login_required(f):
@@ -382,7 +407,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -808,6 +833,35 @@ def guardar_resultado():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/resultados-hoy')
+@admin_required
+def admin_resultados_hoy():
+    """Obtener resultados del día para el admin"""
+    try:
+        hoy = ahora_peru().strftime("%d/%m/%Y")
+        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        
+        resultados_dict = {}
+        if resultados_list:
+            for r in resultados_list:
+                resultados_dict[r['hora']] = {
+                    'animal': r['animal'],
+                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
+                }
+        
+        # Completar con horarios pendientes
+        for hora in HORARIOS_PERU:
+            if hora not in resultados_dict:
+                resultados_dict[hora] = None
+                
+        return jsonify({
+            'status': 'ok',
+            'fecha': hoy,
+            'resultados': resultados_dict
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/reporte-agencias')
 @admin_required
 def reporte_agencias():
@@ -884,15 +938,15 @@ def reporte_agencias():
 def riesgo():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
-        proximo_sorteo = obtener_proximo_sorteo()
+        sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
         
-        print(f"[DEBUG] Próximo sorteo detectado: {proximo_sorteo}")
+        print(f"[DEBUG] Sorteo objetivo (en curso o próximo): {sorteo_objetivo}")
         print(f"[DEBUG] Hora actual Perú: {ahora_peru().strftime('%I:%M %p')}")
         
-        if not proximo_sorteo:
+        if not sorteo_objetivo:
             return jsonify({
                 'riesgo': {},
-                'proximo_sorteo': None,
+                'sorteo_objetivo': None,
                 'mensaje': 'No hay más sorteos disponibles para hoy'
             })
         
@@ -910,15 +964,14 @@ def riesgo():
         if not tickets:
             return jsonify({
                 'riesgo': {},
-                'proximo_sorteo': proximo_sorteo,
+                'sorteo_objetivo': sorteo_objetivo,
                 'mensaje': 'No hay tickets vendidos hoy',
                 'total_apostado': 0
             })
         
         print(f"[DEBUG] Tickets encontrados hoy: {len(tickets)}")
         
-        # Obtener jugadas de tipo animal para estos tickets
-        # Filtrar manualmente por el próximo sorteo para evitar problemas de encoding
+        # Obtener jugadas de tipo animal SOLO para el sorteo objetivo
         apuestas = {}
         total_apostado_sorteo = 0
         total_jugadas_contadas = 0
@@ -927,7 +980,8 @@ def riesgo():
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
             
             for j in jugadas:
-                if j.get('hora') == proximo_sorteo:
+                # FILTRO ESTRICTO: Solo el sorteo en curso/próximo
+                if j.get('hora') == sorteo_objetivo:
                     sel = j.get('seleccion')
                     monto = j.get('monto', 0)
                     if sel:
@@ -937,7 +991,7 @@ def riesgo():
                         total_apostado_sorteo += monto
                         total_jugadas_contadas += 1
         
-        print(f"[DEBUG] Jugadas para {proximo_sorteo}: {total_jugadas_contadas}")
+        print(f"[DEBUG] Jugadas para {sorteo_objetivo}: {total_jugadas_contadas}")
         print(f"[DEBUG] Total apostado: {total_apostado_sorteo}")
         
         # Ordenar por monto mayor
@@ -956,7 +1010,7 @@ def riesgo():
         
         return jsonify({
             'riesgo': riesgo,
-            'proximo_sorteo': proximo_sorteo,
+            'sorteo_objetivo': sorteo_objetivo,
             'total_apostado': round(total_apostado_sorteo, 2),
             'hora_actual': ahora_peru().strftime("%I:%M %p"),
             'cantidad_jugadas': total_jugadas_contadas
@@ -1205,7 +1259,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.5.1 - Riesgo por Sorteo
+            Sistema ZOOLO CASINO v5.6 - Admin Completo
         </div>
     </div>
 </body>
@@ -1982,6 +2036,10 @@ ADMIN_HTML = '''
             background: #27ae60; color: white; border: none;
             padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
         }
+        .btn-danger {
+            background: #c0392b; color: white; border: none;
+            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+        }
         .btn-secondary {
             background: #2980b9; color: white; border: none;
             padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-right: 5px;
@@ -2010,13 +2068,23 @@ ADMIN_HTML = '''
             font-size: 0.8rem; color: #888; text-align: center;
             border: 1px solid #333;
         }
-        .proximo-sorteo-box {
+        .sorteo-actual-box {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
             padding: 15px; border-radius: 8px; margin-bottom: 15px;
             border: 2px solid #2980b9; text-align: center;
         }
-        .proximo-sorteo-box h4 { color: #2980b9; margin-bottom: 5px; }
-        .proximo-sorteo-box p { color: #ffd700; font-size: 1.5rem; font-weight: bold; }
+        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 5px; }
+        .sorteo-actual-box p { color: #ffd700; font-size: 1.5rem; font-weight: bold; }
+        .resultado-item {
+            background: #0a0a0a; padding: 10px; margin: 5px 0;
+            border-radius: 5px; border-left: 3px solid #27ae60;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .resultado-item.pendiente {
+            border-left-color: #666; opacity: 0.6;
+        }
+        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
+        .resultado-nombre { color: #888; font-size: 0.9rem; }
         @media (min-width: 768px) {
             .stats-grid { grid-template-columns: repeat(4, 1fr); }
         }
@@ -2031,6 +2099,7 @@ ADMIN_HTML = '''
             <button onclick="showTab('riesgo')">Riesgo</button>
             <button onclick="showTab('reporte')">Reporte</button>
             <button onclick="showTab('resultados')">Resultados</button>
+            <button onclick="showTab('anular')">Anular Ticket</button>
             <button onclick="showTab('agencias')">Agencias</button>
             <button onclick="location.href='/logout'" class="logout-btn">Salir</button>
         </div>
@@ -2101,18 +2170,20 @@ ADMIN_HTML = '''
         </div>
 
         <div id="riesgo" class="tab-content">
-            <div class="proximo-sorteo-box">
-                <h4>🎯 PRÓXIMO SORTEO A VIGILAR</h4>
-                <p id="proximo-sorteo-hora">Cargando...</p>
+            <div class="sorteo-actual-box">
+                <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
+                <p id="sorteo-objetivo">Cargando...</p>
                 <small style="color: #888; font-size: 0.8rem;">Riesgo calculado solo para este horario específico</small>
             </div>
             
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">APUESTAS ACUMULADAS PARA ESTE SORTEO</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">
+                APUESTAS PARA ESTE SORTEO: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
+            </h3>
             <div id="lista-riesgo"><p style="color: #888; font-size: 0.85rem;">Cargando...</p></div>
             
             <div style="margin-top: 20px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
                 <small style="color: #ff6b6b;">
-                    ⚠️ Este riesgo se resetea automáticamente cuando pasa el sorteo y comienza el siguiente horario.
+                    ⚠️ Este riesgo se resetea automáticamente cuando pasa el sorteo y comienza el siguiente horario. No acumula jugadas de otros sorteos.
                 </small>
             </div>
         </div>
@@ -2128,8 +2199,16 @@ ADMIN_HTML = '''
         </div>
 
         <div id="resultados" class="tab-content">
+            <!-- NUEVO: Lista de resultados del día -->
             <div class="form-box">
-                <h3>CARGAR RESULTADO</h3>
+                <h3>RESULTADOS DEL DÍA</h3>
+                <div id="lista-resultados-admin" style="max-height: 300px; overflow-y: auto; margin-bottom: 15px;">
+                    <p style="color: #888;">Cargando...</p>
+                </div>
+            </div>
+
+            <div class="form-box">
+                <h3>CARGAR/EDITAR RESULTADO</h3>
                 <div class="form-row">
                     <select id="res-hora">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
                     <select id="res-animal">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
@@ -2138,6 +2217,23 @@ ADMIN_HTML = '''
                 <div style="margin-top: 10px; font-size: 0.8rem; color: #888;">
                     ℹ️ Si el resultado ya existe, se actualizará automáticamente.
                 </div>
+            </div>
+        </div>
+
+        <!-- NUEVA PESTAÑA: Anular Ticket -->
+        <div id="anular" class="tab-content">
+            <div class="form-box">
+                <h3>ANULAR TICKET</h3>
+                <div class="form-row">
+                    <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
+                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR TICKET</button>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
+                    <small style="color: #ff6b6b;">
+                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado aún.
+                    </small>
+                </div>
+                <div id="resultado-anular" style="margin-top: 10px; font-size: 0.9rem;"></div>
             </div>
         </div>
 
@@ -2175,6 +2271,7 @@ ADMIN_HTML = '''
             if (tab === 'reporte') cargarReporte();
             if (tab === 'agencias') cargarAgencias();
             if (tab === 'dashboard') cargarDashboard();
+            if (tab === 'resultados') cargarResultadosAdmin();
         }
 
         function showMensaje(msg, tipo) {
@@ -2307,16 +2404,18 @@ ADMIN_HTML = '''
 
         function cargarRiesgo() {
             fetch('/admin/riesgo').then(r => r.json()).then(d => {
-                // Actualizar próximo sorteo
-                if (d.proximo_sorteo) {
-                    document.getElementById('proximo-sorteo-hora').textContent = d.proximo_sorteo;
+                // Actualizar sorteo objetivo
+                if (d.sorteo_objetivo) {
+                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
                 } else {
-                    document.getElementById('proximo-sorteo-hora').textContent = 'No hay más sorteos hoy';
+                    document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
                 }
                 
                 let container = document.getElementById('lista-riesgo');
                 if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para el próximo sorteo</p>'; 
+                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para este sorteo</p>'; 
                     return;
                 }
                 let html = '';
@@ -2345,14 +2444,103 @@ ADMIN_HTML = '''
             });
         }
 
+        // NUEVA FUNCIÓN: Cargar resultados del día en admin
+        function cargarResultadosAdmin() {
+            fetch('/admin/resultados-hoy')
+            .then(r => r.json())
+            .then(d => {
+                let container = document.getElementById('lista-resultados-admin');
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b;">Error al cargar</p>';
+                    return;
+                }
+                
+                let html = '';
+                if (d.resultados && Object.keys(d.resultados).length > 0) {
+                    for (let hora of Object.keys(d.resultados).sort()) {
+                        let resultado = d.resultados[hora];
+                        let clase = resultado ? '' : 'pendiente';
+                        let contenido;
+                        
+                        if (resultado) {
+                            contenido = `
+                                <span class="resultado-numero">${resultado.animal}</span>
+                                <span class="resultado-nombre">${resultado.nombre}</span>
+                                <span style="color: #27ae60; font-size: 0.8rem;">✓ Cargado</span>
+                            `;
+                        } else {
+                            contenido = `
+                                <span style="color: #666;">Pendiente</span>
+                                <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
+                            `;
+                        }
+                        
+                        html += `
+                            <div class="resultado-item ${clase}">
+                                <div style="display: flex; flex-direction: column;">
+                                    <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
+                                </div>
+                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
+                                    ${contenido}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    html = '<p style="color: #888; text-align: center;">No hay resultados disponibles</p>';
+                }
+                container.innerHTML = html;
+            })
+            .catch(() => {
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b;">Error de conexión</p>';
+            });
+        }
+
         function guardarResultado() {
             let form = new FormData();
             form.append('hora', document.getElementById('res-hora').value);
             form.append('animal', document.getElementById('res-animal').value);
             fetch('/admin/guardar-resultado', {method: 'POST', body: form})
             .then(r => r.json()).then(d => {
-                if (d.status === 'ok') showMensaje('Guardado', 'success');
+                if (d.status === 'ok') {
+                    showMensaje('Guardado', 'success');
+                    cargarResultadosAdmin(); // Recargar la lista
+                }
                 else showMensaje(d.error || 'Error', 'error');
+            });
+        }
+
+        // NUEVA FUNCIÓN: Anular ticket desde admin
+        function anularTicketAdmin() {
+            let serial = document.getElementById('anular-serial').value.trim();
+            if (!serial) {
+                showMensaje('Ingrese un serial', 'error');
+                return;
+            }
+            
+            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
+                return;
+            }
+            
+            fetch('/api/anular-ticket', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let resultadoDiv = document.getElementById('resultado-anular');
+                if (d.error) {
+                    resultadoDiv.innerHTML = '<span style="color: #c0392b;">❌ ' + d.error + '</span>';
+                    showMensaje(d.error, 'error');
+                } else {
+                    resultadoDiv.innerHTML = '<span style="color: #27ae60;">✅ ' + d.mensaje + '</span>';
+                    showMensaje(d.mensaje, 'success');
+                    document.getElementById('anular-serial').value = '';
+                }
+            })
+            .catch(e => {
+                showMensaje('Error de conexión', 'error');
             });
         }
 
@@ -2398,8 +2586,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.5.1")
-    print("  RIESGO POR SORTEO - Fix filtrado")
+    print("  ZOOLO CASINO CLOUD v5.6 - Admin Completo")
+    print("  RIESGO POR SORTEO ACTIVO (No acumulativo)")
     print("=" * 60)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
