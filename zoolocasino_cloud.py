@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.5 - Riesgo por sorteo + Resultados en POS
+ZOOLO CASINO CLOUD v5.5.1 - Riesgo por Sorteo (Fix filtrado)
 """
 
 import os
@@ -886,6 +886,9 @@ def riesgo():
         hoy = ahora_peru().strftime("%d/%m/%Y")
         proximo_sorteo = obtener_proximo_sorteo()
         
+        print(f"[DEBUG] Próximo sorteo detectado: {proximo_sorteo}")
+        print(f"[DEBUG] Hora actual Perú: {ahora_peru().strftime('%I:%M %p')}")
+        
         if not proximo_sorteo:
             return jsonify({
                 'riesgo': {},
@@ -893,32 +896,51 @@ def riesgo():
                 'mensaje': 'No hay más sorteos disponibles para hoy'
             })
         
-        # Obtener solo tickets del próximo sorteo específico
+        # Obtener todos los tickets de hoy no anulados
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25&anulado=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        }
         req = urllib.request.Request(url, headers=headers)
         
         with urllib.request.urlopen(req, timeout=15) as response:
             tickets = json.loads(response.read().decode())
         
+        if not tickets:
+            return jsonify({
+                'riesgo': {},
+                'proximo_sorteo': proximo_sorteo,
+                'mensaje': 'No hay tickets vendidos hoy',
+                'total_apostado': 0
+            })
+        
+        print(f"[DEBUG] Tickets encontrados hoy: {len(tickets)}")
+        
+        # Obtener jugadas de tipo animal para estos tickets
+        # Filtrar manualmente por el próximo sorteo para evitar problemas de encoding
         apuestas = {}
         total_apostado_sorteo = 0
+        total_jugadas_contadas = 0
         
         for t in tickets:
-            # Filtrar solo jugadas del próximo sorteo
-            jugadas = supabase_request("jugadas", filters={
-                "ticket_id": t['id'], 
-                "tipo": "animal",
-                "hora": proximo_sorteo
-            })
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
             
             for j in jugadas:
-                sel = j['seleccion']
-                if sel not in apuestas:
-                    apuestas[sel] = 0
-                apuestas[sel] += j['monto']
-                total_apostado_sorteo += j['monto']
+                if j.get('hora') == proximo_sorteo:
+                    sel = j.get('seleccion')
+                    monto = j.get('monto', 0)
+                    if sel:
+                        if sel not in apuestas:
+                            apuestas[sel] = 0
+                        apuestas[sel] += monto
+                        total_apostado_sorteo += monto
+                        total_jugadas_contadas += 1
         
+        print(f"[DEBUG] Jugadas para {proximo_sorteo}: {total_jugadas_contadas}")
+        print(f"[DEBUG] Total apostado: {total_apostado_sorteo}")
+        
+        # Ordenar por monto mayor
         apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
         
         riesgo = {}
@@ -936,9 +958,14 @@ def riesgo():
             'riesgo': riesgo,
             'proximo_sorteo': proximo_sorteo,
             'total_apostado': round(total_apostado_sorteo, 2),
-            'hora_actual': ahora_peru().strftime("%I:%M %p")
+            'hora_actual': ahora_peru().strftime("%I:%M %p"),
+            'cantidad_jugadas': total_jugadas_contadas
         })
+        
     except Exception as e:
+        print(f"[ERROR] En riesgo: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/estadisticas-rango', methods=['POST'])
@@ -1178,7 +1205,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.5 - Riesgo por Sorteo
+            Sistema ZOOLO CASINO v5.5.1 - Riesgo por Sorteo
         </div>
     </div>
 </body>
@@ -2371,8 +2398,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.5")
-    print("  RIESGO POR SORTEO + RESULTADOS EN POS")
+    print("  ZOOLO CASINO CLOUD v5.5.1")
+    print("  RIESGO POR SORTEO - Fix filtrado")
     print("=" * 60)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
