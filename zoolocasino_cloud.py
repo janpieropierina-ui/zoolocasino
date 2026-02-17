@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6 - Admin Completo + Riesgo por Sorteo
+ZOOLO CASINO CLOUD v5.6.1 - Fix orden horarios Admin
 """
 
 import os
@@ -1259,7 +1259,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6 - Admin Completo
+            Sistema ZOOLO CASINO v5.6.1 - Fix horarios
         </div>
     </div>
 </body>
@@ -2258,6 +2258,8 @@ ADMIN_HTML = '''
     </div>
 
     <script>
+        // Variable global con el orden correcto de horarios - CORRECCIÓN AQUÍ
+        const HORARIOS_ORDEN = {{horarios|tojson}};
         let historicoData = null;
         let fechasConsulta = { inicio: null, fin: null };
 
@@ -2444,7 +2446,7 @@ ADMIN_HTML = '''
             });
         }
 
-        // NUEVA FUNCIÓN: Cargar resultados del día en admin
+        // CORREGIDO: Usar HORARIOS_ORDEN (09:00 AM primero, no 01:00 PM)
         function cargarResultadosAdmin() {
             fetch('/admin/resultados-hoy')
             .then(r => r.json())
@@ -2456,38 +2458,35 @@ ADMIN_HTML = '''
                 }
                 
                 let html = '';
-                if (d.resultados && Object.keys(d.resultados).length > 0) {
-                    for (let hora of Object.keys(d.resultados).sort()) {
-                        let resultado = d.resultados[hora];
-                        let clase = resultado ? '' : 'pendiente';
-                        let contenido;
-                        
-                        if (resultado) {
-                            contenido = `
-                                <span class="resultado-numero">${resultado.animal}</span>
-                                <span class="resultado-nombre">${resultado.nombre}</span>
-                                <span style="color: #27ae60; font-size: 0.8rem;">✓ Cargado</span>
-                            `;
-                        } else {
-                            contenido = `
-                                <span style="color: #666;">Pendiente</span>
-                                <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
-                            `;
-                        }
-                        
-                        html += `
-                            <div class="resultado-item ${clase}">
-                                <div style="display: flex; flex-direction: column;">
-                                    <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
-                                </div>
-                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
-                                    ${contenido}
-                                </div>
-                            </div>
+                // Usar HORARIOS_ORDEN que tiene el orden correcto: 09:00 AM primero
+                for (let hora of HORARIOS_ORDEN) {
+                    let resultado = d.resultados[hora];
+                    let clase = resultado ? '' : 'pendiente';
+                    let contenido;
+                    
+                    if (resultado) {
+                        contenido = `
+                            <span class="resultado-numero">${resultado.animal}</span>
+                            <span class="resultado-nombre">${resultado.nombre}</span>
+                            <span style="color: #27ae60; font-size: 0.8rem;">✓ Cargado</span>
+                        `;
+                    } else {
+                        contenido = `
+                            <span style="color: #666;">Pendiente</span>
+                            <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
                         `;
                     }
-                } else {
-                    html = '<p style="color: #888; text-align: center;">No hay resultados disponibles</p>';
+                    
+                    html += `
+                        <div class="resultado-item ${clase}">
+                            <div style="display: flex; flex-direction: column;">
+                                <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
+                            </div>
+                            <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
+                                ${contenido}
+                            </div>
+                        </div>
+                    `;
                 }
                 container.innerHTML = html;
             })
@@ -2510,7 +2509,6 @@ ADMIN_HTML = '''
             });
         }
 
-        // NUEVA FUNCIÓN: Anular ticket desde admin
         function anularTicketAdmin() {
             let serial = document.getElementById('anular-serial').value.trim();
             if (!serial) {
@@ -2586,8 +2584,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6 - Admin Completo")
-    print("  RIESGO POR SORTEO ACTIVO (No acumulativo)")
+    print("  ZOOLO CASINO CLOUD v5.6.1")
+    print("  Fix: Orden horarios 09:00 AM primero")
     print("=" * 60)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
