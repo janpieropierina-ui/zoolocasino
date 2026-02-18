@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6.5 - GRID HORARIOS PC OPTIMIZADO
+ZOOLO CASINO CLOUD v5.6.6 - RIESGO POR AGENCIA + HORARIOS FIX
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co ').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co  ').strip()
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
@@ -439,7 +439,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text=  {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text=   {urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -974,8 +974,8 @@ def reporte_agencias_rango():
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                             stats['premios'] += calcular_premio_animal(j['monto'], wa)
                         elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
                             num = int(wa)
+                            sel = j['seleccion']
                             if (sel == 'ROJO' and str(wa) in ROJOS) or \
                                (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                (sel == 'PAR' and num % 2 == 0) or \
@@ -992,8 +992,8 @@ def reporte_agencias_rango():
                             tiene_premio = True
                             break
                         elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
                             num = int(wa)
+                            sel = j['seleccion']
                             if (sel == 'ROJO' and str(wa) in ROJOS) or \
                                (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                (sel == 'PAR' and num % 2 == 0) or \
@@ -1281,16 +1281,31 @@ def riesgo():
         hoy = ahora_peru().strftime("%d/%m/%Y")
         sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
         
-        print(f"[DEBUG] Sorteo objetivo: {sorteo_objetivo}")
+        # Obtener parámetro de agencia opcional
+        agencia_id = request.args.get('agencia_id')
+        nombre_agencia = "TODAS LAS AGENCIAS"
+        
+        print(f"[DEBUG] Sorteo objetivo: {sorteo_objetivo}, Agencia solicitada: {agencia_id}")
         
         if not sorteo_objetivo:
             return jsonify({
                 'riesgo': {},
                 'sorteo_objetivo': None,
-                'mensaje': 'No hay más sorteos disponibles para hoy'
+                'mensaje': 'No hay más sorteos disponibles para hoy',
+                'agencia_nombre': nombre_agencia
             })
         
+        # Construir URL base
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25&anulado=eq.false"
+        
+        # Si se especifica agencia, filtrar por ella
+        if agencia_id:
+            url += f"&agencia_id=eq.{agencia_id}"
+            # Obtener nombre de la agencia
+            agencias = supabase_request("agencias", filters={"id": agencia_id})
+            if agencias and len(agencias) > 0:
+                nombre_agencia = agencias[0]['nombre_agencia']
+        
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}"
@@ -1305,7 +1320,9 @@ def riesgo():
                 'riesgo': {},
                 'sorteo_objetivo': sorteo_objetivo,
                 'mensaje': 'No hay tickets vendidos hoy',
-                'total_apostado': 0
+                'total_apostado': 0,
+                'agencia_nombre': nombre_agencia,
+                'agencia_id': agencia_id
             })
         
         apuestas = {}
@@ -1344,7 +1361,9 @@ def riesgo():
             'sorteo_objetivo': sorteo_objetivo,
             'total_apostado': round(total_apostado_sorteo, 2),
             'hora_actual': ahora_peru().strftime("%I:%M %p"),
-            'cantidad_jugadas': total_jugadas_contadas
+            'cantidad_jugadas': total_jugadas_contadas,
+            'agencia_nombre': nombre_agencia,
+            'agencia_id': agencia_id
         })
         
     except Exception as e:
@@ -1602,7 +1621,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6.5<br>Optimizado para Móviles
+            Sistema ZOOLO CASINO v5.6.6<br>Riesgo por Agencia + Horarios Fix
         </div>
     </div>
 </body>
@@ -1775,7 +1794,7 @@ POS_HTML = '''
             }
         }
         
-        /* Horarios - MOBILE: Scroll horizontal */
+        /* Horarios - SCROLL HORIZONTAL PARA TODOS (MOBILE Y PC) */
         .horarios {
             display: flex;
             gap: 6px;
@@ -1784,28 +1803,29 @@ POS_HTML = '''
             flex-shrink: 0;
             background: #0a0a0a;
             -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
+            scrollbar-width: thin;
+            scrollbar-color: #ffd700 #222;
         }
-        .horarios::-webkit-scrollbar { display: none; }
         
-        /* Horarios - PC: Grid de 2 filas */
-        @media (min-width: 1024px) {
-            .horarios {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-                grid-template-rows: repeat(2, 1fr);
-                grid-auto-flow: column;
-                overflow-x: visible;
-                overflow-y: visible;
-                gap: 8px;
-                max-height: none;
-                padding: 15px;
-            }
+        /* Scrollbar personalizada */
+        .horarios::-webkit-scrollbar {
+            height: 8px;
         }
+        .horarios::-webkit-scrollbar-track {
+            background: #222;
+            border-radius: 4px;
+        }
+        .horarios::-webkit-scrollbar-thumb {
+            background: #ffd700;
+            border-radius: 4px;
+        }
+        
+        /* ELIMINADO: Media query que rompía el grid en PC */
+        /* Ahora todos ven el scroll horizontal igual que en móvil */
         
         .btn-hora {
             flex: 0 0 auto;
-            min-width: 75px;
+            min-width: 85px;
             padding: 10px 6px; 
             background: #222; 
             border: 1px solid #444;
@@ -1816,16 +1836,12 @@ POS_HTML = '''
             text-align: center; 
             line-height: 1.3;
             touch-action: manipulation;
+            transition: all 0.2s;
         }
         
-        @media (min-width: 1024px) {
-            .btn-hora {
-                flex: none;
-                min-width: auto;
-                width: 100%;
-                padding: 12px 8px;
-                font-size: 0.85rem;
-            }
+        .btn-hora:hover {
+            background: #333;
+            border-color: #555;
         }
         
         .btn-hora.active { 
@@ -3026,6 +3042,40 @@ ADMIN_HTML = '''
         .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 8px; font-size: 0.9rem; }
         .sorteo-actual-box p { color: #ffd700; font-size: 1.8rem; font-weight: bold; }
         
+        /* Selector de agencia */
+        .agencia-selector {
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #444;
+        }
+        .agencia-selector label {
+            color: #ffd700;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .agencia-selector select {
+            width: 100%;
+            padding: 12px;
+            background: #000;
+            border: 2px solid #ffd700;
+            color: white;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .agencia-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255,215,0,0.1);
+            border-radius: 6px;
+            text-align: center;
+            color: #ffd700;
+            font-weight: bold;
+        }
+        
         /* Resultados */
         .resultado-item {
             background: #0a0a0a;
@@ -3186,6 +3236,17 @@ ADMIN_HTML = '''
         </div>
 
         <div id="riesgo" class="tab-content">
+            <!-- SELECTOR DE AGENCIA NUEVO -->
+            <div class="agencia-selector">
+                <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
+                <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()">
+                    <option value="">TODAS LAS AGENCIAS</option>
+                </select>
+                <div class="agencia-info" id="riesgo-agencia-nombre" style="display:none;">
+                    Mostrando riesgo para: <span id="nombre-agencia-actual">TODAS</span>
+                </div>
+            </div>
+            
             <div class="sorteo-actual-box">
                 <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
                 <p id="sorteo-objetivo">Cargando...</p>
@@ -3194,6 +3255,7 @@ ADMIN_HTML = '''
             
             <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">
                 💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
+                <span id="cantidad-jugadas-info" style="color: #888; font-size: 0.8rem; display: block; margin-top: 5px;"></span>
             </h3>
             <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
             
@@ -3321,6 +3383,7 @@ ADMIN_HTML = '''
         let historicoData = null;
         let reporteAgenciasData = null;
         let fechasConsulta = { inicio: null, fin: null };
+        let listaAgencias = [];
 
         function showTab(tab) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -3328,7 +3391,10 @@ ADMIN_HTML = '''
             document.getElementById(tab).classList.add('active');
             event.target.classList.add('active');
             
-            if (tab === 'riesgo') cargarRiesgo();
+            if (tab === 'riesgo') {
+                cargarAgenciasSelect(); // Cargar selector de agencias
+                cargarRiesgo();
+            }
             if (tab === 'reporte') {
                 let hoy = new Date().toISOString().split('T')[0];
                 document.getElementById('reporte-fecha-inicio').value = hoy;
@@ -3405,6 +3471,27 @@ ADMIN_HTML = '''
             document.getElementById('reporte-fecha-fin').value = fin.toISOString().split('T')[0];
             
             consultarReporteAgencias();
+        }
+
+        // NUEVA FUNCIÓN: Cargar agencias en el select de riesgo
+        function cargarAgenciasSelect() {
+            fetch('/admin/lista-agencias')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) return;
+                listaAgencias = d;
+                let select = document.getElementById('riesgo-agencia-select');
+                // Mantener la opción "TODAS" y agregar las demás
+                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
+                d.forEach(ag => {
+                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
+                });
+            });
+        }
+
+        // NUEVA FUNCIÓN: Cambiar agencia en el riesgo
+        function cambiarAgenciaRiesgo() {
+            cargarRiesgo();
         }
 
         function consultarHistorico() {
@@ -3627,14 +3714,35 @@ ADMIN_HTML = '''
             }).catch(() => showMensaje('Error de conexion', 'error'));
         }
 
+        // MODIFICADO: Ahora acepta parámetro de agencia
         function cargarRiesgo() {
-            fetch('/admin/riesgo').then(r => r.json()).then(d => {
+            let agenciaId = document.getElementById('riesgo-agencia-select').value;
+            let url = '/admin/riesgo';
+            
+            if (agenciaId) {
+                url += '?agencia_id=' + agenciaId;
+            }
+            
+            fetch(url)
+            .then(r => r.json())
+            .then(d => {
                 if (d.sorteo_objetivo) {
                     document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
                     document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
+                    
+                    // Mostrar nombre de agencia
+                    let nombreAgencia = d.agencia_nombre || "TODAS LAS AGENCIAS";
+                    document.getElementById('nombre-agencia-actual').textContent = nombreAgencia;
+                    document.getElementById('riesgo-agencia-nombre').style.display = 'block';
+                    
+                    // Info extra
+                    let infoExtra = d.cantidad_jugadas ? `${d.cantidad_jugadas} jugadas registradas` : '';
+                    if (d.hora_actual) infoExtra += ` • Hora actual: ${d.hora_actual}`;
+                    document.getElementById('cantidad-jugadas-info').textContent = infoExtra;
                 } else {
                     document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
                     document.getElementById('total-apostado-sorteo').textContent = 'S/0';
+                    document.getElementById('cantidad-jugadas-info').textContent = '';
                 }
                 
                 let container = document.getElementById('lista-riesgo');
@@ -3652,6 +3760,10 @@ ADMIN_HTML = '''
                     </div>`;
                 }
                 container.innerHTML = html;
+            })
+            .catch(e => {
+                console.error(e);
+                showMensaje('Error cargando riesgo', 'error');
             });
         }
 
@@ -3833,8 +3945,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6.5")
-    print("  GRID HORARIOS PC - Mobile Optimized")
+    print("  ZOOLO CASINO CLOUD v5.6.6")
+    print("  RIESGO POR AGENCIA + HORARIOS FIX")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
