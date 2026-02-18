@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6.7 - EDICIÓN DE RESULTADOS + VALIDACIONES
+ZOOLO CASINO CLOUD v5.6.8 - EDICIÓN DE RESULTADOS + VALIDACIONES (CORREGIDO)
 """
 
 import os
@@ -113,13 +113,14 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     """Función mejorada con manejo de errores robusto y timeout aumentado para móviles"""
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
+    # CORRECCIÓN: Codificar filtros para URL correctamente
     if filters:
         filter_params = []
         for k, v in filters.items():
             if k.endswith('__like'):
-                filter_params.append(f"{k.replace('__like', '')}=like.{v}")
+                filter_params.append(f"{k.replace('__like', '')}=like.{urllib.parse.quote(str(v))}")
             else:
-                filter_params.append(f"{k}=eq.{v}")
+                filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
     
     headers = {
@@ -141,9 +142,20 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 return json.loads(response.read().decode())
         
         elif method == "PATCH":
+            # CORRECCIÓN: Mejor manejo de la respuesta PATCH
             req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="PATCH")
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                return True
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    # Supabase retorna 204 No Content en PATCH exitoso
+                    if response.status in [200, 201, 204]:
+                        return True
+                    return False
+            except urllib.error.HTTPError as e:
+                # Si es 404, significa que no encontró el registro para actualizar
+                if e.code == 404:
+                    print(f"[ERROR PATCH] Registro no encontrado: {url}")
+                    return False
+                raise e
                 
     except urllib.error.HTTPError as e:
         print(f"[ERROR] HTTP {e.code}: {e.read().decode()}")
@@ -439,7 +451,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text=    {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -517,7 +529,8 @@ def verificar_ticket():
 def pagar_ticket():
     try:
         ticket_id = request.json.get('ticket_id')
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{ticket_id}"
+        # CORRECCIÓN: Codificar el ID en la URL
+        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -563,7 +576,8 @@ def anular_ticket():
                 if not verificar_horario_bloqueo(j['hora']):
                     return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{ticket['id']}"
+        # CORRECCIÓN: Codificar el ID en la URL
+        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -583,7 +597,8 @@ def caja_agencia():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25"
+        # CORRECCIÓN: Codificar la fecha en el like
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -612,8 +627,8 @@ def caja_agencia():
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                                 tiene_premio = True
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                                num = int(wa)
                                 sel = j['seleccion']
+                                num = int(wa)
                                 if (sel == 'ROJO' and str(wa) in ROJOS) or \
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
@@ -711,7 +726,7 @@ def caja_historico():
                 jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                 premio_ticket = 0
                 for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
+                    wa = resultados.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                             premio_ticket += calcular_premio_animal(j['monto'], wa)
@@ -831,7 +846,7 @@ def crear_agencia():
         return jsonify({'error': str(e)}), 500
 
 # ============================================
-# NUEVA FUNCIONALIDAD: EDITAR RESULTADOS CON VALIDACIONES
+# NUEVA FUNCIONALIDAD: EDITAR RESULTADOS CON VALIDACIONES (CORREGIDO)
 # ============================================
 
 @app.route('/admin/guardar-resultado', methods=['POST'])
@@ -865,7 +880,8 @@ def guardar_resultado():
         
         if existentes and len(existentes) > 0:
             # ACTUALIZAR (EDITAR) resultado existente
-            url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{fecha}&hora=eq.{hora}"
+            # CORRECCIÓN: Codificar fecha y hora para URL
+            url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{urllib.parse.quote(fecha)}&hora=eq.{urllib.parse.quote(hora)}"
             headers = {
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -873,31 +889,44 @@ def guardar_resultado():
             }
             data = json.dumps({"animal": animal}).encode()
             req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-            urllib.request.urlopen(req, timeout=15)
             
-            return jsonify({
-                'status': 'ok', 
-                'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
-                'accion': 'actualizado',
-                'fecha': fecha,
-                'hora': hora,
-                'animal': animal
-            })
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    if response.status in [200, 201, 204]:
+                        return jsonify({
+                            'status': 'ok', 
+                            'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
+                            'accion': 'actualizado',
+                            'fecha': fecha,
+                            'hora': hora,
+                            'animal': animal
+                        })
+                    else:
+                        return jsonify({'error': 'Error al actualizar en la base de datos'}), 500
+            except urllib.error.HTTPError as e:
+                print(f"[ERROR PATCH] HTTP {e.code}: {e.read().decode()}")
+                return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
+                
         else:
             # CREAR nuevo resultado
             data = {"fecha": fecha, "hora": hora, "animal": animal}
-            supabase_request("resultados", method="POST", data=data)
+            result = supabase_request("resultados", method="POST", data=data)
             
-            return jsonify({
-                'status': 'ok', 
-                'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
-                'accion': 'creado',
-                'fecha': fecha,
-                'hora': hora,
-                'animal': animal
-            })
+            if result:
+                return jsonify({
+                    'status': 'ok', 
+                    'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
+                    'accion': 'creado',
+                    'fecha': fecha,
+                    'hora': hora,
+                    'animal': animal
+                })
+            else:
+                return jsonify({'error': 'Error al crear resultado'}), 500
             
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/verificar-tickets-sorteo', methods=['POST'])
@@ -916,7 +945,8 @@ def verificar_tickets_sorteo():
             return jsonify({'error': 'Fecha y hora requeridas'}), 400
         
         # Buscar tickets de esa fecha que tengan jugadas en esa hora
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{fecha}%25&anulado=eq.false"
+        # CORRECCIÓN: Codificar fecha para el like
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(fecha)}%25&anulado=eq.false"
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}"
@@ -1312,7 +1342,7 @@ def reporte_agencias():
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
         resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
             tickets = json.loads(response.read().decode())
@@ -1390,11 +1420,11 @@ def riesgo():
             })
         
         # Construir URL base
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25&anulado=eq.false"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&anulado=eq.false"
         
         # Si se especifica agencia, filtrar por ella
         if agencia_id:
-            url += f"&agencia_id=eq.{agencia_id}"
+            url += f"&agencia_id=eq.{urllib.parse.quote(str(agencia_id))}"
             # Obtener nombre de la agencia
             agencias = supabase_request("agencias", filters={"id": agencia_id})
             if agencias and len(agencias) > 0:
@@ -1715,7 +1745,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6.7<br>Edición de Resultados + Validaciones
+            Sistema ZOOLO CASINO v5.6.8<br>Edición de Resultados + Validaciones (CORREGIDO)
         </div>
     </div>
 </body>
@@ -3188,7 +3218,7 @@ ADMIN_HTML = '''
         .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
         .resultado-nombre { color: #888; font-size: 0.9rem; }
         
-        /* NUEVO: Botón de editar resultado */
+        /* Botón de editar resultado */
         .btn-editar {
             background: linear-gradient(135deg, #2980b9, #3498db);
             color: white;
@@ -4229,8 +4259,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6.7")
-    print("  EDICION DE RESULTADOS + VALIDACIONES")
+    print("  ZOOLO CASINO CLOUD v5.6.8")
+    print("  EDICION DE RESULTADOS + VALIDACIONES (CORREGIDO)")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
