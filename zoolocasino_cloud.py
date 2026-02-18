@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6.3 - Reportes Agencias Históricos + CSV
+ZOOLO CASINO CLOUD v5.6.4 - FULL RESPONSIVE MOBILE OPTIMIZED
 """
 
 import os
@@ -109,8 +109,8 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-def supabase_request(table, method="GET", data=None, filters=None, timeout=15):
-    """Función mejorada con manejo de errores robusto"""
+def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
+    """Función mejorada con manejo de errores robusto y timeout aumentado para móviles"""
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
     if filters:
@@ -439,7 +439,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -711,7 +711,7 @@ def caja_historico():
                 jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                 premio_ticket = 0
                 for j in jugadas:
-                    wa = resultados.get(j['hora'])
+                    wa = resultados_dia.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                             premio_ticket += calcular_premio_animal(j['monto'], wa)
@@ -886,7 +886,6 @@ def admin_resultados_hoy():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# NUEVO: Reporte de agencias con histórico y totales separados
 @app.route('/admin/reporte-agencias-rango', methods=['POST'])
 @admin_required
 def reporte_agencias_rango():
@@ -1065,7 +1064,6 @@ def reporte_agencias_rango():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# NUEVO: Exportar reporte a CSV
 @app.route('/admin/exportar-csv', methods=['POST'])
 @admin_required
 def exportar_csv():
@@ -1531,47 +1529,59 @@ LOGIN_HTML = '''
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
     <title>Login - ZOOLO CASINO</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
             background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
             color: white;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 20px;
         }
         .login-box {
             background: rgba(255,255,255,0.05);
-            padding: 40px;
+            padding: 40px 30px;
             border-radius: 20px;
             border: 2px solid #ffd700;
-            width: 90%;
+            width: 100%;
             max-width: 400px;
             text-align: center;
+            backdrop-filter: blur(10px);
         }
-        .login-box h2 { color: #ffd700; margin-bottom: 30px; font-size: 2rem; }
+        .login-box h2 { color: #ffd700; margin-bottom: 30px; font-size: 1.8rem; }
         .form-group { margin-bottom: 20px; text-align: left; }
-        .form-group label { display: block; margin-bottom: 8px; color: #aaa; }
+        .form-group label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.9rem; }
         .form-group input {
-            width: 100%; padding: 12px;
-            border: 1px solid #444; border-radius: 8px;
+            width: 100%; padding: 15px;
+            border: 1px solid #444; border-radius: 10px;
             background: rgba(0,0,0,0.5); color: white; font-size: 1rem;
+            -webkit-appearance: none;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #ffd700;
+            box-shadow: 0 0 10px rgba(255,215,0,0.3);
         }
         .btn-login {
-            width: 100%; padding: 15px;
+            width: 100%; padding: 16px;
             background: linear-gradient(45deg, #ffd700, #ffed4e);
-            color: black; border: none; border-radius: 8px;
+            color: black; border: none; border-radius: 10px;
             font-size: 1.1rem; font-weight: bold; cursor: pointer;
+            margin-top: 10px;
+            transition: transform 0.2s;
         }
+        .btn-login:active { transform: scale(0.98); }
         .error {
             background: rgba(255,0,0,0.2); color: #ff6b6b;
-            padding: 10px; border-radius: 5px; margin-bottom: 20px;
+            padding: 12px; border-radius: 8px; margin-bottom: 20px;
+            font-size: 0.9rem;
         }
-        .info { margin-top: 20px; font-size: 0.85rem; color: #666; }
+        .info { margin-top: 25px; font-size: 0.8rem; color: #666; }
     </style>
 </head>
 <body>
@@ -1583,16 +1593,16 @@ LOGIN_HTML = '''
         <form method="POST">
             <div class="form-group">
                 <label>Usuario</label>
-                <input type="text" name="usuario" required autofocus>
+                <input type="text" name="usuario" required autofocus autocomplete="off">
             </div>
             <div class="form-group">
-                <label>Contrasena</label>
+                <label>Contraseña</label>
                 <input type="password" name="password" required>
             </div>
-            <button type="submit" class="btn-login">INICIAR SESION</button>
+            <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6.3 - Reportes Agencias
+            Sistema ZOOLO CASINO v5.6.4<br>Optimizado para Móviles
         </div>
     </div>
 </body>
@@ -1607,106 +1617,282 @@ POS_HTML = '''
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
     <title>POS - {{agencia}}</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { 
-            background: #0a0a0a; color: white; font-family: 'Segoe UI', sans-serif; 
-            height: 100%; overflow: hidden; touch-action: manipulation;
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        html { height: 100%; }
+        body { 
+            background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            min-height: 100vh; 
+            display: flex; 
+            flex-direction: column;
+            overflow-x: hidden;
         }
+        
+        /* Header optimizado */
         .header {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;
-            border-bottom: 2px solid #ffd700; height: 50px; flex-shrink: 0;
+            padding: 10px 15px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            border-bottom: 2px solid #ffd700; 
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
-        .header-info h3 { color: #ffd700; font-size: 0.9rem; margin: 0; }
-        .header-info p { color: #888; font-size: 0.7rem; margin: 0; }
-        .monto-box { display: flex; align-items: center; gap: 5px; }
-        .monto-box span { font-size: 0.75rem; }
+        .header-info h3 { color: #ffd700; font-size: 1rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+        .header-info p { color: #888; font-size: 0.75rem; margin: 0; }
+        .monto-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 20px; }
+        .monto-box span { font-size: 0.8rem; font-weight: bold; color: #ffd700; }
         .monto-box input {
-            width: 60px; padding: 5px; border: 1px solid #ffd700; border-radius: 4px;
-            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 0.9rem;
+            width: 60px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
+            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
+            -webkit-appearance: none;
         }
+        
+        /* Layout principal */
         .main-container { 
-            display: flex; height: calc(100% - 50px); 
+            display: flex; 
+            flex-direction: column;
+            flex: 1;
+            height: calc(100vh - 60px);
+            overflow: hidden;
         }
+        
+        @media (min-width: 1024px) {
+            .main-container { flex-direction: row; }
+        }
+        
+        /* Panel izquierdo */
         .left-panel { 
-            flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            min-height: 0;
+            overflow: hidden;
         }
+        
+        /* Botones especiales */
         .special-btns { 
-            display: flex; gap: 4px; padding: 6px; background: #111; flex-shrink: 0;
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px; 
+            padding: 10px; 
+            background: #111; 
+            flex-shrink: 0;
         }
         .btn-esp { 
-            flex: 1; padding: 10px 4px; border: none; border-radius: 4px; 
-            font-weight: bold; cursor: pointer; color: white; font-size: 0.75rem;
-            -webkit-tap-highlight-color: transparent;
+            padding: 12px 4px; 
+            border: none; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            color: white; 
+            font-size: 0.8rem;
+            touch-action: manipulation;
+            min-height: 44px;
+            transition: all 0.1s;
         }
-        .btn-rojo { background: #c0392b; }
-        .btn-negro { background: #2c3e50; border: 1px solid #555; }
-        .btn-par { background: #2980b9; }
-        .btn-impar { background: #8e44ad; }
-        .btn-esp.active { box-shadow: 0 0 8px white; transform: scale(0.95); }
+        .btn-esp:active { transform: scale(0.95); }
+        .btn-rojo { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+        .btn-negro { background: linear-gradient(135deg, #2c3e50, #34495e); border: 1px solid #555; }
+        .btn-par { background: linear-gradient(135deg, #2980b9, #3498db); }
+        .btn-impar { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
+        .btn-esp.active { 
+            box-shadow: 0 0 15px rgba(255,255,255,0.5); 
+            transform: scale(0.95);
+            border: 2px solid white;
+        }
+        
+        /* Grid de animales */
         .animals-grid {
-            flex: 1; display: grid; 
-            grid-template-columns: repeat(7, 1fr);
-            gap: 3px; padding: 5px; overflow-y: auto;
+            flex: 1; 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+            gap: 5px; 
+            padding: 10px; 
+            overflow-y: auto;
             -webkit-overflow-scrolling: touch;
         }
-        .animal-card {
-            background: #1a1a2e; border: 2px solid; border-radius: 6px;
-            padding: 6px 2px; text-align: center; cursor: pointer; 
-            transition: all 0.1s; min-height: 55px; display: flex; flex-direction: column; justify-content: center;
-            -webkit-tap-highlight-color: transparent; user-select: none;
-            position: relative;
+        @media (min-width: 768px) {
+            .animals-grid { grid-template-columns: repeat(7, 1fr); }
         }
-        .animal-card:active { transform: scale(0.95); }
-        .animal-card.active { box-shadow: 0 0 10px white; border-color: #ffd700 !important; background: #2a2a4e; }
-        .animal-card .num { font-size: 1rem; font-weight: bold; line-height: 1; }
-        .animal-card .name { font-size: 0.6rem; color: #aaa; line-height: 1; margin-top: 3px; }
+        
+        .animal-card {
+            background: linear-gradient(135deg, #1a1a2e, #16213e); 
+            border: 2px solid; 
+            border-radius: 10px;
+            padding: 8px 2px; 
+            text-align: center; 
+            cursor: pointer; 
+            transition: all 0.15s; 
+            min-height: 65px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center;
+            user-select: none;
+            position: relative;
+            touch-action: manipulation;
+        }
+        .animal-card:active { transform: scale(0.92); }
+        .animal-card.active { 
+            box-shadow: 0 0 15px rgba(255,215,0,0.6); 
+            border-color: #ffd700 !important; 
+            background: linear-gradient(135deg, #2a2a4e, #1a1a3e);
+            transform: scale(1.05);
+            z-index: 10;
+        }
+        .animal-card .num { font-size: 1.2rem; font-weight: bold; line-height: 1; }
+        .animal-card .name { font-size: 0.7rem; color: #aaa; line-height: 1; margin-top: 4px; font-weight: 500; }
         .animal-card.lechuza::after {
             content: "x70";
             position: absolute;
-            top: 2px;
-            right: 2px;
+            top: 3px;
+            right: 3px;
             background: #ffd700;
             color: black;
-            font-size: 0.5rem;
-            padding: 1px 3px;
-            border-radius: 2px;
+            font-size: 0.6rem;
+            padding: 2px 4px;
+            border-radius: 4px;
             font-weight: bold;
         }
+        
+        /* Panel derecho */
         .right-panel {
-            width: 260px; background: #111; border-left: 1px solid #333;
-            display: flex; flex-direction: column; flex-shrink: 0;
+            background: #111; 
+            border-top: 2px solid #333;
+            display: flex; 
+            flex-direction: column;
+            height: 40vh;
+            flex-shrink: 0;
         }
+        @media (min-width: 1024px) { 
+            .right-panel { 
+                width: 350px; 
+                height: auto;
+                border-top: none;
+                border-left: 2px solid #333;
+            }
+        }
+        
+        /* Horarios */
         .horarios {
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px;
-            padding: 5px; max-height: 160px; overflow-y: auto; flex-shrink: 0;
+            display: flex;
+            gap: 6px;
+            padding: 10px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            background: #0a0a0a;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .horarios::-webkit-scrollbar { display: none; }
+        
+        .btn-hora {
+            flex: 0 0 auto;
+            min-width: 75px;
+            padding: 10px 6px; 
+            background: #222; 
+            border: 1px solid #444;
+            border-radius: 8px; 
+            color: #ccc; 
+            cursor: pointer; 
+            font-size: 0.75rem; 
+            text-align: center; 
+            line-height: 1.3;
+            touch-action: manipulation;
+        }
+        .btn-hora.active { 
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            font-weight: bold; 
+            border-color: #27ae60;
+            box-shadow: 0 0 10px rgba(39, 174, 96, 0.4);
+        }
+        .btn-hora.expired { 
+            background: #300; 
+            color: #666; 
+            text-decoration: line-through; 
+            pointer-events: none;
+            opacity: 0.5;
+        }
+        
+        /* Ticket display */
+        .ticket-display {
+            flex: 1; 
+            background: #000; 
+            margin: 0 10px 10px; 
+            border-radius: 10px;
+            padding: 12px; 
+            border: 1px solid #333;
+            overflow-y: auto;
+            font-size: 0.85rem;
             -webkit-overflow-scrolling: touch;
         }
-        .btn-hora {
-            padding: 6px 3px; background: #222; border: 1px solid #444;
-            border-radius: 4px; color: #ccc; cursor: pointer; 
-            font-size: 0.65rem; text-align: center; line-height: 1.3;
-            -webkit-tap-highlight-color: transparent; user-select: none;
+        
+        .ticket-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
         }
-        .btn-hora.active { background: #27ae60; color: white; font-weight: bold; border-color: #27ae60; }
-        .btn-hora.expired { background: #400000; color: #666; text-decoration: line-through; pointer-events: none; }
-        .ticket-display {
-            flex: 1; background: #000; margin: 0 5px 5px; border-radius: 4px;
-            padding: 8px; font-family: monospace; font-size: 0.72rem;
-            overflow-y: auto; white-space: pre-wrap; border: 1px solid #333;
-            line-height: 1.4; -webkit-overflow-scrolling: touch;
+        .ticket-table th {
+            background: #1a1a2e;
+            color: #ffd700;
+            padding: 8px 6px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            font-size: 0.75rem;
         }
+        .ticket-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #222;
+            vertical-align: middle;
+        }
+        .ticket-table tr:last-child td { border-bottom: none; }
+        .ticket-total {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 2px solid #ffd700;
+            text-align: right;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        /* Botones de acción */
         .action-btns { 
-            display: grid; grid-template-columns: repeat(3, 1fr); 
-            gap: 3px; padding: 5px; flex-shrink: 0;
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 6px; 
+            padding: 10px;
+            background: #0a0a0a;
+            flex-shrink: 0;
         }
         .action-btns button {
-            padding: 10px 3px; border: none; border-radius: 4px;
-            font-weight: bold; cursor: pointer; font-size: 0.68rem;
-            -webkit-tap-highlight-color: transparent;
+            padding: 14px 5px; 
+            border: none; 
+            border-radius: 8px;
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 0.8rem;
+            touch-action: manipulation;
+            min-height: 48px;
+            transition: all 0.1s;
         }
-        .btn-agregar { background: #27ae60; color: white; grid-column: span 3; }
-        .btn-vender { background: #2980b9; color: white; grid-column: span 3; }
+        .action-btns button:active { transform: scale(0.95); }
+        .btn-agregar { 
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            grid-column: span 3; 
+            font-size: 1.1rem;
+        }
+        .btn-vender { 
+            background: linear-gradient(135deg, #2980b9, #2573a7); 
+            color: white; 
+            grid-column: span 3;
+            font-size: 1rem;
+        }
         .btn-resultados { background: #f39c12; color: black; }
         .btn-caja { background: #16a085; color: white; }
         .btn-pagar { background: #8e44ad; color: white; }
@@ -1714,106 +1900,210 @@ POS_HTML = '''
         .btn-borrar { background: #555; color: white; }
         .btn-salir { background: #333; color: white; grid-column: span 3; }
         
+        /* Modales */
         .modal {
-            display: none; position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%; background: rgba(0,0,0,0.95);
-            z-index: 1000; overflow-y: auto;
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0;
+            width: 100%; 
+            height: 100%; 
+            background: rgba(0,0,0,0.95);
+            z-index: 1000; 
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
         .modal-content {
-            background: #1a1a2e; margin: 20px auto; padding: 20px; 
-            border-radius: 10px; border: 2px solid #ffd700; 
-            max-width: 500px; width: 95%;
+            background: #1a1a2e; 
+            margin: 10px; 
+            padding: 20px; 
+            border-radius: 15px; 
+            border: 2px solid #ffd700; 
+            max-width: 100%;
+            min-height: calc(100vh - 20px);
+        }
+        @media (min-width: 768px) {
+            .modal-content {
+                margin: 40px auto; 
+                max-width: 600px;
+                min-height: auto;
+            }
         }
         .modal-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #333;
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            margin-bottom: 20px; 
+            padding-bottom: 15px; 
+            border-bottom: 1px solid #333;
         }
-        .modal h3 { color: #ffd700; font-size: 1.1rem; }
+        .modal h3 { color: #ffd700; font-size: 1.3rem; }
         .btn-close {
-            background: #c0392b; color: white; border: none; 
-            padding: 5px 12px; border-radius: 4px; cursor: pointer;
+            background: #c0392b; 
+            color: white; 
+            border: none; 
+            padding: 8px 16px; 
+            border-radius: 6px; 
+            cursor: pointer;
+            font-weight: bold;
         }
         
-        .tabs { display: flex; gap: 5px; margin-bottom: 15px; border-bottom: 1px solid #444; }
-        .tab-btn { 
-            background: transparent; border: none; color: #888; 
-            padding: 10px 15px; cursor: pointer; font-size: 0.85rem; 
-            border-bottom: 2px solid transparent;
+        /* Tabs */
+        .tabs { 
+            display: flex; 
+            gap: 2px; 
+            margin-bottom: 20px; 
+            border-bottom: 2px solid #333;
+            overflow-x: auto;
+            scrollbar-width: none;
         }
-        .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; }
+        .tabs::-webkit-scrollbar { display: none; }
+        .tab-btn { 
+            flex: 1;
+            background: transparent; 
+            border: none; 
+            color: #888; 
+            padding: 14px 10px; 
+            cursor: pointer; 
+            font-size: 0.85rem; 
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            min-width: 80px;
+        }
+        .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; font-weight: bold; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         
-        .form-group { margin-bottom: 10px; }
-        .form-group label { display: block; color: #888; font-size: 0.8rem; margin-bottom: 4px; }
-        .form-group input, .form-group select {
-            width: 100%; padding: 8px; background: #000; border: 1px solid #444;
-            color: white; border-radius: 4px; font-size: 0.85rem;
-        }
-        .btn-consultar {
-            background: #27ae60; color: white; border: none; padding: 10px;
-            width: 100%; border-radius: 4px; font-weight: bold; cursor: pointer;
-            margin-top: 10px;
-        }
+        /* Stats */
         .stats-box {
-            background: #0a0a0a; padding: 15px; border-radius: 8px; margin: 10px 0;
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e); 
+            padding: 20px; 
+            border-radius: 12px; 
+            margin: 15px 0;
             border: 1px solid #333;
         }
         .stat-row {
-            display: flex; justify-content: space-between; padding: 8px 0;
-            border-bottom: 1px solid #222; font-size: 0.9rem;
+            display: flex; 
+            justify-content: space-between; 
+            padding: 12px 0;
+            border-bottom: 1px solid #222; 
+            font-size: 1rem;
+            align-items: center;
         }
         .stat-row:last-child { border-bottom: none; }
-        .stat-label { color: #888; }
-        .stat-value { color: #ffd700; font-weight: bold; }
-        .stat-value.negative { color: #c0392b; }
+        .stat-label { color: #aaa; }
+        .stat-value { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
+        .stat-value.negative { color: #e74c3c; }
         .stat-value.positive { color: #27ae60; }
         
-        table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin-top: 10px; }
-        th, td { padding: 6px; text-align: left; border-bottom: 1px solid #333; }
-        th { background: #222; color: #ffd700; }
+        /* Tablas */
+        .table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 0.85rem; 
+            min-width: 300px;
+        }
+        th, td { 
+            padding: 12px 8px; 
+            text-align: left; 
+            border-bottom: 1px solid #333; 
+            white-space: nowrap;
+        }
+        th { 
+            background: linear-gradient(135deg, #ffd700, #ffed4e); 
+            color: black; 
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
         tr:hover { background: rgba(255,215,0,0.05); }
         
+        /* Formularios */
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; color: #888; font-size: 0.9rem; margin-bottom: 6px; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 12px; background: #000; border: 1px solid #444;
+            color: white; border-radius: 8px; font-size: 1rem;
+            -webkit-appearance: none;
+        }
+        .btn-consultar {
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            border: none; 
+            padding: 14px;
+            width: 100%; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 1rem;
+        }
+        
+        /* Alertas */
         .alert-box {
-            background: rgba(243, 156, 18, 0.2); border: 1px solid #f39c12;
-            padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 0.85rem;
+            background: rgba(243, 156, 18, 0.15); 
+            border: 1px solid #f39c12;
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 15px 0; 
+            font-size: 0.9rem;
         }
         .alert-box strong { color: #f39c12; }
 
+        /* Resultados */
         .resultado-item {
             background: #0a0a0a;
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 5px;
-            border-left: 3px solid #27ae60;
+            padding: 15px;
+            margin: 8px 0;
+            border-radius: 10px;
+            border-left: 4px solid #27ae60;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         .resultado-item.pendiente {
             border-left-color: #666;
-            opacity: 0.6;
+            opacity: 0.7;
         }
         .resultado-numero {
             color: #ffd700;
             font-weight: bold;
-            font-size: 1.2rem;
+            font-size: 1.4rem;
         }
         .resultado-nombre {
-            color: #888;
-            font-size: 0.9rem;
+            color: #aaa;
+            font-size: 1rem;
         }
         
-        @media (max-width: 768px) {
-            .main-container { flex-direction: column; }
-            .right-panel { width: 100%; height: 42vh; border-left: none; border-top: 1px solid #333; }
-            .animals-grid { grid-template-columns: repeat(7, 1fr); }
+        /* Toast Notification */
+        .toast-notification {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 14px 24px;
+            border-radius: 30px;
+            font-size: 0.95rem;
+            z-index: 10000;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+            max-width: 90%;
+            text-align: center;
+            font-weight: bold;
+            animation: slideDown 0.3s ease;
         }
-        @media (max-width: 480px) {
-            .animals-grid { grid-template-columns: repeat(6, 1fr); }
-            .animal-card { min-height: 50px; padding: 4px 1px; }
-            .animal-card .num { font-size: 0.9rem; }
-            .animal-card .name { font-size: 0.55rem; }
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+        @keyframes slideUp {
+            from { transform: translateX(-50%) translateY(0); opacity: 1; }
+            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
         }
     </style>
 </head>
@@ -1853,16 +2143,20 @@ POS_HTML = '''
                 </div>
                 {% endfor %}
             </div>
-            <div class="ticket-display" id="ticket-display">Selecciona animales y horarios...</div>
+            <div class="ticket-display" id="ticket-display">
+                <div style="text-align:center; color:#666; padding:20px; font-style:italic;">
+                    Selecciona animales y horarios...
+                </div>
+            </div>
             <div class="action-btns">
-                <button class="btn-agregar" onclick="agregar()">AGREGAR</button>
-                <button class="btn-vender" onclick="vender()">WHATSAPP</button>
+                <button class="btn-agregar" onclick="agregar()">AGREGAR AL TICKET</button>
+                <button class="btn-vender" onclick="vender()">ENVIAR POR WHATSAPP</button>
                 <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
                 <button class="btn-caja" onclick="verCaja()">CAJA</button>
                 <button class="btn-pagar" onclick="pagar()">PAGAR</button>
                 <button class="btn-anular" onclick="anular()">ANULAR</button>
-                <button class="btn-borrar" onclick="borrarTodo()">BORRAR</button>
-                <button class="btn-salir" onclick="location.href='/logout'">SALIR</button>
+                <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
+                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
             </div>
         </div>
     </div>
@@ -1871,7 +2165,7 @@ POS_HTML = '''
         <div class="modal-content">
             <div class="modal-header">
                 <h3>ESTADO DE CAJA</h3>
-                <button class="btn-close" onclick="cerrarModal()">X</button>
+                <button class="btn-close" onclick="cerrarModal('modal-caja')">X</button>
             </div>
             
             <div class="tabs">
@@ -1904,8 +2198,8 @@ POS_HTML = '''
                     <div id="info-pendientes"></div>
                 </div>
                 
-                <div style="margin-top: 15px; font-size: 0.75rem; color: #666; text-align: center;">
-                    Reglas: Animales x35 | Lechuza(40) x70 | Especiales x2
+                <div style="margin-top: 20px; font-size: 0.8rem; color: #666; text-align: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+                    💰 Reglas: Animales x35 | Lechuza(40) x70 | Especiales x2
                 </div>
             </div>
 
@@ -1918,9 +2212,9 @@ POS_HTML = '''
                     <label>Hasta:</label>
                     <input type="date" id="hist-fecha-fin">
                 </div>
-                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR</button>
+                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR HISTORIAL</button>
                 
-                <div id="resultado-historico" style="display:none; margin-top: 15px;">
+                <div id="resultado-historico" style="display:none; margin-top: 20px;">
                     <div class="stats-box">
                         <div class="stat-row">
                             <span class="stat-label">Total Ventas:</span>
@@ -1936,11 +2230,12 @@ POS_HTML = '''
                         </div>
                     </div>
 
-                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin-top: 15px;">
                         <table>
                             <thead>
                                 <tr>
                                     <th>Fecha</th>
+                                    <th>Tickets</th>
                                     <th>Ventas</th>
                                     <th>Balance</th>
                                 </tr>
@@ -1961,22 +2256,22 @@ POS_HTML = '''
     <div class="modal" id="modal-resultados">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>RESULTADOS</h3>
-                <button class="btn-close" onclick="cerrarModalResultados()">X</button>
+                <h3>RESULTADOS DE SORTEOS</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-resultados')">X</button>
             </div>
             
-            <div class="form-group" style="margin-bottom: 15px;">
+            <div class="form-group" style="margin-bottom: 20px;">
                 <label>Seleccionar Fecha:</label>
                 <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
-                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 8px;">CONSULTAR</button>
+                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR FECHA</button>
             </div>
 
-            <div style="margin-bottom: 10px; text-align: center; color: #ffd700; font-size: 0.9rem;" id="resultados-fecha-titulo">
+            <div style="margin-bottom: 15px; text-align: center; color: #ffd700; font-size: 1.1rem; font-weight: bold;" id="resultados-fecha-titulo">
                 Hoy
             </div>
 
             <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
-                <p style="color: #888; text-align: center;">Seleccione una fecha...</p>
+                <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
             </div>
         </div>
     </div>
@@ -1985,6 +2280,23 @@ POS_HTML = '''
         let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
         let horasPeru = {{horarios_peru|tojson}};
         let horasVen = {{horarios_venezuela|tojson}};
+        
+        function showToast(message, type = 'info') {
+            const existing = document.querySelector('.toast-notification');
+            if (existing) existing.remove();
+            
+            const toast = document.createElement('div');
+            toast.className = 'toast-notification';
+            toast.style.background = type === 'error' ? '#c0392b' : type === 'success' ? '#27ae60' : '#2980b9';
+            toast.style.color = 'white';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideUp 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
         
         function updateReloj() {
             let now = new Date();
@@ -2019,6 +2331,7 @@ POS_HTML = '''
             } else {
                 seleccionados.push({k, nombre});
                 el.classList.add('active');
+                if (navigator.vibrate) navigator.vibrate(50);
             }
             updateTicket();
         }
@@ -2038,7 +2351,10 @@ POS_HTML = '''
         
         function toggleHora(hora, id) {
             let btn = document.getElementById('hora-' + id);
-            if (btn.classList.contains('expired')) return;
+            if (btn.classList.contains('expired')) {
+                showToast('Este sorteo ya cerró', 'error');
+                return;
+            }
             let idx = horariosSel.indexOf(hora);
             if (idx >= 0) {
                 horariosSel.splice(idx, 1);
@@ -2051,55 +2367,125 @@ POS_HTML = '''
         }
         
         function updateTicket() {
-            let txt = "=== TICKET ===\\n", total = 0;
+            const display = document.getElementById('ticket-display');
+            let total = 0;
+            let html = '<table class="ticket-table"><thead><tr><th>Hora</th><th>Apuesta</th><th>S/</th></tr></thead><tbody>';
+            
             for (let item of carrito) {
-                let nom = item.tipo === 'animal' ? item.nombre : item.seleccion;
-                txt += item.hora + " | " + item.seleccion + " " + nom + " | S/" + item.monto + "\\n";
+                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : item.seleccion;
+                let color = item.tipo === 'animal' ? '#ffd700' : '#3498db';
+                html += `<tr>
+                    <td style="color:#aaa; font-size:0.75rem">${item.hora}</td>
+                    <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
+                    <td style="text-align:right; font-weight:bold">${item.monto}</td>
+                </tr>`;
                 total += item.monto;
             }
+            
             if (horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
-                txt += "\\n--- SELECCION ---\\n";
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
                 for (let h of horariosSel) {
                     for (let a of seleccionados) {
-                        let indicador = a.k === "40" ? " [x70!]" : "";
-                        txt += "> " + h + " | " + a.k + " " + a.nombre + indicador + "\\n";
+                        let indicador = a.k === "40" ? " 🦉x70" : "";
+                        html += `<tr style="opacity:0.7; background:rgba(255,215,0,0.1)">
+                            <td style="color:#ffd700; font-size:0.75rem">${h}</td>
+                            <td style="color:#ffd700; font-size:0.8rem">${a.k} ${a.nombre}${indicador}</td>
+                            <td style="text-align:right; color:#ffd700; font-weight:bold">${monto}</td>
+                        </tr>`;
                     }
-                    for (let e of especiales) txt += "> " + h + " | " + e + " [x2]\\n";
+                    for (let e of especiales) {
+                        html += `<tr style="opacity:0.7; background:rgba(52,152,219,0.1)">
+                            <td style="color:#3498db; font-size:0.75rem">${h}</td>
+                            <td style="color:#3498db; font-size:0.8rem">${e}</td>
+                            <td style="text-align:right; color:#3498db; font-weight:bold">${monto}</td>
+                        </tr>`;
+                    }
                 }
             }
-            txt += "\\nTOTAL: S/" + total;
-            document.getElementById('ticket-display').textContent = txt;
+            
+            html += '</tbody></table>';
+            
+            if (carrito.length === 0 && (seleccionados.length === 0 && especiales.length === 0)) {
+                html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
+            } else if (carrito.length === 0) {
+                html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
+            }
+            
+            if (total > 0) {
+                html += `<div class="ticket-total">TOTAL: S/${total}</div>`;
+            }
+            
+            display.innerHTML = html;
         }
         
         function agregar() {
             if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
-                alert('Selecciona horario y animal'); return;
+                showToast('Selecciona horario y animal/especial', 'error'); 
+                return;
             }
             let monto = parseFloat(document.getElementById('monto').value) || 5;
+            let count = 0;
             for (let h of horariosSel) {
-                for (let a of seleccionados) carrito.push({hora: h, seleccion: a.k, nombre: a.nombre, monto: monto, tipo: 'animal'});
-                for (let e of especiales) carrito.push({hora: h, seleccion: e, nombre: e, monto: monto, tipo: 'especial'});
+                for (let a of seleccionados) {
+                    carrito.push({hora: h, seleccion: a.k, nombre: a.nombre, monto: monto, tipo: 'animal'});
+                    count++;
+                }
+                for (let e of especiales) {
+                    carrito.push({hora: h, seleccion: e, nombre: e, monto: monto, tipo: 'especial'});
+                    count++;
+                }
             }
             seleccionados = []; especiales = []; horariosSel = [];
-            document.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.animal-card.active, .btn-esp.active, .btn-hora.active').forEach(el => el.classList.remove('active'));
             updateTicket();
+            showToast(`${count} jugada(s) agregada(s)`, 'success');
         }
         
-        function vender() {
-            if (carrito.length === 0) { alert('Carrito vacio'); return; }
-            let jugadas = carrito.map(c => ({hora: c.hora, seleccion: c.seleccion, monto: c.monto, tipo: c.tipo}));
-            fetch('/api/procesar-venta', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({jugadas: jugadas})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) alert('Error: ' + d.error);
-                else { window.open(d.url_whatsapp, '_blank'); carrito = []; updateTicket(); }
-            })
-            .catch(e => alert('Error de conexion: ' + e));
+        async function vender() {
+            if (carrito.length === 0) { 
+                showToast('Carrito vacío', 'error'); 
+                return; 
+            }
+            
+            const btn = document.querySelector('.btn-vender');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Procesando...';
+            btn.disabled = true;
+            
+            try {
+                let jugadas = carrito.map(c => ({
+                    hora: c.hora, 
+                    seleccion: c.seleccion, 
+                    monto: c.monto, 
+                    tipo: c.tipo
+                }));
+                
+                const response = await fetch('/api/procesar-venta', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({jugadas: jugadas})
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                        window.location.href = data.url_whatsapp;
+                    } else {
+                        window.open(data.url_whatsapp, '_blank');
+                    }
+                    carrito = []; 
+                    updateTicket();
+                    showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
+                }
+            } catch (e) {
+                showToast('Error de conexión. Intenta de nuevo.', 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
         }
 
         function verResultados() {
@@ -2114,7 +2500,7 @@ POS_HTML = '''
             if (!fecha) return;
             
             let container = document.getElementById('lista-resultados');
-            container.innerHTML = '<p style="color: #888; text-align: center;">Cargando...</p>';
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
             
             let fechaObj = new Date(fecha + 'T00:00:00');
             let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
@@ -2128,7 +2514,7 @@ POS_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
                     return;
                 }
                 
@@ -2146,42 +2532,45 @@ POS_HTML = '''
                             `;
                         } else {
                             contenido = `
-                                <span style="color: #666;">Pendiente</span>
-                                <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
+                                <span style="color: #666; font-size:1.1rem">Pendiente</span>
+                                <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
                             `;
                         }
                         
                         html += `
                             <div class="resultado-item ${clase}">
                                 <div style="display: flex; flex-direction: column;">
-                                    <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
-                                    <small style="color: #666; font-size: 0.7rem;">Venezuela: ${horasVen[horasPeru.indexOf(hora)]}</small>
+                                    <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
+                                    <small style="color: #666; font-size: 0.75rem;">Venezuela: ${horasVen[horasPeru.indexOf(hora)]}</small>
                                 </div>
-                                <div style="text-align: right;">
+                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
                                     ${contenido}
                                 </div>
                             </div>
                         `;
                     }
                 } else {
-                    html = '<p style="color: #888; text-align: center;">No hay resultados disponibles para esta fecha</p>';
+                    html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles para esta fecha</p>';
                 }
                 container.innerHTML = html;
             })
             .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
             });
         }
 
-        function cerrarModalResultados() {
-            document.getElementById('modal-resultados').style.display = 'none';
+        function cerrarModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
         }
         
         function verCaja() {
             fetch('/api/caja')
             .then(r => r.json())
             .then(d => {
-                if (d.error) { alert(d.error); return; }
+                if (d.error) { 
+                    showToast(d.error, 'error'); 
+                    return; 
+                }
                 document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
                 document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
                 document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
@@ -2194,14 +2583,14 @@ POS_HTML = '''
                 let infoDiv = document.getElementById('info-pendientes');
                 if (d.tickets_pendientes > 0) {
                     alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar. Pasa a pagar!`;
+                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.<br>¡Pasa a pagar!`;
                 } else {
                     alertaDiv.style.display = 'none';
                 }
                 
                 document.getElementById('modal-caja').style.display = 'block';
             })
-            .catch(e => alert('Error: ' + e));
+            .catch(e => showToast('Error de conexión', 'error'));
             
             let hoy = new Date().toISOString().split('T')[0];
             document.getElementById('hist-fecha-inicio').value = hoy;
@@ -2220,7 +2609,7 @@ POS_HTML = '''
             let fin = document.getElementById('hist-fecha-fin').value;
             
             if (!inicio || !fin) {
-                alert('Seleccione ambas fechas');
+                showToast('Seleccione ambas fechas', 'error');
                 return;
             }
             
@@ -2232,7 +2621,7 @@ POS_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    alert('Error: ' + d.error);
+                    showToast(d.error, 'error');
                     return;
                 }
                 
@@ -2250,8 +2639,9 @@ POS_HTML = '''
                     let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
                     html += `<tr>
                         <td>${dia.fecha}</td>
+                        <td>${dia.tickets}</td>
                         <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td style="color:${color}">S/${dia.balance.toFixed(0)}</td>
+                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
                     </tr>`;
                 });
                 tbody.innerHTML = html;
@@ -2265,27 +2655,25 @@ POS_HTML = '''
                     alertaDiv.style.display = 'none';
                 }
             })
-            .catch(e => alert('Error de conexion: ' + e));
+            .catch(e => showToast('Error de conexión', 'error'));
         }
         
-        function cerrarModal() { 
-            document.getElementById('modal-caja').style.display = 'none';
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelector('.tab-btn').classList.add('active');
-            document.getElementById('tab-hoy').classList.add('active');
-        }
-        
-        function pagar() {
-            let serial = prompt('Ingrese SERIAL:'); if (!serial) return;
-            fetch('/api/verificar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) { alert(d.error); return; }
+        async function pagar() {
+            let serial = prompt('Ingrese SERIAL del ticket:'); 
+            if (!serial) return;
+            
+            try {
+                const response = await fetch('/api/verificar-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({serial: serial})
+                });
+                const d = await response.json();
+                
+                if (d.error) { 
+                    showToast(d.error, 'error'); 
+                    return; 
+                }
                 
                 let msg = "=== RESULTADO ===\\n\\n";
                 let total = d.total_ganado;
@@ -2299,47 +2687,78 @@ POS_HTML = '''
                 msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
                 
                 if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
-                    fetch('/api/pagar-ticket', {
+                    await fetch('/api/pagar-ticket', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ticket_id: d.ticket_id})
-                    }).then(() => alert('✅ Ticket pagado correctamente'));
-                } else {
-                    alert(msg);
+                    });
+                    showToast('✅ Ticket pagado correctamente', 'success');
+                } else if (total === 0) {
+                    showToast('Ticket no ganador', 'info');
                 }
-            });
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
         }
         
-        function anular() {
-            let serial = prompt('SERIAL a anular:'); if (!serial) return;
+        async function anular() {
+            let serial = prompt('SERIAL a anular:'); 
+            if (!serial) return;
             if (!confirm('¿ANULAR ' + serial + '?')) return;
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => { 
-                if (d.error) alert('Error: ' + d.error); 
-                else alert('✅ ' + d.mensaje); 
-            });
+            
+            try {
+                const response = await fetch('/api/anular-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({serial: serial})
+                });
+                const d = await response.json();
+                
+                if (d.error) {
+                    showToast(d.error, 'error');
+                } else {
+                    showToast('✅ ' + d.mensaje, 'success');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
         }
         
         function borrarTodo() {
+            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0) {
+                if (!confirm('¿Borrar todo?')) return;
+            }
             seleccionados = []; especiales = []; horariosSel = []; carrito = [];
             document.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
             updateTicket();
+            showToast('Ticket limpiado', 'info');
         }
         
-        document.getElementById('modal-caja').addEventListener('click', function(e) {
-            if (e.target === this) cerrarModal();
-        });
-
-        document.getElementById('modal-resultados').addEventListener('click', function(e) {
-            if (e.target === this) cerrarModalResultados();
+        // Cerrar modales al hacer click fuera
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) this.style.display = 'none';
+            });
         });
         
-        document.addEventListener('dblclick', function(e) { e.preventDefault(); }, { passive: false });
+        // Prevenir zoom en inputs (iOS)
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('input, select, textarea').forEach(el => {
+                el.addEventListener('focus', function() {
+                    document.body.style.zoom = '100%';
+                });
+            });
+            
+            // Prevenir doble tap zoom
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', function (event) {
+                const now = (new Date()).getTime();
+                if (now - lastTouchEnd <= 300) {
+                    event.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, false);
+        });
     </script>
 </body>
 </html>
@@ -2350,111 +2769,261 @@ ADMIN_HTML = '''
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
     <title>Panel Admin - ZOOLO CASINO</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #0a0a0a; color: white; font-family: 'Segoe UI', sans-serif; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { 
+            background: #0a0a0a; 
+            color: white; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.5;
+        }
         .navbar {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 10px 15px; display: flex; justify-content: space-between; align-items: center;
-            border-bottom: 2px solid #ffd700; flex-wrap: wrap; gap: 10px;
+            padding: 12px 10px;
+            border-bottom: 2px solid #ffd700;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
-        .navbar h2 { color: #ffd700; font-size: 1.2rem; }
-        .nav-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
+        .navbar-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .navbar h2 { color: #ffd700; font-size: 1.1rem; }
+        .logout-btn { 
+            background: #c0392b; 
+            color: white; 
+            border: none; 
+            padding: 8px 16px; 
+            border-radius: 6px; 
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .nav-tabs { 
+            display: flex; 
+            gap: 5px; 
+            overflow-x: auto; 
+            scrollbar-width: none;
+            padding-bottom: 5px;
+        }
+        .nav-tabs::-webkit-scrollbar { display: none; }
         .nav-tabs button {
-            padding: 8px 12px; background: #333; border: none; color: white;
-            cursor: pointer; border-radius: 4px; font-size: 0.8rem;
+            flex: 0 0 auto;
+            padding: 10px 15px; 
+            background: #333; 
+            border: none; 
+            color: white;
+            cursor: pointer; 
+            border-radius: 6px; 
+            font-size: 0.8rem;
+            white-space: nowrap;
+            transition: all 0.2s;
         }
-        .nav-tabs button.active { background: #ffd700; color: black; font-weight: bold; }
-        .logout-btn { background: #c0392b !important; }
-        .content { padding: 15px; max-width: 1200px; margin: 0 auto; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .nav-tabs button.active { 
+            background: linear-gradient(135deg, #ffd700, #ffed4e); 
+            color: black; 
+            font-weight: bold; 
+        }
+        .content { 
+            padding: 15px; 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding-bottom: 30px;
+        }
+        
+        .info-pago {
+            background: linear-gradient(135deg, rgba(255,215,0,0.1), rgba(255,215,0,0.05)); 
+            padding: 15px; 
+            border-radius: 10px; 
+            margin: 15px 0; 
+            font-size: 0.85rem; 
+            text-align: center;
+            border: 1px solid rgba(255,215,0,0.3);
+            color: #ffd700;
+        }
+        
+        /* Stats Grid */
         .stats-grid {
-            display: grid; grid-template-columns: repeat(2, 1fr);
-            gap: 10px; margin-bottom: 20px;
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px; 
+            margin-bottom: 20px;
         }
-        .stats-grid.agencias {
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        @media (min-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(4, 1fr); }
         }
         .stat-card {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 15px; border-radius: 8px; border: 1px solid #ffd700; text-align: center;
+            padding: 20px 15px; 
+            border-radius: 12px; 
+            border: 1px solid #ffd700; 
+            text-align: center;
+            transition: transform 0.2s;
         }
-        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 5px; }
-        .stat-card p { color: #ffd700; font-size: 1.3rem; font-weight: bold; }
-        .form-box { background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .form-box h3 { color: #ffd700; margin-bottom: 10px; font-size: 1rem; }
-        .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+        .stat-card:active { transform: scale(0.98); }
+        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-card p { color: #ffd700; font-size: 1.4rem; font-weight: bold; }
+        
+        /* Formularios */
+        .form-box { 
+            background: #1a1a2e; 
+            padding: 20px; 
+            border-radius: 12px; 
+            margin-bottom: 20px;
+            border: 1px solid #333;
+        }
+        .form-box h3 { 
+            color: #ffd700; 
+            margin-bottom: 15px; 
+            font-size: 1.1rem; 
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        .form-row { 
+            display: flex; 
+            gap: 10px; 
+            margin-bottom: 12px; 
+            flex-wrap: wrap; 
+            align-items: center; 
+        }
         .form-row input, .form-row select {
-            flex: 1; min-width: 120px; padding: 8px; background: #000;
-            border: 1px solid #444; color: white; border-radius: 4px; font-size: 0.85rem;
+            flex: 1; 
+            min-width: 120px; 
+            padding: 12px; 
+            background: #000;
+            border: 1px solid #444; 
+            color: white; 
+            border-radius: 8px; 
+            font-size: 1rem;
+            -webkit-appearance: none;
         }
         .btn-submit {
-            background: #27ae60; color: white; border: none;
-            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            border: none;
+            padding: 12px 24px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            font-size: 0.95rem;
+            flex: 1;
+            min-width: 120px;
         }
         .btn-danger {
-            background: #c0392b; color: white; border: none;
-            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+            background: linear-gradient(135deg, #c0392b, #e74c3c); 
+            color: white; 
+            border: none;
+            padding: 12px 24px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            font-size: 0.95rem;
         }
         .btn-secondary {
-            background: #2980b9; color: white; border: none;
-            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-right: 5px;
+            background: #444; 
+            color: white; 
+            border: none;
+            padding: 10px 16px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 0.85rem;
+            flex: 1;
         }
         .btn-csv {
-            background: #f39c12; color: black; border: none;
-            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+            background: linear-gradient(135deg, #f39c12, #e67e22); 
+            color: black; 
+            border: none;
+            padding: 12px 24px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            font-size: 0.95rem;
         }
-        table { width: 100%; border-collapse: collapse; background: #1a1a2e; border-radius: 8px; overflow: hidden; font-size: 0.8rem; margin-top: 10px; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
-        th { background: #ffd700; color: black; }
-        tr:hover { background: rgba(255,215,0,0.1); }
+        
+        /* Tablas */
+        .table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #1a1a2e;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 0.85rem; 
+        }
+        th, td { 
+            padding: 12px 10px; 
+            text-align: left; 
+            border-bottom: 1px solid #333; 
+            white-space: nowrap;
+        }
+        th { 
+            background: linear-gradient(135deg, #ffd700, #ffed4e); 
+            color: black; 
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover { background: rgba(255,215,0,0.05); }
+        
+        /* Riesgo */
         .riesgo-item {
-            background: #1a1a2e; padding: 10px; margin-bottom: 8px;
-            border-radius: 4px; border-left: 3px solid #c0392b; font-size: 0.85rem;
+            background: #1a1a2e; 
+            padding: 15px; 
+            margin-bottom: 10px;
+            border-radius: 8px; 
+            border-left: 4px solid #c0392b;
+            font-size: 0.9rem;
         }
         .riesgo-item.lechuza {
             border-left-color: #ffd700;
-            background: rgba(255, 215, 0, 0.1);
+            background: linear-gradient(135deg, rgba(255,215,0,0.1), #1a1a2e);
         }
-        .riesgo-item b { color: #ffd700; }
-        .mensaje {
-            padding: 10px; margin: 10px 0; border-radius: 4px; display: none;
-            font-size: 0.85rem;
-        }
-        .mensaje.success { background: rgba(39,174,96,0.3); border: 1px solid #27ae60; display: block; }
-        .mensaje.error { background: rgba(192,57,43,0.3); border: 1px solid #c0392b; display: block; }
-        .info-pago {
-            background: #0a0a0a; padding: 10px; border-radius: 4px; margin: 10px 0;
-            font-size: 0.8rem; color: #888; text-align: center;
-            border: 1px solid #333;
-        }
+        .riesgo-item b { color: #ffd700; font-size: 1.1rem; }
+        
         .sorteo-actual-box {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 15px; border-radius: 8px; margin-bottom: 15px;
-            border: 2px solid #2980b9; text-align: center;
+            padding: 20px; 
+            border-radius: 12px; 
+            margin-bottom: 20px;
+            border: 2px solid #2980b9; 
+            text-align: center;
         }
-        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 5px; }
-        .sorteo-actual-box p { color: #ffd700; font-size: 1.5rem; font-weight: bold; }
+        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 8px; font-size: 0.9rem; }
+        .sorteo-actual-box p { color: #ffd700; font-size: 1.8rem; font-weight: bold; }
+        
+        /* Resultados */
         .resultado-item {
-            background: #0a0a0a; padding: 10px; margin: 5px 0;
-            border-radius: 5px; border-left: 3px solid #27ae60;
-            display: flex; justify-content: space-between; align-items: center;
+            background: #0a0a0a;
+            padding: 15px;
+            margin: 8px 0;
+            border-radius: 10px;
+            border-left: 4px solid #27ae60;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .resultado-item.pendiente {
-            border-left-color: #666; opacity: 0.6;
+            border-left-color: #666;
+            opacity: 0.7;
         }
-        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
+        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
         .resultado-nombre { color: #888; font-size: 0.9rem; }
         
-        /* Estilos para ranking */
+        /* Ranking */
         .ranking-item {
-            background: #1a1a2e;
-            padding: 12px;
-            margin-bottom: 8px;
-            border-radius: 8px;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 10px;
             border-left: 4px solid #ffd700;
             display: flex;
             justify-content: space-between;
@@ -2466,47 +3035,66 @@ ADMIN_HTML = '''
             color: #ffd700;
             min-width: 40px;
         }
-        .ranking-info {
-            flex: 1;
-            padding: 0 10px;
+        .ranking-info { flex: 1; padding: 0 10px; }
+        .ranking-nombre { font-weight: bold; color: white; font-size: 1.1rem; }
+        .ranking-detalle { font-size: 0.85rem; color: #888; margin-top: 3px; }
+        .ranking-monto { text-align: right; }
+        .ranking-ventas { font-size: 1.3rem; font-weight: bold; color: #27ae60; }
+        .ranking-balance { font-size: 0.9rem; color: #888; }
+        
+        /* Mensajes */
+        .mensaje {
+            padding: 15px; 
+            margin: 15px 0; 
+            border-radius: 8px; 
+            display: none;
+            font-size: 0.95rem;
+            text-align: center;
         }
-        .ranking-nombre {
-            font-weight: bold;
-            color: white;
-        }
-        .ranking-detalle {
-            font-size: 0.8rem;
-            color: #888;
-        }
-        .ranking-monto {
-            text-align: right;
-        }
-        .ranking-ventas {
-            font-size: 1.2rem;
-            font-weight: bold;
+        .mensaje.success { 
+            background: rgba(39,174,96,0.2); 
+            border: 1px solid #27ae60; 
+            display: block; 
             color: #27ae60;
         }
-        .ranking-balance {
-            font-size: 0.9rem;
-            color: #888;
+        .mensaje.error { 
+            background: rgba(192,57,43,0.2); 
+            border: 1px solid #c0392b; 
+            display: block; 
+            color: #c0392b;
         }
-        @media (min-width: 768px) {
-            .stats-grid { grid-template-columns: repeat(4, 1fr); }
+        
+        /* Tabs content */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .btn-group button {
+            flex: 1;
+            min-width: 80px;
         }
     </style>
 </head>
 <body>
     <div class="navbar">
-        <h2>PANEL ADMIN</h2>
+        <div class="navbar-top">
+            <h2>👑 PANEL ADMIN</h2>
+            <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
+        </div>
         <div class="nav-tabs">
             <button onclick="showTab('dashboard')" class="active">Dashboard</button>
             <button onclick="showTab('historico')">Histórico</button>
             <button onclick="showTab('riesgo')">Riesgo</button>
-            <button onclick="showTab('reporte')">Reporte Agencias</button>
+            <button onclick="showTab('reporte')">Agencias</button>
             <button onclick="showTab('resultados')">Resultados</button>
-            <button onclick="showTab('anular')">Anular Ticket</button>
-            <button onclick="showTab('agencias')">Agencias</button>
-            <button onclick="location.href='/logout'" class="logout-btn">Salir</button>
+            <button onclick="showTab('anular')">Anular</button>
+            <button onclick="showTab('agencias')">Crear</button>
         </div>
     </div>
     <div class="content">
@@ -2517,7 +3105,7 @@ ADMIN_HTML = '''
         </div>
         
         <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px;">RESUMEN DE HOY</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">📊 RESUMEN DE HOY</h3>
             <div class="stats-grid">
                 <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
                 <div class="stat-card"><h3>PREMIOS</h3><p id="stat-premios">S/0</p></div>
@@ -2528,29 +3116,29 @@ ADMIN_HTML = '''
 
         <div id="historico" class="tab-content">
             <div class="form-box">
-                <h3>CONSULTA HISTÓRICA POR RANGO</h3>
+                <h3>📅 CONSULTA HISTÓRICA</h3>
                 <div class="form-row">
-                    <input type="date" id="hist-fecha-inicio" value="">
-                    <input type="date" id="hist-fecha-fin" value="">
+                    <input type="date" id="hist-fecha-inicio">
+                    <input type="date" id="hist-fecha-fin">
                     <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
                 </div>
-                <div class="form-row" style="margin-top: 10px;">
+                <div class="btn-group">
                     <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">Últimos 7 días</button>
-                    <button class="btn-secondary" onclick="setRango('mes')">Este mes</button>
+                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
+                    <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
                 </div>
                 
                 <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 15px;">
+                    <div class="stats-grid" style="margin-top: 20px;">
                         <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
                         <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL TICKETS</h3><p id="hist-total-tickets">0</p></div>
+                        <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
                         <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
                     </div>
 
-                    <h3 style="color: #ffd700; margin: 20px 0 10px;">DETALLE POR DÍA</h3>
-                    <div style="overflow-x: auto;">
+                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
+                    <div class="table-container">
                         <table>
                             <thead>
                                 <tr>
@@ -2558,7 +3146,6 @@ ADMIN_HTML = '''
                                     <th>Tickets</th>
                                     <th>Ventas</th>
                                     <th>Premios</th>
-                                    <th>Comisiones</th>
                                     <th>Balance</th>
                                 </tr>
                             </thead>
@@ -2566,10 +3153,8 @@ ADMIN_HTML = '''
                         </table>
                     </div>
 
-                    <h3 style="color: #ffd700; margin: 20px 0 10px;">TOP ANIMALES DEL PERÍODO</h3>
-                    <div id="top-animales-hist" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
-                        <p style="color: #888;">Cargando...</p>
-                    </div>
+                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
+                    <div id="top-animales-hist"></div>
                 </div>
             </div>
         </div>
@@ -2578,51 +3163,45 @@ ADMIN_HTML = '''
             <div class="sorteo-actual-box">
                 <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
                 <p id="sorteo-objetivo">Cargando...</p>
-                <small style="color: #888; font-size: 0.8rem;">Riesgo calculado solo para este horario específico</small>
+                <small style="color: #888; font-size: 0.8rem;">Riesgo calculado para este horario específico</small>
             </div>
             
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">
-                APUESTAS PARA ESTE SORTEO: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">
+                💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
             </h3>
-            <div id="lista-riesgo"><p style="color: #888; font-size: 0.85rem;">Cargando...</p></div>
+            <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
             
-            <div style="margin-top: 20px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
+            <div style="margin-top: 20px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
                 <small style="color: #ff6b6b;">
-                    ⚠️ Este riesgo se resetea automáticamente cuando pasa el sorteo y comienza el siguiente horario.
+                    ⚠️ El riesgo se resetea automáticamente cuando cambia el sorteo.
                 </small>
             </div>
         </div>
 
-        <!-- NUEVA PESTAÑA: Reporte de Agencias con Histórico -->
         <div id="reporte" class="tab-content">
             <div class="form-box">
-                <h3>REPORTE POR AGENCIAS - HISTÓRICO</h3>
+                <h3>🏢 REPORTE POR AGENCIAS</h3>
                 <div class="form-row">
-                    <input type="date" id="reporte-fecha-inicio" value="">
-                    <input type="date" id="reporte-fecha-fin" value="">
-                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR REPORTE</button>
+                    <input type="date" id="reporte-fecha-inicio">
+                    <input type="date" id="reporte-fecha-fin">
+                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR</button>
                 </div>
-                <div class="form-row" style="margin-top: 10px;">
+                <div class="btn-group">
                     <button class="btn-secondary" onclick="setRangoReporte('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRangoReporte('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('semana')">Últimos 7 días</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('mes')">Este mes</button>
-                    <button class="btn-csv" onclick="exportarCSV()">📊 Exportar CSV</button>
+                    <button class="btn-secondary" onclick="setRangoReporte('semana')">7 días</button>
+                    <button class="btn-csv" onclick="exportarCSV()">📊 CSV</button>
                 </div>
                 
-                <div id="reporte-agencias-resumen" style="display:none; margin-top: 20px;">
-                    <h4 style="color: #ffd700; margin-bottom: 10px;">TODAS LAS AGENCIAS</h4>
-                    <div class="stats-grid agencias" id="stats-agencias-totales">
-                        <!-- Se llena dinámicamente -->
-                    </div>
+                <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
+                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES</h4>
+                    <div class="stats-grid" id="stats-agencias-totales"></div>
 
-                    <h4 style="color: #ffd700; margin: 20px 0 10px;">🏆 RANKING DE AGENCIAS</h4>
-                    <div id="ranking-agencias">
-                        <!-- Se llena dinámicamente -->
-                    </div>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🏆 TOP 5 AGENCIAS</h4>
+                    <div id="ranking-agencias"></div>
 
-                    <h4 style="color: #ffd700; margin: 20px 0 10px;">DETALLE POR AGENCIA</h4>
-                    <div style="overflow-x: auto;">
+                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE COMPLETO</h4>
+                    <div class="table-container">
                         <table id="tabla-detalle-agencias">
                             <thead>
                                 <tr>
@@ -2631,9 +3210,8 @@ ADMIN_HTML = '''
                                     <th>Tickets</th>
                                     <th>Ventas</th>
                                     <th>Premios</th>
-                                    <th>Comisión</th>
                                     <th>Balance</th>
-                                    <th>% Part.</th>
+                                    <th>%</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -2645,30 +3223,30 @@ ADMIN_HTML = '''
 
         <div id="resultados" class="tab-content">
             <div class="form-box">
-                <h3>CONSULTAR RESULTADOS HISTÓRICOS</h3>
+                <h3>🔍 CONSULTAR RESULTADOS</h3>
                 <div class="form-row">
                     <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
                     <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
-                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">VER HOY</button>
+                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">HOY</button>
                 </div>
-                <div id="admin-resultados-titulo" style="margin-top: 10px; color: #ffd700; font-weight: bold; text-align: center;"></div>
+                <div id="admin-resultados-titulo" style="margin-top: 15px; color: #ffd700; font-weight: bold; text-align: center; font-size: 1.1rem;"></div>
             </div>
 
             <div class="form-box">
-                <h3>LISTA DE RESULTADOS</h3>
-                <div id="lista-resultados-admin" style="max-height: 300px; overflow-y: auto;">
-                    <p style="color: #888;">Seleccione una fecha...</p>
+                <h3>📋 RESULTADOS CARGADOS</h3>
+                <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
+                    <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
                 </div>
             </div>
 
             <div class="form-box">
-                <h3>CARGAR/EDITAR RESULTADO</h3>
+                <h3>✏️ CARGAR/EDITAR RESULTADO</h3>
                 <div class="form-row">
-                    <select id="res-hora">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
-                    <select id="res-animal">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
+                    <select id="res-hora" style="flex: 1.5;">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
+                    <select id="res-animal" style="flex: 2;">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
                     <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
                 </div>
-                <div style="margin-top: 10px; font-size: 0.8rem; color: #888;">
+                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;">
                     ℹ️ Si el resultado ya existe, se actualizará automáticamente.
                 </div>
             </div>
@@ -2676,35 +3254,37 @@ ADMIN_HTML = '''
 
         <div id="anular" class="tab-content">
             <div class="form-box">
-                <h3>ANULAR TICKET</h3>
+                <h3>❌ ANULAR TICKET</h3>
                 <div class="form-row">
                     <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR TICKET</button>
+                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR</button>
                 </div>
-                <div style="margin-top: 15px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
+                <div style="margin-top: 15px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
                     <small style="color: #ff6b6b;">
-                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado aún.
+                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado.
                     </small>
                 </div>
-                <div id="resultado-anular" style="margin-top: 10px; font-size: 0.9rem;"></div>
+                <div id="resultado-anular" style="margin-top: 15px; font-size: 1rem; text-align: center;"></div>
             </div>
         </div>
 
         <div id="agencias" class="tab-content">
             <div class="form-box">
-                <h3>CREAR AGENCIA</h3>
+                <h3>➕ CREAR NUEVA AGENCIA</h3>
                 <div class="form-row">
                     <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contrasena">
-                    <input type="text" id="new-nombre" placeholder="Nombre">
-                    <button class="btn-submit" onclick="crearAgencia()">CREAR</button>
+                    <input type="password" id="new-password" placeholder="Contraseña">
+                </div>
+                <div class="form-row">
+                    <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
+                    <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
                 </div>
             </div>
-            <h3 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">AGENCIAS</h3>
-            <div style="overflow-x: auto;">
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">🏢 AGENCIAS EXISTENTES</h3>
+            <div class="table-container">
                 <table>
-                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comision</th></tr></thead>
-                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888;">Cargando...</td></tr></tbody>
+                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comisión</th></tr></thead>
+                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -2724,7 +3304,6 @@ ADMIN_HTML = '''
             
             if (tab === 'riesgo') cargarRiesgo();
             if (tab === 'reporte') {
-                // Inicializar fechas de reporte
                 let hoy = new Date().toISOString().split('T')[0];
                 document.getElementById('reporte-fecha-inicio').value = hoy;
                 document.getElementById('reporte-fecha-fin').value = hoy;
@@ -2743,7 +3322,7 @@ ADMIN_HTML = '''
             let div = document.getElementById('mensaje');
             div.textContent = msg; 
             div.className = 'mensaje ' + tipo;
-            setTimeout(() => div.className = 'mensaje', 3000);
+            setTimeout(() => div.className = 'mensaje', 4000);
         }
 
         function setRango(tipo) {
@@ -2841,10 +3420,9 @@ ADMIN_HTML = '''
                     html += `<tr>
                         <td>${dia.fecha}</td>
                         <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(2)}</td>
-                        <td>S/${dia.premios.toFixed(2)}</td>
-                        <td>S/${dia.comisiones.toFixed(2)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(2)}</td>
+                        <td>S/${dia.ventas.toFixed(0)}</td>
+                        <td>S/${dia.premios.toFixed(0)}</td>
+                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
                     </tr>`;
                 });
                 tbody.innerHTML = html;
@@ -2854,7 +3432,6 @@ ADMIN_HTML = '''
             .catch(e => showMensaje('Error de conexión', 'error'));
         }
 
-        // NUEVA FUNCIÓN: Consultar reporte de agencias por rango
         function consultarReporteAgencias() {
             let inicio = document.getElementById('reporte-fecha-inicio').value;
             let fin = document.getElementById('reporte-fecha-fin').value;
@@ -2864,7 +3441,7 @@ ADMIN_HTML = '''
                 return;
             }
             
-            showMensaje('Consultando reporte de agencias...', 'success');
+            showMensaje('Consultando reporte...', 'success');
             
             fetch('/admin/reporte-agencias-rango', {
                 method: 'POST',
@@ -2881,29 +3458,27 @@ ADMIN_HTML = '''
                 reporteAgenciasData = d;
                 document.getElementById('reporte-agencias-resumen').style.display = 'block';
                 
-                // Mostrar totales generales
                 let totales = d.totales;
                 let htmlTotales = `
                     <div class="stat-card">
-                        <h3>TOTAL AGENCIAS</h3>
+                        <h3>AGENCIAS</h3>
                         <p>${d.agencias.length}</p>
                     </div>
                     <div class="stat-card">
-                        <h3>TOTAL TICKETS</h3>
+                        <h3>TICKETS</h3>
                         <p>${totales.tickets}</p>
                     </div>
                     <div class="stat-card">
-                        <h3>VENTAS TOTALES</h3>
+                        <h3>VENTAS</h3>
                         <p>S/${totales.ventas.toFixed(0)}</p>
                     </div>
                     <div class="stat-card">
-                        <h3>BALANCE GLOBAL</h3>
+                        <h3>BALANCE</h3>
                         <p style="color: ${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</p>
                     </div>
                 `;
                 document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
                 
-                // Mostrar ranking
                 let htmlRanking = '';
                 d.agencias.slice(0, 5).forEach((ag, idx) => {
                     let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
@@ -2913,18 +3488,17 @@ ADMIN_HTML = '''
                             <div class="ranking-pos">${medalla}</div>
                             <div class="ranking-info">
                                 <div class="ranking-nombre">${ag.nombre}</div>
-                                <div class="ranking-detalle">${ag.tickets} tickets | ${ag.porcentaje_ventas}% del total</div>
+                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total</div>
                             </div>
                             <div class="ranking-monto">
                                 <div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div>
-                                <div class="ranking-balance" style="color: ${colorBalance}">Balance: S/${ag.balance.toFixed(0)}</div>
+                                <div class="ranking-balance" style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div>
                             </div>
                         </div>
                     `;
                 });
                 document.getElementById('ranking-agencias').innerHTML = htmlRanking;
                 
-                // Mostrar tabla detalle
                 let tbody = document.querySelector('#tabla-detalle-agencias tbody');
                 let htmlTabla = '';
                 d.agencias.forEach((ag, idx) => {
@@ -2933,22 +3507,19 @@ ADMIN_HTML = '''
                         <td>${idx + 1}</td>
                         <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
                         <td>${ag.tickets}</td>
-                        <td>S/${ag.ventas.toFixed(2)}</td>
-                        <td>S/${ag.premios.toFixed(2)}</td>
-                        <td>S/${ag.comision.toFixed(2)}</td>
-                        <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(2)}</td>
+                        <td>S/${ag.ventas.toFixed(0)}</td>
+                        <td>S/${ag.premios.toFixed(0)}</td>
+                        <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td>
                         <td>${ag.porcentaje_ventas}%</td>
                     </tr>`;
                 });
                 
-                // Fila de totales
                 htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
                     <td colspan="2">TOTALES</td>
                     <td>${totales.tickets}</td>
-                    <td>S/${totales.ventas.toFixed(2)}</td>
-                    <td>S/${totales.premios.toFixed(2)}</td>
-                    <td>S/${totales.comision.toFixed(2)}</td>
-                    <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(2)}</td>
+                    <td>S/${totales.ventas.toFixed(0)}</td>
+                    <td>S/${totales.premios.toFixed(0)}</td>
+                    <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
                     <td>100%</td>
                 </tr>`;
                 
@@ -2960,7 +3531,6 @@ ADMIN_HTML = '''
             });
         }
 
-        // NUEVA FUNCIÓN: Exportar a CSV
         function exportarCSV() {
             if (!reporteAgenciasData) {
                 showMensaje('Primero genere un reporte', 'error');
@@ -2987,10 +3557,7 @@ ADMIN_HTML = '''
                 document.body.removeChild(a);
                 showMensaje('CSV descargado correctamente', 'success');
             })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error al exportar', 'error');
-            });
+            .catch(e => showMensaje('Error al exportar', 'error'));
         }
 
         function cargarTopAnimalesHistorico(inicio, fin) {
@@ -3014,9 +3581,9 @@ ADMIN_HTML = '''
                     let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
                     let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
                     
-                    html += `<div class="${clase}" style="margin-bottom: 0;">
+                    html += `<div class="${clase}" style="margin-bottom: 10px;">
                         <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
-                        <small>Apostado: S/${a.total_apostado} | Si sale pagaría: S/${a.pago_potencial}</small>
+                        <small>Apostado: S/${a.total_apostado} • Si sale pagaría: S/${a.pago_potencial}</small>
                     </div>`;
                 });
                 container.innerHTML = html;
@@ -3046,14 +3613,17 @@ ADMIN_HTML = '''
                 
                 let container = document.getElementById('lista-riesgo');
                 if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para este sorteo</p>'; 
+                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
                     return;
                 }
                 let html = '';
                 for (let [k, v] of Object.entries(d.riesgo)) {
                     let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
                     let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
-                    html += `<div class="${clase}"><b>${k}${extra}</b><br>Apostado: S/${v.apostado.toFixed(2)} | Pagaria: S/${v.pagaria.toFixed(2)} | ${v.porcentaje}% del total</div>`;
+                    html += `<div class="${clase}">
+                        <b>${k}${extra}</b><br>
+                        Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total
+                    </div>`;
                 }
                 container.innerHTML = html;
             });
@@ -3064,7 +3634,7 @@ ADMIN_HTML = '''
             if (!fecha) return;
             
             let container = document.getElementById('lista-resultados-admin');
-            container.innerHTML = '<p style="color: #888; text-align: center;">Cargando...</p>';
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
             
             let fechaObj = new Date(fecha + 'T00:00:00');
             let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
@@ -3078,14 +3648,13 @@ ADMIN_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
                     return;
                 }
-                
                 renderizarResultadosAdmin(d.resultados);
             })
             .catch(() => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
             });
         }
 
@@ -3094,15 +3663,14 @@ ADMIN_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error al cargar</p>';
+                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>';
                     return;
                 }
-                
                 document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
                 renderizarResultadosAdmin(d.resultados);
             })
             .catch(() => {
-                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
             });
         }
 
@@ -3119,19 +3687,18 @@ ADMIN_HTML = '''
                     contenido = `
                         <span class="resultado-numero">${resultado.animal}</span>
                         <span class="resultado-nombre">${resultado.nombre}</span>
-                        <span style="color: #27ae60; font-size: 0.8rem;">✓ Cargado</span>
                     `;
                 } else {
                     contenido = `
-                        <span style="color: #666;">Pendiente</span>
-                        <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
+                        <span style="color: #666; font-size:1.1rem">Pendiente</span>
+                        <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
                     `;
                 }
                 
                 html += `
                     <div class="resultado-item ${clase}">
                         <div style="display: flex; flex-direction: column;">
-                            <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
+                            <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
                         </div>
                         <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
                             ${contenido}
@@ -3149,7 +3716,7 @@ ADMIN_HTML = '''
             fetch('/admin/guardar-resultado', {method: 'POST', body: form})
             .then(r => r.json()).then(d => {
                 if (d.status === 'ok') {
-                    showMensaje('Guardado', 'success');
+                    showMensaje('✅ ' + d.mensaje, 'success');
                     let fechaActual = document.getElementById('admin-resultados-fecha').value;
                     if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
                         cargarResultadosAdminFecha();
@@ -3181,10 +3748,10 @@ ADMIN_HTML = '''
             .then(d => {
                 let resultadoDiv = document.getElementById('resultado-anular');
                 if (d.error) {
-                    resultadoDiv.innerHTML = '<span style="color: #c0392b;">❌ ' + d.error + '</span>';
+                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
                     showMensaje(d.error, 'error');
                 } else {
-                    resultadoDiv.innerHTML = '<span style="color: #27ae60;">✅ ' + d.mensaje + '</span>';
+                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
                     showMensaje(d.mensaje, 'success');
                     document.getElementById('anular-serial').value = '';
                 }
@@ -3197,7 +3764,10 @@ ADMIN_HTML = '''
         function cargarAgencias() {
             fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
                 let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { tbody.innerHTML = '<tr><td colspan="4">No hay agencias</td></tr>'; return; }
+                if (!d || d.length === 0) { 
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; 
+                    return; 
+                }
                 let html = '';
                 for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
                 tbody.innerHTML = html;
@@ -3212,7 +3782,7 @@ ADMIN_HTML = '''
             fetch('/admin/crear-agencia', {method: 'POST', body: form})
             .then(r => r.json()).then(d => {
                 if (d.status === 'ok') {
-                    showMensaje('Creada', 'success');
+                    showMensaje('✅ ' + d.mensaje, 'success');
                     document.getElementById('new-usuario').value = '';
                     document.getElementById('new-password').value = '';
                     document.getElementById('new-nombre').value = '';
@@ -3237,8 +3807,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6.3")
-    print("  Reportes Agencias Históricos + Exportación CSV")
+    print("  ZOOLO CASINO CLOUD v5.6.4")
+    print("  FULL RESPONSIVE - Mobile Optimized")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
