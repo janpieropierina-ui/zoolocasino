@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.5.1 - Riesgo por Sorteo (Fix filtrado)
+ZOOLO CASINO CLOUD v5.6.2 - Fix conexión + Resultados Históricos
 """
 
 import os
@@ -16,11 +16,13 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE')
+# CORREGIDO: Limpiar espacios en la URL
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
-app.secret_key = "zoolo_casino_cloud_2025"
+# CORREGIDO: Secret key desde variable de entorno con fallback seguro
+app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
 
 # Configuracion de negocio
 PAGO_ANIMAL_NORMAL = 35      
@@ -109,12 +111,18 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-def supabase_request(table, method="GET", data=None, filters=None):
+def supabase_request(table, method="GET", data=None, filters=None, timeout=15):
+    """Función mejorada con manejo de errores robusto"""
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
     if filters:
-        filter_str = "&".join([f"{k}=eq.{v}" for k, v in filters.items()])
-        url += "?" + filter_str
+        filter_params = []
+        for k, v in filters.items():
+            if k.endswith('__like'):
+                filter_params.append(f"{k.replace('__like', '')}=like.{v}")
+            else:
+                filter_params.append(f"{k}=eq.{v}")
+        url += "?" + "&".join(filter_params)
     
     headers = {
         "apikey": SUPABASE_KEY,
@@ -126,24 +134,24 @@ def supabase_request(table, method="GET", data=None, filters=None):
     try:
         if method == "GET":
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "POST":
             req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "PATCH":
             req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="PATCH")
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return True
                 
     except urllib.error.HTTPError as e:
-        print(f"HTTP Error: {e.code} - {e.read().decode()}")
+        print(f"[ERROR] HTTP {e.code}: {e.read().decode()}")
         return None
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[ERROR] Supabase: {e}")
         return None
 
 def obtener_proximo_sorteo():
@@ -164,11 +172,33 @@ def obtener_proximo_sorteo():
             
         sorteo_minutos = hora * 60 + minuto
         
-        # Si faltan más de 5 minutos para el sorteo, es el próximo válido
         if (sorteo_minutos - actual_minutos) > MINUTOS_BLOQUEO:
             return hora_str
     
     return None
+
+def obtener_sorteo_en_curso():
+    """Devuelve el sorteo que está actualmente en curso"""
+    ahora = ahora_peru()
+    actual_minutos = ahora.hour * 60 + ahora.minute
+    
+    for hora_str in HORARIOS_PERU:
+        partes = hora_str.replace(':', ' ').split()
+        hora = int(partes[0])
+        minuto = int(partes[1])
+        ampm = partes[2]
+        
+        if ampm == 'PM' and hora != 12:
+            hora += 12
+        elif ampm == 'AM' and hora == 12:
+            hora = 0
+            
+        sorteo_minutos = hora * 60 + minuto
+        
+        if actual_minutos >= sorteo_minutos and actual_minutos < (sorteo_minutos + 60):
+            return hora_str
+    
+    return obtener_proximo_sorteo()
 
 # ==================== DECORADORES ====================
 def login_required(f):
@@ -213,16 +243,19 @@ def login():
         u = request.form.get('usuario', '').strip().lower()
         p = request.form.get('password', '').strip()
         
-        users = supabase_request("agencias", filters={"usuario": u, "password": p, "activa": "true"})
-        
-        if users and len(users) > 0:
-            user = users[0]
-            session['user_id'] = user['id']
-            session['nombre_agencia'] = user['nombre_agencia']
-            session['es_admin'] = user['es_admin']
-            return redirect('/')
-        else:
-            error = "Usuario o clave incorrecta"
+        try:
+            users = supabase_request("agencias", filters={"usuario": u, "password": p, "activa": "true"})
+            
+            if users and len(users) > 0:
+                user = users[0]
+                session['user_id'] = user['id']
+                session['nombre_agencia'] = user['nombre_agencia']
+                session['es_admin'] = user['es_admin']
+                return redirect('/')
+            else:
+                error = "Usuario o clave incorrecta"
+        except Exception as e:
+            error = f"Error de conexión: {str(e)}"
     
     return render_template_string(LOGIN_HTML, error=error)
 
@@ -257,10 +290,48 @@ def admin():
 @app.route('/api/resultados-hoy')
 @login_required
 def resultados_hoy():
-    """Endpoint para que las agencias vean los resultados del día (solo lectura)"""
+    """Endpoint para resultados del día actual"""
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        
+        resultados_dict = {}
+        if resultados_list:
+            for r in resultados_list:
+                resultados_dict[r['hora']] = {
+                    'animal': r['animal'],
+                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
+                }
+        
+        for hora in HORARIOS_PERU:
+            if hora not in resultados_dict:
+                resultados_dict[hora] = None
+                
+        return jsonify({
+            'status': 'ok',
+            'fecha': hoy,
+            'resultados': resultados_dict
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# NUEVO: Endpoint para resultados históricos (Agencias y Admin)
+@app.route('/api/resultados-fecha', methods=['POST'])
+@login_required
+def resultados_fecha():
+    """Endpoint para consultar resultados de cualquier fecha"""
+    try:
+        data = request.get_json()
+        fecha_str = data.get('fecha')  # Formato: YYYY-MM-DD
+        
+        if not fecha_str:
+            return jsonify({'error': 'Fecha requerida'}), 400
+        
+        # Convertir de YYYY-MM-DD a DD/MM/YYYY
+        fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d")
+        fecha_busqueda = fecha_obj.strftime("%d/%m/%Y")
+        
+        resultados_list = supabase_request("resultados", filters={"fecha": fecha_busqueda})
         
         resultados_dict = {}
         if resultados_list:
@@ -277,9 +348,11 @@ def resultados_hoy():
                 
         return jsonify({
             'status': 'ok',
-            'fecha': hoy,
+            'fecha_consulta': fecha_busqueda,
+            'fecha_input': fecha_str,
             'resultados': resultados_dict
         })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -326,8 +399,7 @@ def procesar_venta():
             }
             supabase_request("jugadas", method="POST", data=jugada_data)
         
-        # ==================== FORMATO COMPACTO DEL TICKET ====================
-        # Agrupar jugadas por hora
+        # Formato compacto del ticket
         jugadas_por_hora = defaultdict(list)
         for j in jugadas:
             jugadas_por_hora[j['hora']].append(j)
@@ -341,7 +413,6 @@ def procesar_venta():
             ""
         ]
         
-        # Procesar cada horario
         for hora_peru in HORARIOS_PERU:
             if hora_peru not in jugadas_por_hora:
                 continue
@@ -349,31 +420,23 @@ def procesar_venta():
             idx = HORARIOS_PERU.index(hora_peru)
             hora_ven = HORARIOS_VENEZUELA[idx]
             
-            # Formato: ZOOLO PERU/09:AM...VZLA/10:AM
             hora_peru_corta = hora_peru.replace(' ', '').replace('00', '').lower()
             hora_ven_corta = hora_ven.replace(' ', '').replace('00', '').lower()
             lineas.append(f"*ZOOLO.PERU/{hora_peru_corta}...VZLA/{hora_ven_corta}*")
             
-            # Agrupar jugadas de esta hora en una sola línea
             jugadas_hora = jugadas_por_hora[hora_peru]
             texto_jugadas = []
             
             for j in jugadas_hora:
                 if j['tipo'] == 'animal':
-                    # Formato: ZOR 15x10 (abreviatura del animal + numero x monto)
-                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()  # Primeras 3 letras
-                    if j['seleccion'] == "40":
-                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
-                    else:
-                        texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
+                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
+                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
                 else:
-                    # Formato especial: ROJx10 o NEGx10
                     tipo_corto = j['seleccion'][0:3]
                     texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
             
-            # Unir todas las jugadas de esta hora con espacios
             lineas.append(" ".join(texto_jugadas))
-            lineas.append("")  # Línea en blanco entre horarios
+            lineas.append("")
         
         lineas.append("------------------------")
         lineas.append(f"*TOTAL: S/{int(total)}*")
@@ -484,11 +547,9 @@ def anular_ticket():
         
         ticket = tickets[0]
         
-        # Verificar si ya está pagado
         if ticket['pagado']:
             return jsonify({'error': 'Ya esta pagado, no se puede anular'})
         
-        # Si es agencia (no admin), verificar restricción de 5 minutos
         if not session.get('es_admin'):
             fecha_ticket = parse_fecha_ticket(ticket['fecha'])
             if not fecha_ticket:
@@ -496,23 +557,18 @@ def anular_ticket():
             
             minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
             if minutos_transcurridos > 5:
-                return jsonify({'error': f'No puede anular después de 5 minutos. Han pasado {int(minutos_transcurridos)} minutos'})
+                return jsonify({'error': f'No puede anular después de 5 minutos'})
             
-            # Verificar que el sorteo no haya pasado para ninguna jugada
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             for j in jugadas:
                 if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró o está por cerrar'})
-        
-        # Si es admin, solo verificar que el sorteo no haya ocurrido aún (más permisivo)
+                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
         else:
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             for j in jugadas:
-                # Admin puede anular hasta el último momento antes del sorteo
                 if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado o en curso'})
+                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
         
-        # Proceder a anular
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{ticket['id']}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -562,8 +618,8 @@ def caja_agencia():
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                                 tiene_premio = True
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                                sel = j['seleccion']
                                 num = int(wa)
+                                sel = j['seleccion']
                                 if (sel == 'ROJO' and str(wa) in ROJOS) or \
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
@@ -808,6 +864,34 @@ def guardar_resultado():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/resultados-hoy')
+@admin_required
+def admin_resultados_hoy():
+    """Obtener resultados del día para el admin"""
+    try:
+        hoy = ahora_peru().strftime("%d/%m/%Y")
+        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        
+        resultados_dict = {}
+        if resultados_list:
+            for r in resultados_list:
+                resultados_dict[r['hora']] = {
+                    'animal': r['animal'],
+                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
+                }
+        
+        for hora in HORARIOS_PERU:
+            if hora not in resultados_dict:
+                resultados_dict[hora] = None
+                
+        return jsonify({
+            'status': 'ok',
+            'fecha': hoy,
+            'resultados': resultados_dict
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/reporte-agencias')
 @admin_required
 def reporte_agencias():
@@ -884,19 +968,17 @@ def reporte_agencias():
 def riesgo():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
-        proximo_sorteo = obtener_proximo_sorteo()
+        sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
         
-        print(f"[DEBUG] Próximo sorteo detectado: {proximo_sorteo}")
-        print(f"[DEBUG] Hora actual Perú: {ahora_peru().strftime('%I:%M %p')}")
+        print(f"[DEBUG] Sorteo objetivo: {sorteo_objetivo}")
         
-        if not proximo_sorteo:
+        if not sorteo_objetivo:
             return jsonify({
                 'riesgo': {},
-                'proximo_sorteo': None,
+                'sorteo_objetivo': None,
                 'mensaje': 'No hay más sorteos disponibles para hoy'
             })
         
-        # Obtener todos los tickets de hoy no anulados
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{hoy}%25&anulado=eq.false"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -910,15 +992,11 @@ def riesgo():
         if not tickets:
             return jsonify({
                 'riesgo': {},
-                'proximo_sorteo': proximo_sorteo,
+                'sorteo_objetivo': sorteo_objetivo,
                 'mensaje': 'No hay tickets vendidos hoy',
                 'total_apostado': 0
             })
         
-        print(f"[DEBUG] Tickets encontrados hoy: {len(tickets)}")
-        
-        # Obtener jugadas de tipo animal para estos tickets
-        # Filtrar manualmente por el próximo sorteo para evitar problemas de encoding
         apuestas = {}
         total_apostado_sorteo = 0
         total_jugadas_contadas = 0
@@ -927,7 +1005,7 @@ def riesgo():
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
             
             for j in jugadas:
-                if j.get('hora') == proximo_sorteo:
+                if j.get('hora') == sorteo_objetivo:
                     sel = j.get('seleccion')
                     monto = j.get('monto', 0)
                     if sel:
@@ -937,10 +1015,6 @@ def riesgo():
                         total_apostado_sorteo += monto
                         total_jugadas_contadas += 1
         
-        print(f"[DEBUG] Jugadas para {proximo_sorteo}: {total_jugadas_contadas}")
-        print(f"[DEBUG] Total apostado: {total_apostado_sorteo}")
-        
-        # Ordenar por monto mayor
         apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
         
         riesgo = {}
@@ -956,7 +1030,7 @@ def riesgo():
         
         return jsonify({
             'riesgo': riesgo,
-            'proximo_sorteo': proximo_sorteo,
+            'sorteo_objetivo': sorteo_objetivo,
             'total_apostado': round(total_apostado_sorteo, 2),
             'hora_actual': ahora_peru().strftime("%I:%M %p"),
             'cantidad_jugadas': total_jugadas_contadas
@@ -1205,7 +1279,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.5.1 - Riesgo por Sorteo
+            Sistema ZOOLO CASINO v5.6.2 - Fix conexión
         </div>
     </div>
 </body>
@@ -1571,20 +1645,26 @@ POS_HTML = '''
         </div>
     </div>
 
-    <!-- Modal de Resultados (Solo lectura para agencias) -->
+    <!-- Modal de Resultados Históricos (NUEVO) -->
     <div class="modal" id="modal-resultados">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>RESULTADOS DEL DÍA</h3>
+                <h3>RESULTADOS</h3>
                 <button class="btn-close" onclick="cerrarModalResultados()">X</button>
             </div>
             
-            <div style="margin-bottom: 15px; text-align: center; color: #888; font-size: 0.85rem;">
-                Solo visualización. Para modificar contactar al administrador.
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label>Seleccionar Fecha:</label>
+                <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
+                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 8px;">CONSULTAR</button>
+            </div>
+
+            <div style="margin-bottom: 10px; text-align: center; color: #ffd700; font-size: 0.9rem;" id="resultados-fecha-titulo">
+                Hoy: {{ horarios_peru[0].split()[0] if horarios_peru else '' }}
             </div>
 
             <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
-                <p style="color: #888; text-align: center;">Cargando...</p>
+                <p style="color: #888; text-align: center;">Seleccione una fecha...</p>
             </div>
         </div>
     </div>
@@ -1710,19 +1790,40 @@ POS_HTML = '''
             .catch(e => alert('Error de conexion: ' + e));
         }
 
-        // Nueva función para ver resultados (solo lectura)
+        // NUEVA FUNCIÓN: Ver resultados con selector de fecha
         function verResultados() {
-            fetch('/api/resultados-hoy')
+            // Establecer fecha de hoy por defecto
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('resultados-fecha').value = hoy;
+            cargarResultadosFecha();
+            document.getElementById('modal-resultados').style.display = 'block';
+        }
+
+        function cargarResultadosFecha() {
+            let fecha = document.getElementById('resultados-fecha').value;
+            if (!fecha) return;
+            
+            let container = document.getElementById('lista-resultados');
+            container.innerHTML = '<p style="color: #888; text-align: center;">Cargando...</p>';
+            
+            // Mostrar la fecha formateada en el título
+            let fechaObj = new Date(fecha + 'T00:00:00');
+            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('resultados-fecha-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
+            
+            fetch('/api/resultados-fecha', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha: fecha})
+            })
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    alert('Error: ' + d.error);
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
                     return;
                 }
                 
-                let container = document.getElementById('lista-resultados');
                 let html = '';
-                
                 if (d.resultados && Object.keys(d.resultados).length > 0) {
                     for (let hora of horasPeru) {
                         let resultado = d.resultados[hora];
@@ -1754,13 +1855,13 @@ POS_HTML = '''
                         `;
                     }
                 } else {
-                    html = '<p style="color: #888; text-align: center;">No hay resultados disponibles</p>';
+                    html = '<p style="color: #888; text-align: center;">No hay resultados disponibles para esta fecha</p>';
                 }
-                
                 container.innerHTML = html;
-                document.getElementById('modal-resultados').style.display = 'block';
             })
-            .catch(e => alert('Error de conexión: ' + e));
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
         }
 
         function cerrarModalResultados() {
@@ -1982,6 +2083,10 @@ ADMIN_HTML = '''
             background: #27ae60; color: white; border: none;
             padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
         }
+        .btn-danger {
+            background: #c0392b; color: white; border: none;
+            padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+        }
         .btn-secondary {
             background: #2980b9; color: white; border: none;
             padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-right: 5px;
@@ -2010,13 +2115,23 @@ ADMIN_HTML = '''
             font-size: 0.8rem; color: #888; text-align: center;
             border: 1px solid #333;
         }
-        .proximo-sorteo-box {
+        .sorteo-actual-box {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
             padding: 15px; border-radius: 8px; margin-bottom: 15px;
             border: 2px solid #2980b9; text-align: center;
         }
-        .proximo-sorteo-box h4 { color: #2980b9; margin-bottom: 5px; }
-        .proximo-sorteo-box p { color: #ffd700; font-size: 1.5rem; font-weight: bold; }
+        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 5px; }
+        .sorteo-actual-box p { color: #ffd700; font-size: 1.5rem; font-weight: bold; }
+        .resultado-item {
+            background: #0a0a0a; padding: 10px; margin: 5px 0;
+            border-radius: 5px; border-left: 3px solid #27ae60;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .resultado-item.pendiente {
+            border-left-color: #666; opacity: 0.6;
+        }
+        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
+        .resultado-nombre { color: #888; font-size: 0.9rem; }
         @media (min-width: 768px) {
             .stats-grid { grid-template-columns: repeat(4, 1fr); }
         }
@@ -2031,6 +2146,7 @@ ADMIN_HTML = '''
             <button onclick="showTab('riesgo')">Riesgo</button>
             <button onclick="showTab('reporte')">Reporte</button>
             <button onclick="showTab('resultados')">Resultados</button>
+            <button onclick="showTab('anular')">Anular Ticket</button>
             <button onclick="showTab('agencias')">Agencias</button>
             <button onclick="location.href='/logout'" class="logout-btn">Salir</button>
         </div>
@@ -2101,13 +2217,15 @@ ADMIN_HTML = '''
         </div>
 
         <div id="riesgo" class="tab-content">
-            <div class="proximo-sorteo-box">
-                <h4>🎯 PRÓXIMO SORTEO A VIGILAR</h4>
-                <p id="proximo-sorteo-hora">Cargando...</p>
+            <div class="sorteo-actual-box">
+                <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
+                <p id="sorteo-objetivo">Cargando...</p>
                 <small style="color: #888; font-size: 0.8rem;">Riesgo calculado solo para este horario específico</small>
             </div>
             
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">APUESTAS ACUMULADAS PARA ESTE SORTEO</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1rem;">
+                APUESTAS PARA ESTE SORTEO: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
+            </h3>
             <div id="lista-riesgo"><p style="color: #888; font-size: 0.85rem;">Cargando...</p></div>
             
             <div style="margin-top: 20px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
@@ -2128,8 +2246,26 @@ ADMIN_HTML = '''
         </div>
 
         <div id="resultados" class="tab-content">
+            <!-- Selector de fecha para resultados históricos -->
             <div class="form-box">
-                <h3>CARGAR RESULTADO</h3>
+                <h3>CONSULTAR RESULTADOS HISTÓRICOS</h3>
+                <div class="form-row">
+                    <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
+                    <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
+                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">VER HOY</button>
+                </div>
+                <div id="admin-resultados-titulo" style="margin-top: 10px; color: #ffd700; font-weight: bold; text-align: center;"></div>
+            </div>
+
+            <div class="form-box">
+                <h3>LISTA DE RESULTADOS</h3>
+                <div id="lista-resultados-admin" style="max-height: 300px; overflow-y: auto;">
+                    <p style="color: #888;">Seleccione una fecha...</p>
+                </div>
+            </div>
+
+            <div class="form-box">
+                <h3>CARGAR/EDITAR RESULTADO</h3>
                 <div class="form-row">
                     <select id="res-hora">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
                     <select id="res-animal">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
@@ -2138,6 +2274,22 @@ ADMIN_HTML = '''
                 <div style="margin-top: 10px; font-size: 0.8rem; color: #888;">
                     ℹ️ Si el resultado ya existe, se actualizará automáticamente.
                 </div>
+            </div>
+        </div>
+
+        <div id="anular" class="tab-content">
+            <div class="form-box">
+                <h3>ANULAR TICKET</h3>
+                <div class="form-row">
+                    <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
+                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR TICKET</button>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: rgba(192, 57, 43, 0.1); border-radius: 4px; border: 1px solid #c0392b;">
+                    <small style="color: #ff6b6b;">
+                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado aún.
+                    </small>
+                </div>
+                <div id="resultado-anular" style="margin-top: 10px; font-size: 0.9rem;"></div>
             </div>
         </div>
 
@@ -2162,6 +2314,7 @@ ADMIN_HTML = '''
     </div>
 
     <script>
+        const HORARIOS_ORDEN = {{horarios|tojson}};
         let historicoData = null;
         let fechasConsulta = { inicio: null, fin: null };
 
@@ -2175,6 +2328,12 @@ ADMIN_HTML = '''
             if (tab === 'reporte') cargarReporte();
             if (tab === 'agencias') cargarAgencias();
             if (tab === 'dashboard') cargarDashboard();
+            if (tab === 'resultados') {
+                // Establecer fecha de hoy por defecto
+                let hoy = new Date().toISOString().split('T')[0];
+                document.getElementById('admin-resultados-fecha').value = hoy;
+                cargarResultadosAdmin();
+            }
         }
 
         function showMensaje(msg, tipo) {
@@ -2307,16 +2466,17 @@ ADMIN_HTML = '''
 
         function cargarRiesgo() {
             fetch('/admin/riesgo').then(r => r.json()).then(d => {
-                // Actualizar próximo sorteo
-                if (d.proximo_sorteo) {
-                    document.getElementById('proximo-sorteo-hora').textContent = d.proximo_sorteo;
+                if (d.sorteo_objetivo) {
+                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
                 } else {
-                    document.getElementById('proximo-sorteo-hora').textContent = 'No hay más sorteos hoy';
+                    document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
                 }
                 
                 let container = document.getElementById('lista-riesgo');
                 if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para el próximo sorteo</p>'; 
+                    container.innerHTML = '<p style="color:#888; font-size: 0.85rem;">No hay apuestas para este sorteo</p>'; 
                     return;
                 }
                 let html = '';
@@ -2345,14 +2505,142 @@ ADMIN_HTML = '''
             });
         }
 
+        // NUEVA FUNCIÓN: Cargar resultados por fecha específica
+        function cargarResultadosAdminFecha() {
+            let fecha = document.getElementById('admin-resultados-fecha').value;
+            if (!fecha) return;
+            
+            let container = document.getElementById('lista-resultados-admin');
+            container.innerHTML = '<p style="color: #888; text-align: center;">Cargando...</p>';
+            
+            // Mostrar fecha en el título
+            let fechaObj = new Date(fecha + 'T00:00:00');
+            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('admin-resultados-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
+            
+            fetch('/api/resultados-fecha', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha: fecha})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
+                    return;
+                }
+                
+                renderizarResultadosAdmin(d.resultados);
+            })
+            .catch(() => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
+        }
+
+        function cargarResultadosAdmin() {
+            // Cargar resultados de hoy
+            fetch('/admin/resultados-hoy')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error al cargar</p>';
+                    return;
+                }
+                
+                document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
+                renderizarResultadosAdmin(d.resultados);
+            })
+            .catch(() => {
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
+        }
+
+        function renderizarResultadosAdmin(resultados) {
+            let container = document.getElementById('lista-resultados-admin');
+            let html = '';
+            
+            for (let hora of HORARIOS_ORDEN) {
+                let resultado = resultados[hora];
+                let clase = resultado ? '' : 'pendiente';
+                let contenido;
+                
+                if (resultado) {
+                    contenido = `
+                        <span class="resultado-numero">${resultado.animal}</span>
+                        <span class="resultado-nombre">${resultado.nombre}</span>
+                        <span style="color: #27ae60; font-size: 0.8rem;">✓ Cargado</span>
+                    `;
+                } else {
+                    contenido = `
+                        <span style="color: #666;">Pendiente</span>
+                        <span style="color: #444; font-size: 0.8rem;">Sin resultado</span>
+                    `;
+                }
+                
+                html += `
+                    <div class="resultado-item ${clase}">
+                        <div style="display: flex; flex-direction: column;">
+                            <strong style="color: #ffd700; font-size: 0.9rem;">${hora}</strong>
+                        </div>
+                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
+                            ${contenido}
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
         function guardarResultado() {
             let form = new FormData();
             form.append('hora', document.getElementById('res-hora').value);
             form.append('animal', document.getElementById('res-animal').value);
             fetch('/admin/guardar-resultado', {method: 'POST', body: form})
             .then(r => r.json()).then(d => {
-                if (d.status === 'ok') showMensaje('Guardado', 'success');
+                if (d.status === 'ok') {
+                    showMensaje('Guardado', 'success');
+                    // Recargar la lista actual
+                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
+                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
+                        cargarResultadosAdminFecha();
+                    } else {
+                        cargarResultadosAdmin();
+                    }
+                }
                 else showMensaje(d.error || 'Error', 'error');
+            });
+        }
+
+        function anularTicketAdmin() {
+            let serial = document.getElementById('anular-serial').value.trim();
+            if (!serial) {
+                showMensaje('Ingrese un serial', 'error');
+                return;
+            }
+            
+            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
+                return;
+            }
+            
+            fetch('/api/anular-ticket', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let resultadoDiv = document.getElementById('resultado-anular');
+                if (d.error) {
+                    resultadoDiv.innerHTML = '<span style="color: #c0392b;">❌ ' + d.error + '</span>';
+                    showMensaje(d.error, 'error');
+                } else {
+                    resultadoDiv.innerHTML = '<span style="color: #27ae60;">✅ ' + d.mensaje + '</span>';
+                    showMensaje(d.mensaje, 'success');
+                    document.getElementById('anular-serial').value = '';
+                }
+            })
+            .catch(e => {
+                showMensaje('Error de conexión', 'error');
             });
         }
 
@@ -2387,6 +2675,7 @@ ADMIN_HTML = '''
             let hoy = new Date().toISOString().split('T')[0];
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
+            document.getElementById('admin-resultados-fecha').value = hoy;
         });
 
         cargarDashboard();
@@ -2398,8 +2687,9 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.5.1")
-    print("  RIESGO POR SORTEO - Fix filtrado")
+    print("  ZOOLO CASINO CLOUD v5.6.2")
+    print("  Fix: Conexión Supabase + Resultados Históricos")
     print("=" * 60)
-    port = int(os.environ.get('PORT', 5000))
+    # CORREGIDO: Puerto 10000 para Render, fallback 5000 para local
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
