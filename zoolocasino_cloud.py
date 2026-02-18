@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6.6 - RIESGO POR AGENCIA + HORARIOS FIX
+ZOOLO CASINO CLOUD v5.6.7 - EDICIÓN DE RESULTADOS + VALIDACIONES
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co  ').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
@@ -439,7 +439,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text=   {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text=    {urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -711,13 +711,13 @@ def caja_historico():
                 jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                 premio_ticket = 0
                 for j in jugadas:
-                    wa = resultados.get(j['hora'])
+                    wa = resultados_dia.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                             premio_ticket += calcular_premio_animal(j['monto'], wa)
                         elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
                             num = int(wa)
+                            sel = j['seleccion']
                             if (sel == 'ROJO' and str(wa) in ROJOS) or \
                                (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                (sel == 'PAR' and num % 2 == 0) or \
@@ -830,17 +830,41 @@ def crear_agencia():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ============================================
+# NUEVA FUNCIONALIDAD: EDITAR RESULTADOS CON VALIDACIONES
+# ============================================
+
 @app.route('/admin/guardar-resultado', methods=['POST'])
 @admin_required
 def guardar_resultado():
+    """
+    Guarda o actualiza un resultado. Si ya existe, lo actualiza (edición).
+    Ahora acepta fecha específica para poder editar resultados históricos.
+    """
     try:
         hora = request.form.get('hora')
         animal = request.form.get('animal')
-        fecha = ahora_peru().strftime("%d/%m/%Y")
+        fecha_input = request.form.get('fecha')  # NUEVO: Fecha específica (opcional)
         
+        # Validar que el animal sea válido (0-40)
+        if animal not in ANIMALES:
+            return jsonify({'error': f'Animal inválido: {animal}'}), 400
+        
+        # Usar fecha proporcionada o la fecha actual
+        if fecha_input:
+            try:
+                fecha_obj = datetime.strptime(fecha_input, "%Y-%m-%d")
+                fecha = fecha_obj.strftime("%d/%m/%Y")
+            except:
+                fecha = ahora_peru().strftime("%d/%m/%Y")
+        else:
+            fecha = ahora_peru().strftime("%d/%m/%Y")
+        
+        # Verificar si ya existe un resultado para esta fecha/hora
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
         
         if existentes and len(existentes) > 0:
+            # ACTUALIZAR (EDITAR) resultado existente
             url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{fecha}&hora=eq.{hora}"
             headers = {
                 "apikey": SUPABASE_KEY,
@@ -850,13 +874,83 @@ def guardar_resultado():
             data = json.dumps({"animal": animal}).encode()
             req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
             urllib.request.urlopen(req, timeout=15)
+            
+            return jsonify({
+                'status': 'ok', 
+                'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
+                'accion': 'actualizado',
+                'fecha': fecha,
+                'hora': hora,
+                'animal': animal
+            })
         else:
+            # CREAR nuevo resultado
             data = {"fecha": fecha, "hora": hora, "animal": animal}
             supabase_request("resultados", method="POST", data=data)
-        
-        return jsonify({'status': 'ok', 'mensaje': f'Resultado guardado: {hora} = {animal}'})
+            
+            return jsonify({
+                'status': 'ok', 
+                'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
+                'accion': 'creado',
+                'fecha': fecha,
+                'hora': hora,
+                'animal': animal
+            })
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/verificar-tickets-sorteo', methods=['POST'])
+@admin_required
+def verificar_tickets_sorteo():
+    """
+    Verifica si hay tickets vendidos para un sorteo específico.
+    Útil para advertir antes de editar un resultado.
+    """
+    try:
+        data = request.get_json()
+        fecha = data.get('fecha')  # formato dd/mm/yyyy
+        hora = data.get('hora')
+        
+        if not fecha or not hora:
+            return jsonify({'error': 'Fecha y hora requeridas'}), 400
+        
+        # Buscar tickets de esa fecha que tengan jugadas en esa hora
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{fecha}%25&anulado=eq.false"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        }
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=15) as response:
+            tickets = json.loads(response.read().decode())
+        
+        tickets_con_jugadas = []
+        total_apostado = 0
+        
+        for t in tickets:
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "hora": hora})
+            if jugadas and len(jugadas) > 0:
+                monto_jugadas = sum(j['monto'] for j in jugadas)
+                tickets_con_jugadas.append({
+                    'serial': t['serial'],
+                    'agencia_id': t['agencia_id'],
+                    'monto': monto_jugadas
+                })
+                total_apostado += monto_jugadas
+        
+        return jsonify({
+            'status': 'ok',
+            'tickets_count': len(tickets_con_jugadas),
+            'total_apostado': round(total_apostado, 2),
+            'tickets': tickets_con_jugadas[:5]  # Devolver los primeros 5
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ============================================
 
 @app.route('/admin/resultados-hoy')
 @admin_required
@@ -1621,7 +1715,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6.6<br>Riesgo por Agencia + Horarios Fix
+            Sistema ZOOLO CASINO v5.6.7<br>Edición de Resultados + Validaciones
         </div>
     </div>
 </body>
@@ -3094,6 +3188,61 @@ ADMIN_HTML = '''
         .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
         .resultado-nombre { color: #888; font-size: 0.9rem; }
         
+        /* NUEVO: Botón de editar resultado */
+        .btn-editar {
+            background: linear-gradient(135deg, #2980b9, #3498db);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-left: 10px;
+            transition: all 0.2s;
+        }
+        .btn-editar:hover {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            transform: scale(1.05);
+        }
+        
+        /* Modal de edición */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal.active { display: flex; }
+        .modal-box {
+            background: #1a1a2e;
+            padding: 25px;
+            border-radius: 15px;
+            border: 2px solid #ffd700;
+            max-width: 400px;
+            width: 100%;
+        }
+        .modal-box h3 {
+            color: #ffd700;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .warning-box {
+            background: rgba(243, 156, 18, 0.2);
+            border: 1px solid #f39c12;
+            color: #f39c12;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        
         /* Ranking */
         .ranking-item {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
@@ -3158,6 +3307,36 @@ ADMIN_HTML = '''
     </style>
 </head>
 <body>
+    <!-- Modal de Edición de Resultado -->
+    <div class="modal" id="modal-editar">
+        <div class="modal-box">
+            <h3>✏️ EDITAR RESULTADO</h3>
+            <div class="warning-box" id="editar-advertencia">
+                ⚠️ Este sorteo tiene tickets vendidos. Al cambiar el resultado, los tickets ganadores cambiarán.
+            </div>
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label style="display: block; color: #888; margin-bottom: 5px;">Fecha:</label>
+                <input type="text" id="editar-fecha-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
+            </div>
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label style="display: block; color: #888; margin-bottom: 5px;">Hora:</label>
+                <input type="text" id="editar-hora-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="display: block; color: #888; margin-bottom: 5px;">Nuevo Animal:</label>
+                <select id="editar-animal-select" style="width: 100%; padding: 12px; background: #000; border: 2px solid #ffd700; color: white; border-radius: 8px; font-size: 1rem;">
+                    {% for k, v in animales.items() %}
+                    <option value="{{k}}">{{k}} - {{v}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="cerrarModalEditar()" class="btn-secondary" style="flex: 1;">CANCELAR</button>
+                <button onclick="confirmarEdicion()" class="btn-submit" style="flex: 2;">GUARDAR CAMBIO</button>
+            </div>
+        </div>
+    </div>
+
     <div class="navbar">
         <div class="navbar-top">
             <h2>👑 PANEL ADMIN</h2>
@@ -3236,7 +3415,6 @@ ADMIN_HTML = '''
         </div>
 
         <div id="riesgo" class="tab-content">
-            <!-- SELECTOR DE AGENCIA NUEVO -->
             <div class="agencia-selector">
                 <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
                 <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()">
@@ -3384,6 +3562,10 @@ ADMIN_HTML = '''
         let reporteAgenciasData = null;
         let fechasConsulta = { inicio: null, fin: null };
         let listaAgencias = [];
+        
+        // Variables para edición
+        let editandoFecha = null;
+        let editandoHora = null;
 
         function showTab(tab) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -3392,7 +3574,7 @@ ADMIN_HTML = '''
             event.target.classList.add('active');
             
             if (tab === 'riesgo') {
-                cargarAgenciasSelect(); // Cargar selector de agencias
+                cargarAgenciasSelect();
                 cargarRiesgo();
             }
             if (tab === 'reporte') {
@@ -3473,7 +3655,6 @@ ADMIN_HTML = '''
             consultarReporteAgencias();
         }
 
-        // NUEVA FUNCIÓN: Cargar agencias en el select de riesgo
         function cargarAgenciasSelect() {
             fetch('/admin/lista-agencias')
             .then(r => r.json())
@@ -3481,7 +3662,6 @@ ADMIN_HTML = '''
                 if (d.error) return;
                 listaAgencias = d;
                 let select = document.getElementById('riesgo-agencia-select');
-                // Mantener la opción "TODAS" y agregar las demás
                 select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
                 d.forEach(ag => {
                     select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
@@ -3489,10 +3669,97 @@ ADMIN_HTML = '''
             });
         }
 
-        // NUEVA FUNCIÓN: Cambiar agencia en el riesgo
         function cambiarAgenciaRiesgo() {
             cargarRiesgo();
         }
+
+        // ==========================================
+        // NUEVAS FUNCIONES PARA EDITAR RESULTADOS
+        // ==========================================
+        
+        function abrirModalEditar(hora, fecha, animalActual) {
+            editandoHora = hora;
+            editandoFecha = fecha;
+            
+            document.getElementById('editar-fecha-display').value = fecha;
+            document.getElementById('editar-hora-display').value = hora;
+            document.getElementById('editar-animal-select').value = animalActual;
+            
+            // Verificar si hay tickets para este sorteo
+            verificarTicketsSorteo(fecha, hora);
+            
+            document.getElementById('modal-editar').classList.add('active');
+        }
+        
+        function cerrarModalEditar() {
+            document.getElementById('modal-editar').classList.remove('active');
+            editandoFecha = null;
+            editandoHora = null;
+        }
+        
+        function verificarTicketsSorteo(fecha, hora) {
+            // Convertir fecha de dd/mm/yyyy a formato para consulta
+            fetch('/admin/verificar-tickets-sorteo', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha: fecha, hora: hora})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let advertencia = document.getElementById('editar-advertencia');
+                if (d.tickets_count > 0) {
+                    advertencia.style.display = 'block';
+                    advertencia.innerHTML = `⚠️ <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.<br>Cambiar el resultado afectará quién gana o pierde.`;
+                } else {
+                    advertencia.style.display = 'none';
+                }
+            })
+            .catch(e => console.error('Error verificando tickets:', e));
+        }
+        
+        function confirmarEdicion() {
+            let nuevoAnimal = document.getElementById('editar-animal-select').value;
+            
+            if (!confirm(`¿Está seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal} - ${getNombreAnimal(nuevoAnimal)}?`)) {
+                return;
+            }
+            
+            // Convertir fecha de dd/mm/yyyy a yyyy-mm-dd para el backend
+            let partes = editandoFecha.split('/');
+            let fechaISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
+            
+            let form = new FormData();
+            form.append('hora', editandoHora);
+            form.append('animal', nuevoAnimal);
+            form.append('fecha', fechaISO);
+            
+            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
+            .then(r => r.json()).then(d => {
+                if (d.status === 'ok') {
+                    showMensaje('✅ ' + d.mensaje, 'success');
+                    cerrarModalEditar();
+                    // Recargar resultados
+                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
+                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
+                        cargarResultadosAdminFecha();
+                    } else {
+                        cargarResultadosAdmin();
+                    }
+                } else {
+                    showMensaje(d.error || 'Error al guardar', 'error');
+                }
+            })
+            .catch(e => {
+                showMensaje('Error de conexión', 'error');
+            });
+        }
+        
+        function getNombreAnimal(numero) {
+            const animales = {{animales|tojson}};
+            return animales[numero] || 'Desconocido';
+        }
+
+        // ==========================================
 
         function consultarHistorico() {
             let inicio = document.getElementById('hist-fecha-inicio').value;
@@ -3714,7 +3981,6 @@ ADMIN_HTML = '''
             }).catch(() => showMensaje('Error de conexion', 'error'));
         }
 
-        // MODIFICADO: Ahora acepta parámetro de agencia
         function cargarRiesgo() {
             let agenciaId = document.getElementById('riesgo-agencia-select').value;
             let url = '/admin/riesgo';
@@ -3730,12 +3996,10 @@ ADMIN_HTML = '''
                     document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
                     document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
                     
-                    // Mostrar nombre de agencia
                     let nombreAgencia = d.agencia_nombre || "TODAS LAS AGENCIAS";
                     document.getElementById('nombre-agencia-actual').textContent = nombreAgencia;
                     document.getElementById('riesgo-agencia-nombre').style.display = 'block';
                     
-                    // Info extra
                     let infoExtra = d.cantidad_jugadas ? `${d.cantidad_jugadas} jugadas registradas` : '';
                     if (d.hora_actual) infoExtra += ` • Hora actual: ${d.hora_actual}`;
                     document.getElementById('cantidad-jugadas-info').textContent = infoExtra;
@@ -3789,7 +4053,7 @@ ADMIN_HTML = '''
                     container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
                     return;
                 }
-                renderizarResultadosAdmin(d.resultados);
+                renderizarResultadosAdmin(d.resultados, d.fecha_consulta);
             })
             .catch(() => {
                 container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
@@ -3805,14 +4069,14 @@ ADMIN_HTML = '''
                     return;
                 }
                 document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
-                renderizarResultadosAdmin(d.resultados);
+                renderizarResultadosAdmin(d.resultados, d.fecha);
             })
             .catch(() => {
                 document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
             });
         }
 
-        function renderizarResultadosAdmin(resultados) {
+        function renderizarResultadosAdmin(resultados, fechaStr) {
             let container = document.getElementById('lista-resultados-admin');
             let html = '';
             
@@ -3820,17 +4084,22 @@ ADMIN_HTML = '''
                 let resultado = resultados[hora];
                 let clase = resultado ? '' : 'pendiente';
                 let contenido;
+                let botonEditar = '';
                 
                 if (resultado) {
                     contenido = `
                         <span class="resultado-numero">${resultado.animal}</span>
                         <span class="resultado-nombre">${resultado.nombre}</span>
                     `;
+                    // NUEVO: Botón de editar solo si hay resultado
+                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')">✏️ EDITAR</button>`;
                 } else {
                     contenido = `
                         <span style="color: #666; font-size:1.1rem">Pendiente</span>
                         <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
                     `;
+                    // Botón para cargar resultado nuevo (opcional, ya está el formulario arriba)
+                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;">➕ CARGAR</button>`;
                 }
                 
                 html += `
@@ -3838,19 +4107,34 @@ ADMIN_HTML = '''
                         <div style="display: flex; flex-direction: column;">
                             <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
                         </div>
-                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
+                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
                             ${contenido}
+                            ${botonEditar}
                         </div>
                     </div>
                 `;
             }
             container.innerHTML = html;
         }
+        
+        function prepararNuevoResultado(hora) {
+            document.getElementById('res-hora').value = hora;
+            document.getElementById('res-animal').focus();
+            // Hacer scroll al formulario de carga
+            document.getElementById('res-hora').scrollIntoView({behavior: 'smooth'});
+        }
 
         function guardarResultado() {
             let form = new FormData();
             form.append('hora', document.getElementById('res-hora').value);
             form.append('animal', document.getElementById('res-animal').value);
+            
+            // Si estamos viendo una fecha específica, enviar esa fecha
+            let fechaActual = document.getElementById('admin-resultados-fecha').value;
+            if (fechaActual) {
+                form.append('fecha', fechaActual);
+            }
+            
             fetch('/admin/guardar-resultado', {method: 'POST', body: form})
             .then(r => r.json()).then(d => {
                 if (d.status === 'ok') {
@@ -3945,8 +4229,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6.6")
-    print("  RIESGO POR AGENCIA + HORARIOS FIX")
+    print("  ZOOLO CASINO CLOUD v5.6.7")
+    print("  EDICION DE RESULTADOS + VALIDACIONES")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
