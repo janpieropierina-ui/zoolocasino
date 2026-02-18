@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.6.4 - FULL RESPONSIVE MOBILE OPTIMIZED
+ZOOLO CASINO CLOUD v5.6.5 - GRID HORARIOS PC OPTIMIZADO
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co ').strip()
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
@@ -439,7 +439,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text=  {urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -711,7 +711,7 @@ def caja_historico():
                 jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
                 premio_ticket = 0
                 for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
+                    wa = resultados.get(j['hora'])
                     if wa:
                         if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
                             premio_ticket += calcular_premio_animal(j['monto'], wa)
@@ -1602,7 +1602,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.6.4<br>Optimizado para Móviles
+            Sistema ZOOLO CASINO v5.6.5<br>Optimizado para Móviles
         </div>
     </div>
 </body>
@@ -1775,7 +1775,7 @@ POS_HTML = '''
             }
         }
         
-        /* Horarios */
+        /* Horarios - MOBILE: Scroll horizontal */
         .horarios {
             display: flex;
             gap: 6px;
@@ -1787,6 +1787,21 @@ POS_HTML = '''
             scrollbar-width: none;
         }
         .horarios::-webkit-scrollbar { display: none; }
+        
+        /* Horarios - PC: Grid de 2 filas */
+        @media (min-width: 1024px) {
+            .horarios {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+                grid-template-rows: repeat(2, 1fr);
+                grid-auto-flow: column;
+                overflow-x: visible;
+                overflow-y: visible;
+                gap: 8px;
+                max-height: none;
+                padding: 15px;
+            }
+        }
         
         .btn-hora {
             flex: 0 0 auto;
@@ -1802,6 +1817,17 @@ POS_HTML = '''
             line-height: 1.3;
             touch-action: manipulation;
         }
+        
+        @media (min-width: 1024px) {
+            .btn-hora {
+                flex: none;
+                min-width: auto;
+                width: 100%;
+                padding: 12px 8px;
+                font-size: 0.85rem;
+            }
+        }
+        
         .btn-hora.active { 
             background: linear-gradient(135deg, #27ae60, #229954); 
             color: white; 
@@ -3807,8 +3833,8 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.6.4")
-    print("  FULL RESPONSIVE - Mobile Optimized")
+    print("  ZOOLO CASINO CLOUD v5.6.5")
+    print("  GRID HORARIOS PC - Mobile Optimized")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
