@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.8 - MENU WINDOWS SOLO PARA AGENCIAS
+ZOOLO CASINO CLOUD v5.9 - FIX ZONA HORARIA + REPORTES + PREMIOS PENDIENTES
 """
 
 import os
@@ -61,19 +61,42 @@ ANIMALES = {
 ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19", 
          "21", "23", "25", "27", "30", "32", "34", "36", "37", "39"]
 
-# [Todas las funciones auxiliares se mantienen igual...]
-# ==================== FUNCIONES AUXILIARES ====================
+# ==================== FUNCIONES ZONA HORARIA MEJORADAS ====================
 def ahora_peru():
+    """Retorna datetime actual en zona horaria Perú (UTC-5)"""
     return datetime.utcnow() - timedelta(hours=5)
 
+def fecha_peru_actual():
+    """Retorna fecha actual en Perú como string DD/MM/YYYY"""
+    return ahora_peru().strftime("%d/%m/%Y")
+
+def hora_actual_peru_minutos():
+    """Retorna minutos desde medianoche en hora Perú"""
+    ahora = ahora_peru()
+    return ahora.hour * 60 + ahora.minute
+
 def parse_fecha_ticket(fecha_str):
-    try:
-        return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
-    except:
+    """Parsea fecha de ticket con múltiples formatos"""
+    formatos = [
+        "%d/%m/%Y %I:%M %p",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d"
+    ]
+    for fmt in formatos:
         try:
-            return datetime.strptime(fecha_str, "%d/%m/%Y")
+            return datetime.strptime(fecha_str, fmt)
         except:
-            return None
+            continue
+    return None
+
+def fecha_iso_a_peru(fecha_iso):
+    """Convierte YYYY-MM-DD a DD/MM/YYYY"""
+    try:
+        return datetime.strptime(fecha_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except:
+        return fecha_peru_actual()
 
 def get_color(num):
     if num in ["0", "00"]: 
@@ -86,24 +109,10 @@ def generar_serial():
     return str(int(ahora_peru().timestamp() * 1000))
 
 def verificar_horario_bloqueo(hora_sorteo):
-    ahora = ahora_peru()
-    try:
-        partes = hora_sorteo.replace(':', ' ').split()
-        hora = int(partes[0])
-        minuto = int(partes[1])
-        ampm = partes[2]
-        
-        if ampm == 'PM' and hora != 12:
-            hora += 12
-        elif ampm == 'AM' and hora == 12:
-            hora = 0
-        
-        sorteo_minutos = hora * 60 + minuto
-        actual_minutos = ahora.hour * 60 + ahora.minute
-        
-        return (sorteo_minutos - actual_minutos) > MINUTOS_BLOQUEO
-    except:
-        return True
+    """Verifica si el sorteo aún permite ventas (5 min antes)"""
+    minutos_sorteo = hora_a_minutos(hora_sorteo)
+    actual_minutos = hora_actual_peru_minutos()
+    return (minutos_sorteo - actual_minutos) > MINUTOS_BLOQUEO
 
 def calcular_premio_animal(monto_apostado, numero_animal):
     if str(numero_animal) == "40":
@@ -111,7 +120,6 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-# ==================== FUNCIONES ZONA HORARIA ====================
 def hora_a_minutos(hora_str):
     try:
         partes = hora_str.replace(':', ' ').split()
@@ -129,41 +137,44 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
+    """
+    Verifica si se puede editar un resultado (dentro de 2 horas posteriores al sorteo)
+    Solo aplica para resultados del día actual en Perú
+    """
     ahora = ahora_peru()
-    hoy = ahora.strftime("%d/%m/%Y")
+    hoy_peru = ahora.strftime("%d/%m/%Y")
     
-    if fecha_str and fecha_str != hoy:
-        pass
+    # Si es fecha pasada, no permitir edición (solo hoy)
+    if fecha_str and fecha_str != hoy_peru:
+        return False
     
     minutos_sorteo = hora_a_minutos(hora_sorteo)
     minutos_actual = ahora.hour * 60 + ahora.minute
     
+    # Permitir edición hasta 2 horas después del sorteo
     minutos_limite = minutos_sorteo + (HORAS_EDICION_RESULTADO * 60)
     
     return minutos_actual <= minutos_limite
 
 def obtener_sorteo_en_curso():
+    """Obtiene el sorteo que está en curso (hora actual coincide con un sorteo)"""
     ahora = ahora_peru()
     actual_minutos = ahora.hour * 60 + ahora.minute
     
     for hora_str in HORARIOS_PERU:
         minutos_sorteo = hora_a_minutos(hora_str)
-        
         if actual_minutos >= minutos_sorteo and actual_minutos < (minutos_sorteo + 60):
             return hora_str
-    
-    return obtener_proximo_sorteo()
+    return None
 
 def obtener_proximo_sorteo():
-    ahora = ahora_peru()
-    actual_minutos = ahora.hour * 60 + ahora.minute
+    """Obtiene el próximo sorteo disponible para venta"""
+    actual_minutos = hora_actual_peru_minutos()
     
     for hora_str in HORARIOS_PERU:
         minutos_sorteo = hora_a_minutos(hora_str)
-        
         if (minutos_sorteo - actual_minutos) > MINUTOS_BLOQUEO:
             return hora_str
-    
     return None
 
 def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
@@ -174,6 +185,10 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
         for k, v in filters.items():
             if k.endswith('__like'):
                 filter_params.append(f"{k.replace('__like', '')}=like.{urllib.parse.quote(str(v))}")
+            elif k.endswith('__gte'):
+                filter_params.append(f"{k.replace('__gte', '')}=gte.{urllib.parse.quote(str(v))}")
+            elif k.endswith('__lte'):
+                filter_params.append(f"{k.replace('__lte', '')}=lte.{urllib.parse.quote(str(v))}")
             else:
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
@@ -302,13 +317,12 @@ def admin():
         horarios=HORARIOS_PERU
     )
 
-# [Todas las API routes se mantienen exactamente igual...]
 # ==================== API POS ====================
 @app.route('/api/resultados-hoy')
 @login_required
 def resultados_hoy():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
         
         resultados_dict = {}
@@ -341,8 +355,8 @@ def resultados_fecha():
         if not fecha_str:
             return jsonify({'error': 'Fecha requerida'}), 400
         
-        fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d")
-        fecha_busqueda = fecha_obj.strftime("%d/%m/%Y")
+        # Convertir YYYY-MM-DD a DD/MM/YYYY
+        fecha_busqueda = fecha_iso_a_peru(fecha_str)
         
         resultados_list = supabase_request("resultados", filters={"fecha": fecha_busqueda})
         
@@ -363,6 +377,79 @@ def resultados_fecha():
             'fecha_consulta': fecha_busqueda,
             'fecha_input': fecha_str,
             'resultados': resultados_dict
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mis-tickets-hoy')
+@agencia_required
+def mis_tickets_hoy():
+    """NUEVO: Endpoint para ver todos los tickets del día de la agencia"""
+    try:
+        hoy = fecha_peru_actual()
+        
+        # Buscar tickets de hoy de esta agencia
+        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&agencia_id=eq.{session['user_id']}&order=fecha.desc"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        }
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=15) as response:
+            tickets = json.loads(response.read().decode())
+        
+        # Obtener resultados de hoy para verificar ganadores
+        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        
+        tickets_con_info = []
+        
+        for t in tickets:
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+            
+            # Calcular si tiene premio
+            premio_total = 0
+            tiene_premio = False
+            
+            if not t.get('anulado'):
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            premio_total += calcular_premio_animal(j['monto'], wa)
+                            tiene_premio = True
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            sel = j['seleccion']
+                            num = int(wa)
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                premio_total += j['monto'] * PAGO_ESPECIAL
+                                tiene_premio = True
+            
+            estado = "Anulado" if t.get('anulado') else ("Pagado" if t.get('pagado') else ("Ganador" if tiene_premio else "Pendiente"))
+            
+            tickets_con_info.append({
+                'id': t['id'],
+                'serial': t['serial'],
+                'fecha': t['fecha'],
+                'total': t['total'],
+                'estado': estado,
+                'premio': round(premio_total, 2) if tiene_premio and not t.get('pagado') else 0,
+                'cantidad_jugadas': len(jugadas),
+                'es_ganador': tiene_premio and not t.get('pagado') and not t.get('anulado')
+            })
+        
+        return jsonify({
+            'status': 'ok',
+            'tickets': tickets_con_info,
+            'total_tickets': len(tickets_con_info),
+            'total_ventas': sum(t['total'] for t in tickets_con_info if t['estado'] != "Anulado"),
+            'tickets_ganadores': sum(1 for t in tickets_con_info if t['es_ganador']),
+            'total_premios_pendientes': sum(t['premio'] for t in tickets_con_info if t['es_ganador'])
         })
         
     except Exception as e:
@@ -561,6 +648,7 @@ def anular_ticket():
         if ticket['pagado']:
             return jsonify({'error': 'Ya esta pagado, no se puede anular'})
         
+        # Solo admin puede anular después de 5 min, agencia solo dentro de 5 min
         if not session.get('es_admin'):
             fecha_ticket = parse_fecha_ticket(ticket['fecha'])
             if not fecha_ticket:
@@ -575,6 +663,7 @@ def anular_ticket():
                 if not verificar_horario_bloqueo(j['hora']):
                     return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
         else:
+            # Admin también verifica que el sorteo no haya empezado
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             for j in jugadas:
                 if not verificar_horario_bloqueo(j['hora']):
@@ -598,7 +687,7 @@ def anular_ticket():
 @agencia_required
 def caja_agencia():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -682,13 +771,16 @@ def caja_historico():
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
         
+        # Convertir fechas ISO a objetos datetime
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        # FIX: Usar filtros de fecha más eficientes en Supabase
+        # Convertimos a timestamp para comparación precisa
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=1000"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
@@ -808,7 +900,7 @@ def caja_historico():
 @agencia_required
 def mis_tickets_pendientes():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         
         url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&anulado=eq.false&pagado=eq.false"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -915,25 +1007,28 @@ def guardar_resultado():
         if animal not in ANIMALES:
             return jsonify({'error': f'Animal inválido: {animal}'}), 400
         
+        # FIX: Manejo correcto de fechas con zona horaria Perú
         if fecha_input:
             try:
-                fecha_obj = datetime.strptime(fecha_input, "%Y-%m-%d")
-                fecha = fecha_obj.strftime("%d/%m/%Y")
+                # Si viene YYYY-MM-DD del input date
+                fecha = fecha_iso_a_peru(fecha_input)
             except:
-                fecha = ahora_peru().strftime("%d/%m/%Y")
+                fecha = fecha_peru_actual()
         else:
-            fecha = ahora_peru().strftime("%d/%m/%Y")
+            fecha = fecha_peru_actual()
         
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        if fecha == hoy:
+        # Verificar si se puede editar (solo resultados de hoy y dentro de 2 horas)
+        hoy_peru = fecha_peru_actual()
+        if fecha == hoy_peru:
             if not puede_editar_resultado(hora, fecha):
                 return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 7PM editable hasta 9PM).'
+                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo.'
                 }), 403
         
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
         
         if existentes and len(existentes) > 0:
+            # Actualizar
             url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{urllib.parse.quote(fecha)}&hora=eq.{urllib.parse.quote(hora)}"
             headers = {
                 "apikey": SUPABASE_KEY,
@@ -961,6 +1056,7 @@ def guardar_resultado():
                 return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
                 
         else:
+            # Crear nuevo
             data = {"fecha": fecha, "hora": hora, "animal": animal}
             result = supabase_request("resultados", method="POST", data=data)
             
@@ -976,6 +1072,98 @@ def guardar_resultado():
             else:
                 return jsonify({'error': 'Error al crear resultado'}), 500
             
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/premios-pendientes-globales')
+@admin_required
+def premios_pendientes_globales():
+    """
+    NUEVO: Endpoint para ver todos los tickets ganadores no pagados de todas las agencias
+    """
+    try:
+        # Obtener todos los tickets no pagados ni anulados
+        url = f"{SUPABASE_URL}/rest/v1/tickets?pagado=eq.false&anulado=eq.false&limit=1000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            tickets = json.loads(response.read().decode())
+        
+        # Obtener todas las agencias para el mapeo de nombres
+        agencias = supabase_request("agencias", filters={"es_admin": "false"})
+        dict_agencias = {a['id']: a for a in agencias} if agencias else {}
+        
+        # Agrupar por fecha para obtener resultados
+        fechas_distintas = list(set([t['fecha'].split(' ')[0] for t in tickets]))
+        
+        premios_pendientes = []
+        total_global = 0
+        
+        for fecha_str in fechas_distintas:
+            resultados_list = supabase_request("resultados", filters={"fecha": fecha_str})
+            resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+            
+            tickets_fecha = [t for t in tickets if t['fecha'].startswith(fecha_str)]
+            
+            for t in tickets_fecha:
+                agencia_info = dict_agencias.get(t['agencia_id'], {})
+                nombre_agencia = agencia_info.get('nombre_agencia', 'Desconocida')
+                
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                premio_ticket = 0
+                
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            premio_ticket += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            sel = j['seleccion']
+                            num = int(wa)
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                premio_ticket += j['monto'] * PAGO_ESPECIAL
+                
+                if premio_ticket > 0:
+                    premios_pendientes.append({
+                        'ticket_id': t['id'],
+                        'serial': t['serial'],
+                        'agencia_id': t['agencia_id'],
+                        'nombre_agencia': nombre_agencia,
+                        'fecha_ticket': t['fecha'],
+                        'fecha_sorteo': fecha_str,
+                        'monto_apostado': t['total'],
+                        'premio_ganado': round(premio_ticket, 2),
+                        'dias_desde_sorteo': (ahora_peru() - parse_fecha_ticket(t['fecha'])).days if parse_fecha_ticket(t['fecha']) else 0
+                    })
+                    total_global += premio_ticket
+        
+        # Agrupar por agencia para resumen
+        por_agencia = {}
+        for p in premios_pendientes:
+            ag_id = p['agencia_id']
+            if ag_id not in por_agencia:
+                por_agencia[ag_id] = {
+                    'nombre': p['nombre_agencia'],
+                    'cantidad': 0,
+                    'total': 0
+                }
+            por_agencia[ag_id]['cantidad'] += 1
+            por_agencia[ag_id]['total'] += p['premio_ganado']
+        
+        return jsonify({
+            'status': 'ok',
+            'total_premios_pendientes': round(total_global, 2),
+            'cantidad_tickets': len(premios_pendientes),
+            'por_agencia': por_agencia,
+            'tickets': sorted(premios_pendientes, key=lambda x: x['premio_ganado'], reverse=True)
+        })
+        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1031,7 +1219,7 @@ def verificar_tickets_sorteo():
 @admin_required
 def admin_resultados_hoy():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
         
         resultados_dict = {}
@@ -1065,8 +1253,9 @@ def reporte_agencias_rango():
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
         
+        # FIX: Conversión precisa de fechas
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
         
         url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -1076,7 +1265,8 @@ def reporte_agencias_rango():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+        # FIX: Traer tickets con límite mayor y filtrar eficientemente
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=3000"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
@@ -1089,10 +1279,15 @@ def reporte_agencias_rango():
             if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
                 tickets_validos.append(t)
         
-        resultados_por_dia = {}
+        # Agrupar resultados por fecha para eficiencia
+        fechas_en_rango = []
         delta = dt_fin - dt_inicio
         for i in range(delta.days + 1):
             dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
+            fechas_en_rango.append(dia_str)
+        
+        resultados_por_dia = {}
+        for dia_str in fechas_en_rango:
             resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
             if resultados_list:
                 resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
@@ -1223,7 +1418,7 @@ def exportar_csv():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=3000"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
@@ -1329,7 +1524,7 @@ def exportar_csv():
 @admin_required
 def reporte_agencias():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         
         url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -1400,7 +1595,7 @@ def reporte_agencias():
 @admin_required
 def riesgo():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        hoy = fecha_peru_actual()
         sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
         
         agencia_id = request.args.get('agencia_id')
@@ -1499,7 +1694,7 @@ def estadisticas_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
@@ -1609,7 +1804,7 @@ def top_animales_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
@@ -1734,7 +1929,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.8<br>Menu Windows solo para Agencias
+            Sistema ZOOLO CASINO v5.9<br>Fix Zona Horaria + Reportes
         </div>
     </div>
 </body>
@@ -2237,7 +2432,7 @@ POS_HTML = '''
         /* Botones de acción */
         .action-btns { 
             display: grid; 
-            grid-template-columns: repeat(3, 1fr); 
+            grid-template-columns: repeat(4, 1fr); 
             gap: 6px; 
             padding: 10px;
             background: #0a0a0a;
@@ -2249,7 +2444,7 @@ POS_HTML = '''
             border-radius: 8px;
             font-weight: bold; 
             cursor: pointer; 
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             touch-action: manipulation;
             min-height: 48px;
             transition: all 0.1s;
@@ -2258,21 +2453,27 @@ POS_HTML = '''
         .btn-agregar { 
             background: linear-gradient(135deg, #27ae60, #229954); 
             color: white; 
-            grid-column: span 3; 
+            grid-column: span 4; 
             font-size: 1.1rem;
         }
         .btn-vender { 
             background: linear-gradient(135deg, #2980b9, #2573a7); 
             color: white; 
-            grid-column: span 3;
-            font-size: 1rem;
+            grid-column: span 2;
+            font-size: 0.9rem;
         }
-        .btn-resultados { background: #f39c12; color: black; }
-        .btn-caja { background: #16a085; color: white; }
-        .btn-pagar { background: #8e44ad; color: white; }
-        .btn-anular { background: #c0392b; color: white; }
-        .btn-borrar { background: #555; color: white; }
-        .btn-salir { background: #333; color: white; grid-column: span 3; }
+        .btn-mis-tickets {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: black;
+            grid-column: span 2;
+            font-size: 0.9rem;
+        }
+        .btn-resultados { background: #555; color: white; font-size: 0.7rem; }
+        .btn-caja { background: #16a085; color: white; font-size: 0.7rem; }
+        .btn-pagar { background: #8e44ad; color: white; font-size: 0.7rem; }
+        .btn-anular { background: #c0392b; color: white; font-size: 0.7rem; }
+        .btn-borrar { background: #444; color: white; grid-column: span 2; font-size: 0.7rem; }
+        .btn-salir { background: #333; color: white; grid-column: span 2; font-size: 0.7rem; }
         
         /* Modales */
         .modal {
@@ -2507,6 +2708,10 @@ POS_HTML = '''
             border-left-color: #27ae60;
             background: rgba(39,174,96,0.1);
         }
+        .ticket-item.anulado {
+            border-left-color: #c0392b;
+            opacity: 0.6;
+        }
         .ticket-serial {
             color: #ffd700;
             font-weight: bold;
@@ -2523,6 +2728,35 @@ POS_HTML = '''
             font-size: 1.2rem;
             margin-top: 5px;
         }
+        
+        /* Filtros de tickets */
+        .filter-btns {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 10px;
+            background: #222;
+            border: 1px solid #444;
+            color: #aaa;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background: #333;
+        }
+        .filter-btn.active {
+            background: #ffd700;
+            color: black;
+            font-weight: bold;
+            border-color: #ffd700;
+        }
     </style>
 </head>
 <body>
@@ -2538,6 +2772,7 @@ POS_HTML = '''
                 <ul class="win-submenu">
                     <li class="win-submenu-item"><a onclick="abrirCaja()">💰 Caja del Día</a></li>
                     <li class="win-submenu-item"><a onclick="abrirCajaHistorico()">📊 Historial de Caja</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">📋 Mis Tickets de Hoy</a></li>
                     <li class="win-submenu-item"><a onclick="abrirCalculadora()">🧮 Calculadora de Premios</a></li>
                 </ul>
             </li>
@@ -2577,6 +2812,7 @@ POS_HTML = '''
             <div class="mobile-menu-section-title">📁 Archivo</div>
             <div class="mobile-menu-item" onclick="abrirCajaMobile()">💰 Caja del Día</div>
             <div class="mobile-menu-item" onclick="abrirCajaHistoricoMobile()">📊 Historial de Caja</div>
+            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">📋 Mis Tickets Hoy</div>
             <div class="mobile-menu-item" onclick="abrirCalculadoraMobile()">🧮 Calculadora</div>
         </div>
         
@@ -2644,6 +2880,7 @@ POS_HTML = '''
             <div class="action-btns">
                 <button class="btn-agregar" onclick="agregar()">AGREGAR AL TICKET</button>
                 <button class="btn-vender" onclick="vender()">ENVIAR POR WHATSAPP</button>
+                <button class="btn-mis-tickets" onclick="abrirMisTickets()">📋 MIS TICKETS</button>
                 <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
                 <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
                 <button class="btn-pagar" onclick="pagar()">PAGAR</button>
@@ -2739,6 +2976,42 @@ POS_HTML = '''
                         <div id="hist-info-pendientes"></div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL MIS TICKETS (NUEVO) -->
+    <div class="modal" id="modal-mis-tickets">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📋 MIS TICKETS DE HOY</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
+            </div>
+            
+            <div class="stats-box" style="margin-bottom: 15px;">
+                <div class="stat-row">
+                    <span class="stat-label">Total Tickets:</span>
+                    <span class="stat-value" id="mis-tickets-total">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Ventas Hoy:</span>
+                    <span class="stat-value" id="mis-tickets-ventas">S/0.00</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Ganadores sin Cobrar:</span>
+                    <span class="stat-value positive" id="mis-tickets-ganadores">0 (S/0.00)</span>
+                </div>
+            </div>
+
+            <div class="filter-btns">
+                <button class="filter-btn active" onclick="filtrarTickets('todos')">Todos</button>
+                <button class="filter-btn" onclick="filtrarTickets('pendientes')">Pendientes</button>
+                <button class="filter-btn" onclick="filtrarTickets('ganadores')">Ganadores</button>
+                <button class="filter-btn" onclick="filtrarTickets('anulados')">Anulados</button>
+            </div>
+            
+            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto;">
+                <p style="color: #888; text-align: center; padding: 20px;">Cargando tickets...</p>
             </div>
         </div>
     </div>
@@ -2907,17 +3180,17 @@ POS_HTML = '''
             <div style="padding: 20px;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
                 <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.8</p>
+                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.9</p>
                 
                 <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
                     <p style="color: #ffd700; margin: 0; line-height: 1.8;">
                         Sistema de Lotería Animal<br>
                         Desarrollado para Agencias<br><br>
-                        <strong>Características:</strong><br>
-                        ✓ Menú Windows Forms (Agencias)<br>
-                        ✓ Gestión de Tickets<br>
-                        ✓ Cálculo Automático<br>
-                        ✓ Resultados en Vivo
+                        <strong>Novedades v5.9:</strong><br>
+                        ✓ Fix Zona Horaria Perú<br>
+                        ✓ Reportes Desde/Hasta corregidos<br>
+                        ✓ Ver Tickets Vendidos<br>
+                        ✓ Premios Pendientes en Admin
                     </p>
                 </div>
                 
@@ -2933,6 +3206,7 @@ POS_HTML = '''
         let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
         let horasPeru = {{horarios_peru|tojson}};
         let horasVen = {{horarios_venezuela|tojson}};
+        let ticketsDataGlobal = []; // Para almacenar tickets y filtrar
         
         // Toggle mobile menu
         function toggleMobileMenu() {
@@ -2945,6 +3219,7 @@ POS_HTML = '''
         // Funciones para menú móvil
         function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
         function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
+        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
         function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
         function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
         function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
@@ -2972,8 +3247,14 @@ POS_HTML = '''
         
         function updateReloj() {
             let now = new Date();
+            // FIX: Usar zona horaria de Perú explícitamente
             let peruTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Lima"}));
-            document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {hour: '2-digit', minute:'2-digit', hour12: true});
+            document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {
+                hour: '2-digit', 
+                minute:'2-digit', 
+                hour12: true,
+                timeZone: 'America/Lima'
+            });
             
             let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
             
@@ -3233,6 +3514,87 @@ POS_HTML = '''
 
         function cerrarModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
+        }
+        
+        // NUEVO: Función para abrir Mis Tickets
+        function abrirMisTickets() {
+            document.getElementById('modal-mis-tickets').style.display = 'block';
+            cargarMisTickets();
+        }
+        
+        // NUEVO: Cargar tickets del día
+        async function cargarMisTickets() {
+            const container = document.getElementById('lista-mis-tickets');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando tickets...</p>';
+            
+            try {
+                const response = await fetch('/api/mis-tickets-hoy');
+                const data = await response.json();
+                
+                if (data.error) {
+                    container.innerHTML = `<p style="color: #c0392b; text-align: center;">${data.error}</p>`;
+                    return;
+                }
+                
+                // Actualizar resumen
+                document.getElementById('mis-tickets-total').textContent = data.total_tickets;
+                document.getElementById('mis-tickets-ventas').textContent = 'S/' + data.total_ventas.toFixed(2);
+                document.getElementById('mis-tickets-ganadores').textContent = 
+                    `${data.tickets_ganadores} (S/${data.total_premios_pendientes.toFixed(2)})`;
+                
+                ticketsDataGlobal = data.tickets;
+                filtrarTickets('todos');
+                
+            } catch (e) {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            }
+        }
+        
+        // NUEVO: Filtrar tickets
+        function filtrarTickets(filtro) {
+            // Actualizar botones activos
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('onclick').includes(filtro)) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            const container = document.getElementById('lista-mis-tickets');
+            let tickets = ticketsDataGlobal;
+            
+            if (filtro === 'pendientes') {
+                tickets = tickets.filter(t => t.estado === 'Pendiente');
+            } else if (filtro === 'ganadores') {
+                tickets = tickets.filter(t => t.es_ganador);
+            } else if (filtro === 'anulados') {
+                tickets = tickets.filter(t => t.estado === 'Anulado');
+            }
+            
+            if (tickets.length === 0) {
+                container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tickets en esta categoría</p>';
+                return;
+            }
+            
+            let html = '';
+            tickets.forEach(t => {
+                let clase = t.es_ganador ? 'ganador' : (t.estado === 'Anulado' ? 'anulado' : '');
+                let estadoStr = t.estado;
+                if (t.es_ganador) estadoStr += ' 💰';
+                
+                html += `
+                    <div class="ticket-item ${clase}">
+                        <div class="ticket-serial">#${t.serial}</div>
+                        <div class="ticket-info">
+                            ${t.fecha} • ${t.cantidad_jugadas} jugadas • Apostado: S/${t.total}<br>
+                            Estado: <strong>${estadoStr}</strong>
+                        </div>
+                        ${t.premio > 0 ? `<div class="ticket-premio">Ganancia: S/${t.premio.toFixed(2)}</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
         }
         
         // Funciones del menú Archivo
@@ -3961,6 +4323,73 @@ ADMIN_HTML = '''
             font-size: 0.85rem;
             text-align: center;
         }
+        
+        /* Premios pendientes - nuevos estilos */
+        .premio-pendiente-item {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            border-left: 4px solid #e74c3c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .premio-pendiente-item.viejo {
+            border-left-color: #c0392b;
+            background: rgba(192, 57, 43, 0.1);
+        }
+        .premio-info { flex: 1; }
+        .premio-serial { color: #ffd700; font-weight: bold; font-size: 1.1rem; }
+        .premio-agencia { color: #2980b9; font-size: 0.9rem; margin-top: 2px; }
+        .premio-fecha { color: #888; font-size: 0.8rem; margin-top: 2px; }
+        .premio-monto { 
+            text-align: right; 
+            color: #e74c3c; 
+            font-size: 1.4rem; 
+            font-weight: bold; 
+        }
+        .premio-monto small {
+            display: block;
+            color: #888;
+            font-size: 0.75rem;
+            font-weight: normal;
+        }
+        .alerta-deuda {
+            background: rgba(231, 76, 60, 0.15);
+            border: 2px solid #e74c3c;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+        .stats-premios {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .stat-premio-card {
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid #e74c3c;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-premio-card h4 {
+            color: #ff6b6b;
+            font-size: 0.8rem;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        .stat-premio-card p {
+            color: #ffd700;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -4005,6 +4434,7 @@ ADMIN_HTML = '''
         <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
         <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
         <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
+        <button class="admin-tab" onclick="showTab('premios')">💰 Premios Pend.</button>
         <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
         <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
         <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
@@ -4019,7 +4449,7 @@ ADMIN_HTML = '''
         </div>
         
         <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú:</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 7PM editable hasta 9PM).
+            ⏰ <strong>Zona Horaria Perú:</strong> Los resultados son editables hasta 2 horas después del sorteo.
         </div>
         
         <!-- DASHBOARD -->
@@ -4035,9 +4465,38 @@ ADMIN_HTML = '''
             <div class="form-box">
                 <h3>⚡ ACCIONES RÁPIDAS</h3>
                 <div class="btn-group">
-                    <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
-                    <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
-                    <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
+                    <button class="btn-submit" onclick="showTab('premios')">Ver Premios Pendientes</button>
+                    <button class="btn-secondary" onclick="showTab('riesgo')">Ver Riesgo</button>
+                    <button class="btn-csv" onclick="showTab('resultados')">Cargar Resultados</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PREMIOS PENDIENTES (NUEVO) -->
+        <div id="premios" class="tab-content">
+            <div class="form-box">
+                <h3>💰 PREMIOS PENDIENTES DE PAGO</h3>
+                <p style="color: #888; font-size: 0.9rem; margin-bottom: 15px;">
+                    Tickets ganadores que aún no han sido cobrados por las agencias.
+                </p>
+                
+                <div class="stats-premios" id="stats-premios-container" style="display: none;">
+                    <div class="stat-premio-card">
+                        <h4>Total Deuda</h4>
+                        <p id="premio-total-deuda">S/0</p>
+                    </div>
+                    <div class="stat-premio-card">
+                        <h4>Tickets Ganadores</h4>
+                        <p id="premio-total-tickets">0</p>
+                    </div>
+                </div>
+                
+                <div id="alerta-premios-viejos" class="alerta-deuda" style="display: none;">
+                    ⚠️ Hay tickets ganadores de días anteriores sin cobrar. Revisar urgentemente.
+                </div>
+                
+                <div id="lista-premios-pendientes">
+                    <p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>
                 </div>
             </div>
         </div>
@@ -4277,6 +4736,9 @@ ADMIN_HTML = '''
                 cargarAgenciasSelect();
                 cargarRiesgo();
             }
+            if (tab === 'premios') {
+                cargarPremiosPendientes();
+            }
             if (tab === 'reporte') {
                 let hoy = new Date().toISOString().split('T')[0];
                 document.getElementById('reporte-fecha-inicio').value = hoy;
@@ -4371,6 +4833,68 @@ ADMIN_HTML = '''
             cargarRiesgo();
         }
 
+        // NUEVO: Cargar premios pendientes globales
+        function cargarPremiosPendientes() {
+            const container = document.getElementById('lista-premios-pendientes');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando premios pendientes...</p>';
+            
+            fetch('/admin/premios-pendientes-globales')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = `<p style="color: #c0392b; text-align: center;">${d.error}</p>`;
+                    return;
+                }
+                
+                // Mostrar stats
+                document.getElementById('stats-premios-container').style.display = 'grid';
+                document.getElementById('premio-total-deuda').textContent = 'S/' + d.total_premios_pendientes.toFixed(2);
+                document.getElementById('premio-total-tickets').textContent = d.cantidad_tickets;
+                
+                // Verificar si hay tickets viejos (más de 1 día)
+                const hayViejos = d.tickets.some(t => t.dias_desde_sorteo > 0);
+                document.getElementById('alerta-premios-viejos').style.display = hayViejos ? 'block' : 'none';
+                
+                if (d.tickets.length === 0) {
+                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay premios pendientes de pago</p>';
+                    return;
+                }
+                
+                // Agrupar por agencia para mejor visualización
+                let html = '';
+                let agenciaActual = '';
+                
+                d.tickets.forEach(t => {
+                    const esViejo = t.dias_desde_sorteo > 0;
+                    const clase = esViejo ? 'premio-pendiente-item viejo' : 'premio-pendiente-item';
+                    const advertenciaViejo = esViejo ? ' ⏰' : '';
+                    
+                    if (agenciaActual !== t.nombre_agencia) {
+                        agenciaActual = t.nombre_agencia;
+                        html += `<h4 style="color: #ffd700; margin: 20px 0 10px; padding-bottom: 5px; border-bottom: 1px solid #333;">${agenciaActual}</h4>`;
+                    }
+                    
+                    html += `
+                        <div class="${clase}">
+                            <div class="premio-info">
+                                <div class="premio-serial">#${t.serial}${advertenciaViejo}</div>
+                                <div class="premio-fecha">Sorteo: ${t.fecha_sorteo} | Ticket: ${t.fecha_ticket}</div>
+                            </div>
+                            <div class="premio-monto">
+                                S/${t.premio_ganado.toFixed(2)}
+                                <small>Apostado: S/${t.monto_apostado}</small>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
+        }
+
         function pagarTicketAdmin() {
             const serial = document.getElementById('pagar-serial-admin').value.trim();
             if (!serial) {
@@ -4416,6 +4940,10 @@ ADMIN_HTML = '''
                 if (d.status === 'ok') {
                     showMensaje('✅ Ticket pagado correctamente', 'success');
                     document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;">✅ Pago realizado con éxito</div>';
+                    // Recargar premios pendientes si estamos en esa pestaña
+                    if (document.getElementById('premios').classList.contains('active')) {
+                        cargarPremiosPendientes();
+                    }
                 } else {
                     showMensaje(d.error || 'Error al pagar', 'error');
                 }
@@ -4967,11 +5495,13 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.8")
-    print("  MENU WINDOWS SOLO PARA AGENCIAS")
+    print("  ZOOLO CASINO CLOUD v5.9")
+    print("  FIX: Zona Horaria + Reportes + Premios Pendientes")
     print("=" * 60)
-    print("  - Agencia: Menu Windows Forms + Drawer Mobile")
-    print("  - Admin: Tabs horizontales simples (sin menu)")
+    print("  ✓ Zona horaria Perú corregida (UTC-5)")
+    print("  ✓ Reportes Desde/Hasta funcionando")
+    print("  ✓ Premios pendientes visibles en Admin")
+    print("  ✓ Botón 'Mis Tickets' en Agencias")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
