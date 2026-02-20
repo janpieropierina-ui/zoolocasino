@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.8 - MENU WINDOWS AGENCIA + ADMIN
+ZOOLO CASINO CLOUD v5.8 - MENU WINDOWS SOLO PARA AGENCIAS
 """
 
 import os
@@ -61,6 +61,7 @@ ANIMALES = {
 ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19", 
          "21", "23", "25", "27", "30", "32", "34", "36", "37", "39"]
 
+# [Todas las funciones auxiliares se mantienen igual...]
 # ==================== FUNCIONES AUXILIARES ====================
 def ahora_peru():
     return datetime.utcnow() - timedelta(hours=5)
@@ -301,6 +302,7 @@ def admin():
         horarios=HORARIOS_PERU
     )
 
+# [Todas las API routes se mantienen exactamente igual...]
 # ==================== API POS ====================
 @app.route('/api/resultados-hoy')
 @login_required
@@ -454,7 +456,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -1732,7 +1734,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.8<br>Menu Windows Agencia + Admin
+            Sistema ZOOLO CASINO v5.8<br>Menu Windows solo para Agencias
         </div>
     </div>
 </body>
@@ -1758,7 +1760,7 @@ POS_HTML = '''
         }
         
         /* ==========================================
-           MENU WINDOWS FORMS - AGENCIA
+           MENU WINDOWS FORMS - AGENCIA (DESKTOP)
            ========================================== */
         .win-menu-bar {
             background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
@@ -2524,7 +2526,7 @@ POS_HTML = '''
     </style>
 </head>
 <body>
-    <!-- MENU DESKTOP - WINDOWS FORMS STYLE -->
+    <!-- MENU DESKTOP - WINDOWS FORMS STYLE (SOLO AGENCIA) -->
     <div class="win-menu-bar">
         <div class="win-menu-header">
             <div class="win-title">🦁 {{agencia}}</div>
@@ -2558,7 +2560,7 @@ POS_HTML = '''
         </ul>
     </div>
 
-    <!-- MENU MOBIL - HAMBURGER -->
+    <!-- MENU MOBIL - HAMBURGER (SOLO AGENCIA) -->
     <div class="mobile-header">
         <div class="mobile-title">🦁 {{agencia}}</div>
         <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
@@ -2912,7 +2914,7 @@ POS_HTML = '''
                         Sistema de Lotería Animal<br>
                         Desarrollado para Agencias<br><br>
                         <strong>Características:</strong><br>
-                        ✓ Menú Windows Forms<br>
+                        ✓ Menú Windows Forms (Agencias)<br>
                         ✓ Gestión de Tickets<br>
                         ✓ Cálculo Automático<br>
                         ✓ Resultados en Vivo
@@ -3539,254 +3541,73 @@ ADMIN_HTML = '''
             line-height: 1.5;
         }
         
-        /* ==========================================
-           MENU WINDOWS FORMS - DESKTOP (Horizontal)
-           ========================================== */
-        .win-menu-bar {
-            background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
-            border-bottom: 2px solid #000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .win-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 15px;
+        /* Header simple para Admin (sin menú Windows Forms) */
+        .admin-header {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
-            border-bottom: 1px solid #000;
-        }
-        
-        .win-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .win-menu-items {
-            display: flex;
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            background: #2d2d2d;
-        }
-        
-        .win-menu-item {
-            position: relative;
-        }
-        
-        .win-menu-item > a {
-            display: block;
-            padding: 10px 20px;
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.9rem;
-            border-right: 1px solid #444;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-menu-item:hover > a {
-            background: linear-gradient(180deg, #404040 0%, #333 100%);
-            color: #ffd700;
-        }
-        
-        .win-submenu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #2d2d2d;
-            border: 1px solid #555;
-            border-top: none;
-            min-width: 220px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            z-index: 1001;
-        }
-        
-        .win-menu-item:hover .win-submenu {
-            display: block;
-        }
-        
-        .win-submenu-item {
-            border-bottom: 1px solid #444;
-        }
-        
-        .win-submenu-item:last-child {
-            border-bottom: none;
-        }
-        
-        .win-submenu-item a {
-            display: block;
-            padding: 12px 20px;
-            color: #ddd;
-            text-decoration: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-submenu-item a:hover {
-            background: #ffd700;
-            color: #000;
-            padding-left: 25px;
-        }
-        
-        .win-submenu-item a::before {
-            content: "▸";
-            margin-right: 8px;
-            color: #888;
-        }
-        
-        .win-submenu-item a:hover::before {
-            color: #000;
-        }
-        
-        /* ==========================================
-           MENU HAMBURGER - MOBIL
-           ========================================== */
-        .mobile-header {
-            display: none;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 12px 15px;
-            justify-content: space-between;
-            align-items: center;
+            padding: 15px;
             border-bottom: 2px solid #ffd700;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             position: sticky;
             top: 0;
             z-index: 1000;
         }
         
-        .mobile-title {
+        .admin-title {
             color: #ffd700;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             font-weight: bold;
         }
         
-        .hamburger-btn {
+        .logout-btn {
+            background: #c0392b;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        /* Tabs de navegación simples (horizontal) */
+        .admin-tabs {
+            display: flex;
+            background: #1a1a2e;
+            border-bottom: 1px solid #333;
+            overflow-x: auto;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .admin-tabs::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .admin-tab {
+            flex: 1;
+            min-width: 100px;
+            padding: 15px 10px;
             background: transparent;
             border: none;
-            color: #ffd700;
-            font-size: 1.5rem;
+            color: #888;
             cursor: pointer;
-            padding: 5px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mobile-menu {
-            display: none;
-            position: fixed;
-            top: 0;
-            right: -300px;
-            width: 280px;
-            height: 100vh;
-            background: linear-gradient(180deg, #1a1a2e 0%, #0a0a0a 100%);
-            border-left: 2px solid #ffd700;
-            z-index: 2000;
-            transition: right 0.3s ease;
-            overflow-y: auto;
-        }
-        
-        .mobile-menu.active {
-            right: 0;
-        }
-        
-        .mobile-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-        }
-        
-        .close-menu-btn {
-            background: #c0392b;
-            border: none;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.1rem;
-        }
-        
-        .mobile-menu-section {
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-section-title {
-            background: rgba(255,215,0,0.1);
-            color: #ffd700;
-            padding: 12px 15px;
             font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px solid #333;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
         }
         
-        .mobile-menu-item {
-            padding: 15px;
-            color: #fff;
-            cursor: pointer;
-            border-bottom: 1px solid #222;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.95rem;
+        .admin-tab:hover {
+            color: #ffd700;
+            background: rgba(255,215,0,0.05);
         }
         
-        .mobile-menu-item:active {
-            background: rgba(255,215,0,0.1);
-        }
-        
-        .mobile-menu-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            z-index: 1999;
-        }
-        
-        .mobile-menu-overlay.active {
-            display: block;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .win-menu-bar {
-                display: none;
-            }
-            .mobile-header {
-                display: flex;
-            }
-            .mobile-menu {
-                display: block;
-            }
-        }
-        
-        @media (min-width: 769px) {
-            .mobile-menu, .mobile-menu-overlay {
-                display: none !important;
-            }
+        .admin-tab.active {
+            color: #ffd700;
+            border-bottom-color: #ffd700;
+            font-weight: bold;
         }
         
         /* Contenido */
@@ -4129,17 +3950,6 @@ ADMIN_HTML = '''
             min-width: 80px;
         }
         
-        .logout-btn {
-            background: #c0392b;
-            color: white;
-            border: none;
-            padding: 8px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.85rem;
-        }
-        
         /* Info de zona horaria */
         .timezone-info {
             background: rgba(41, 128, 185, 0.1);
@@ -4184,92 +3994,21 @@ ADMIN_HTML = '''
         </div>
     </div>
 
-    <!-- MENU DESKTOP - WINDOWS FORMS STYLE -->
-    <div class="win-menu-bar">
-        <div class="win-menu-header">
-            <div class="win-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
-            <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
-        </div>
-        <ul class="win-menu-items">
-            <li class="win-menu-item">
-                <a>📁 Archivo</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="showTab('dashboard')">📊 Dashboard / Auditor</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('calculadora')">🧮 Calcular Premio</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('parametros')">⚙️ Parámetros del Sistema</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>🔄 Movimientos</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="eliminarListas()">🗑️ Eliminar Listas (Limpiar)</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('anular')">❌ Borrar Tickets</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('pagar')">💰 Pagar Ticket</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>🔍 Consultas</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="showTab('resultados')">📋 Resultados</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('status')">📊 Status Tickets</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('reporte')">🏢 Tickets Por Pagar/Pagados</a></li>
-                    <li class="win-submenu-item"><a onclick="cargarAnulados()">🗑️ Tickets Anulados</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>❓ Ayuda</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="showTab('reglas')">📖 Reglas de Pago</a></li>
-                    <li class="win-submenu-item"><a onclick="showTab('acerca')">ℹ️ Acerca del Sistema</a></li>
-                </ul>
-            </li>
-        </ul>
+    <!-- Header Simple para Admin (Sin menú Windows) -->
+    <div class="admin-header">
+        <div class="admin-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
+        <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
     </div>
 
-    <!-- MENU MOBIL - HAMBURGER -->
-    <div class="mobile-header">
-        <div class="mobile-title">👑 PANEL ADMIN</div>
-        <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
-    </div>
-    
-    <div class="mobile-menu-overlay" onclick="toggleMobileMenu()"></div>
-    <div class="mobile-menu" id="mobileMenu">
-        <div class="mobile-menu-header">
-            <div class="mobile-menu-title">MENÚ</div>
-            <button class="close-menu-btn" onclick="toggleMobileMenu()">×</button>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">📁 Archivo</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('dashboard')">📊 Dashboard / Auditor</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('calculadora')">🧮 Calcular Premio</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('parametros')">⚙️ Parámetros</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">🔄 Movimientos</div>
-            <div class="mobile-menu-item" onclick="eliminarListasMobile()">🗑️ Eliminar Listas</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('anular')">❌ Borrar Tickets</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('pagar')">💰 Pagar Ticket</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">🔍 Consultas</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('resultados')">📋 Resultados</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('status')">📊 Status Tickets</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('reporte')">🏢 Por Pagar/Pagados</div>
-            <div class="mobile-menu-item" onclick="cargarAnuladosMobile()">🗑️ Anulados</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">❓ Ayuda</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('reglas')">📖 Reglas de Pago</div>
-            <div class="mobile-menu-item" onclick="showTabMobile('acerca')">ℹ️ Acerca de</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-item" onclick="location.href='/logout'" style="color: #e74c3c; font-weight: bold;">🚪 Cerrar Sesión</div>
-        </div>
+    <!-- Tabs de Navegación Simple (reemplaza al menú Windows) -->
+    <div class="admin-tabs">
+        <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
+        <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
+        <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
+        <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
+        <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
+        <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
+        <button class="admin-tab" onclick="showTab('operaciones')">⚙️ Operaciones</button>
     </div>
 
     <div class="content">
@@ -4299,105 +4038,6 @@ ADMIN_HTML = '''
                     <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
                     <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
                     <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- CALCULADORA -->
-        <div id="calculadora" class="tab-content">
-            <div class="form-box">
-                <h3>🧮 CALCULAR PREMIO</h3>
-                <div class="form-row">
-                    <input type="number" id="calc-monto" placeholder="Monto apostado" min="1">
-                    <select id="calc-tipo">
-                        <option value="35">Animal Normal (x35)</option>
-                        <option value="70">Lechuza (x70)</option>
-                        <option value="2">Especial (x2)</option>
-                    </select>
-                </div>
-                <button class="btn-submit" onclick="calcularPremio()" style="width: 100%; margin-top: 10px;">CALCULAR</button>
-                <div id="calc-resultado" style="margin-top: 20px; text-align: center; font-size: 1.5rem; color: #ffd700; display: none;">
-                    Premio: <span id="calc-premio">S/0</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- PARAMETROS -->
-        <div id="parametros" class="tab-content">
-            <div class="form-box">
-                <h3>⚙️ PARÁMETROS DEL SISTEMA</h3>
-                <div class="stat-row">
-                    <span class="stat-label">Pago Animal Normal:</span>
-                    <span class="stat-value">x35</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Pago Lechuza (40):</span>
-                    <span class="stat-value">x70</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Pago Especiales:</span>
-                    <span class="stat-value">x2</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Comisión Agencia:</span>
-                    <span class="stat-value">15%</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Minutos Bloqueo:</span>
-                    <span class="stat-value">5 min antes</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Ventana Edición Resultados:</span>
-                    <span class="stat-value" style="color: #3498db;">2 horas después del sorteo</span>
-                </div>
-                <div class="timezone-info">
-                    <strong>Nota:</strong> El sorteo de 7:00 PM puede editarse hasta las 9:00 PM (2 horas después).
-                </div>
-            </div>
-        </div>
-
-        <!-- HISTORICO -->
-        <div id="historico" class="tab-content">
-            <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA</h3>
-                <div class="form-row">
-                    <input type="date" id="hist-fecha-inicio">
-                    <input type="date" id="hist-fecha-fin">
-                    <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
-                </div>
-                <div class="btn-group">
-                    <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
-                    <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
-                </div>
-                
-                <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 20px;">
-                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
-                        <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
-                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico"></tbody>
-                        </table>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
-                    <div id="top-animales-hist"></div>
                 </div>
             </div>
         </div>
@@ -4512,8 +4152,63 @@ ADMIN_HTML = '''
             </div>
         </div>
 
-        <!-- ANULAR -->
-        <div id="anular" class="tab-content">
+        <!-- HISTORICO -->
+        <div id="historico" class="tab-content">
+            <div class="form-box">
+                <h3>📅 CONSULTA HISTÓRICA</h3>
+                <div class="form-row">
+                    <input type="date" id="hist-fecha-inicio">
+                    <input type="date" id="hist-fecha-fin">
+                    <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
+                </div>
+                <div class="btn-group">
+                    <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
+                    <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
+                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
+                    <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
+                </div>
+                
+                <div id="historico-resumen" style="display:none;">
+                    <div class="stats-grid" style="margin-top: 20px;">
+                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
+                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
+                        <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
+                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
+                    </div>
+
+                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Tickets</th>
+                                    <th>Ventas</th>
+                                    <th>Premios</th>
+                                    <th>Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-historico"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
+                    <div id="top-animales-hist"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- OPERACIONES -->
+        <div id="operaciones" class="tab-content">
+            <div class="form-box">
+                <h3>💰 PAGAR TICKET</h3>
+                <div class="form-row">
+                    <input type="text" id="pagar-serial-admin" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
+                    <button class="btn-submit" onclick="pagarTicketAdmin()">VERIFICAR Y PAGAR</button>
+                </div>
+                <div id="resultado-pago-admin" style="margin-top: 15px;"></div>
+            </div>
+
             <div class="form-box">
                 <h3>❌ ANULAR TICKET</h3>
                 <div class="form-row">
@@ -4526,93 +4221,6 @@ ADMIN_HTML = '''
                     </small>
                 </div>
                 <div id="resultado-anular" style="margin-top: 15px; font-size: 1rem; text-align: center;"></div>
-            </div>
-        </div>
-
-        <!-- PAGAR (ADMIN) -->
-        <div id="pagar" class="tab-content">
-            <div class="form-box">
-                <h3>💰 PAGAR TICKET (ADMIN)</h3>
-                <div class="form-row">
-                    <input type="text" id="pagar-serial-admin" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-submit" onclick="pagarTicketAdmin()">VERIFICAR Y PAGAR</button>
-                </div>
-                <div id="resultado-pago-admin" style="margin-top: 15px;"></div>
-            </div>
-        </div>
-
-        <!-- STATUS TICKETS -->
-        <div id="status" class="tab-content">
-            <div class="form-box">
-                <h3>📊 STATUS DE TICKETS</h3>
-                <div class="form-row">
-                    <input type="date" id="status-fecha" value="">
-                    <button class="btn-submit" onclick="consultarStatusTickets()">CONSULTAR</button>
-                </div>
-                <div id="status-resultados" style="margin-top: 20px;"></div>
-            </div>
-        </div>
-
-        <!-- REGLAS -->
-        <div id="reglas" class="tab-content">
-            <div class="form-box">
-                <h3>📖 REGLAS DE PAGO</h3>
-                <div style="line-height: 2; color: #ddd;">
-                    <h4 style="color: #ffd700; margin: 15px 0;">🎯 Animales (00-39)</h4>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
-                        <li>Ejemplo: S/10 → S/350</li>
-                    </ul>
-                    
-                    <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li>Pago: <strong style="color: #e74c3c;">x70</strong> veces el monto apostado</li>
-                        <li>Ejemplo: S/10 → S/700</li>
-                        <li>¡Doble premio por el animal especial!</li>
-                    </ul>
-                    
-                    <h4 style="color: #ffd700; margin: 15px 0;">🎲 Apuestas Especiales</h4>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li>Rojo, Negro, Par, Impar</li>
-                        <li>Pago: <strong style="color: #2980b9;">x2</strong> veces el monto apostado</li>
-                        <li>Ejemplo: S/10 → S/20</li>
-                    </ul>
-                    
-                    <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Restricciones</h4>
-                    <ul style="margin-left: 20px;">
-                        <li>Tickets se pueden anular hasta 5 minutos después de creados</li>
-                        <li>Venta se bloquea 5 minutos antes de cada sorteo</li>
-                        <li>Resultados editables hasta 2 horas después del sorteo</li>
-                        <li>Tickets vencen a los 3 días</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <!-- ACERCA -->
-        <div id="acerca" class="tab-content">
-            <div class="form-box" style="text-align: center;">
-                <h3>ℹ️ ACERCA DEL SISTEMA</h3>
-                <div style="padding: 30px;">
-                    <div style="font-size: 3rem; margin-bottom: 20px;">🦁</div>
-                    <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO CLOUD</h2>
-                    <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.8</p>
-                    <p style="color: #aaa; line-height: 1.8; margin-bottom: 30px;">
-                        Sistema de gestión de lotería animal<br>
-                        Desarrollado para Perú y Venezuela<br>
-                        Zona horaria: Perú (UTC-5)
-                    </p>
-                    <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3);">
-                        <p style="color: #ffd700; margin: 0;">
-                            <strong>Características:</strong><br>
-                            ✓ Edición de resultados con ventana de 2 horas<br>
-                            ✓ Menú estilo Windows Forms<br>
-                            ✓ Gestión multi-agencia<br>
-                            ✓ Cálculo automático de premios<br>
-                            ✓ Exportación CSV
-                        </p>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -4648,22 +4256,22 @@ ADMIN_HTML = '''
         let editandoFecha = null;
         let editandoHora = null;
 
-        // Toggle mobile menu
-        function toggleMobileMenu() {
-            const menu = document.getElementById('mobileMenu');
-            const overlay = document.querySelector('.mobile-menu-overlay');
-            menu.classList.toggle('active');
-            overlay.classList.toggle('active');
-        }
-
         function showTab(tab) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.win-menu-items .active').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
             
             const target = document.getElementById(tab);
             if (target) {
                 target.classList.add('active');
             }
+            
+            // Marcar el botón correspondiente como activo
+            const buttons = document.querySelectorAll('.admin-tab');
+            buttons.forEach(btn => {
+                if (btn.getAttribute('onclick').includes("'" + tab + "'")) {
+                    btn.classList.add('active');
+                }
+            });
             
             if (tab === 'riesgo') {
                 cargarAgenciasSelect();
@@ -4682,14 +4290,6 @@ ADMIN_HTML = '''
                 document.getElementById('admin-resultados-fecha').value = hoy;
                 cargarResultadosAdmin();
             }
-            if (tab === 'status') {
-                document.getElementById('status-fecha').value = new Date().toISOString().split('T')[0];
-            }
-        }
-
-        function showTabMobile(tab) {
-            toggleMobileMenu();
-            showTab(tab);
         }
 
         function showMensaje(msg, tipo) {
@@ -4771,66 +4371,6 @@ ADMIN_HTML = '''
             cargarRiesgo();
         }
 
-        function eliminarListas() {
-            if (confirm('¿Eliminar todas las listas y limpiar el sistema?')) {
-                showMensaje('Listas eliminadas correctamente', 'success');
-            }
-        }
-
-        function eliminarListasMobile() {
-            toggleMobileMenu();
-            eliminarListas();
-        }
-
-        function calcularPremio() {
-            const monto = parseFloat(document.getElementById('calc-monto').value) || 0;
-            const multiplicador = parseInt(document.getElementById('calc-tipo').value);
-            const premio = monto * multiplicador;
-            
-            document.getElementById('calc-premio').textContent = 'S/' + premio.toFixed(2);
-            document.getElementById('calc-resultado').style.display = 'block';
-        }
-
-        function consultarStatusTickets() {
-            const fecha = document.getElementById('status-fecha').value;
-            if (!fecha) {
-                showMensaje('Seleccione una fecha', 'error');
-                return;
-            }
-            
-            document.getElementById('status-resultados').innerHTML = `
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <h3>TOTAL TICKETS</h3>
-                        <p>0</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>PAGADOS</h3>
-                        <p>0</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>PENDIENTES</h3>
-                        <p>0</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>ANULADOS</h3>
-                        <p>0</p>
-                    </div>
-                </div>
-                <p style="color: #888; text-align: center; margin-top: 20px;">Consulta realizada para: ${fecha}</p>
-            `;
-        }
-
-        function cargarAnulados() {
-            showTab('reporte');
-            showMensaje('Mostrando tickets anulados del período', 'success');
-        }
-
-        function cargarAnuladosMobile() {
-            toggleMobileMenu();
-            cargarAnulados();
-        }
-
         function pagarTicketAdmin() {
             const serial = document.getElementById('pagar-serial-admin').value.trim();
             if (!serial) {
@@ -4879,6 +4419,39 @@ ADMIN_HTML = '''
                 } else {
                     showMensaje(d.error || 'Error al pagar', 'error');
                 }
+            });
+        }
+
+        function anularTicketAdmin() {
+            let serial = document.getElementById('anular-serial').value.trim();
+            if (!serial) {
+                showMensaje('Ingrese un serial', 'error');
+                return;
+            }
+            
+            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
+                return;
+            }
+            
+            fetch('/api/anular-ticket', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let resultadoDiv = document.getElementById('resultado-anular');
+                if (d.error) {
+                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
+                    showMensaje(d.error, 'error');
+                } else {
+                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
+                    showMensaje(d.mensaje, 'success');
+                    document.getElementById('anular-serial').value = '';
+                }
+            })
+            .catch(e => {
+                showMensaje('Error de conexión', 'error');
             });
         }
 
@@ -5344,39 +4917,6 @@ ADMIN_HTML = '''
             });
         }
 
-        function anularTicketAdmin() {
-            let serial = document.getElementById('anular-serial').value.trim();
-            if (!serial) {
-                showMensaje('Ingrese un serial', 'error');
-                return;
-            }
-            
-            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
-                return;
-            }
-            
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let resultadoDiv = document.getElementById('resultado-anular');
-                if (d.error) {
-                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
-                    showMensaje(d.error, 'error');
-                } else {
-                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
-                    showMensaje(d.mensaje, 'success');
-                    document.getElementById('anular-serial').value = '';
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
         function cargarAgencias() {
             fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
                 let tbody = document.getElementById('tabla-agencias');
@@ -5428,11 +4968,10 @@ ADMIN_HTML = '''
 if __name__ == '__main__':
     print("=" * 60)
     print("  ZOOLO CASINO CLOUD v5.8")
-    print("  MENU WINDOWS AGENCIA + ADMIN")
+    print("  MENU WINDOWS SOLO PARA AGENCIAS")
     print("=" * 60)
-    print("  - Agencia: Menu Archivo/Consultas/Ayuda")
-    print("  - Admin: Menu Archivo/Movimientos/Consultas/Ayuda")
-    print("  - Estilo Windows Forms (Desktop) / Hamburger (Mobile)")
+    print("  - Agencia: Menu Windows Forms + Drawer Mobile")
+    print("  - Admin: Tabs horizontales simples (sin menu)")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
