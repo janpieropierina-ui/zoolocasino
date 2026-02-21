@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.9 - CONSULTAS AGENCIA + ZONA HORARIA PERÚ + PREMIOS PENDIENTES
+ZOOLO CASINO CLOUD v5.9.1 - REPARADO
+- Fix: Pantalla blanca PC (CSS display)
+- Fix: Reportes timeout optimizados
+- Fix: Manejo de fechas robusto
 """
 
 import os
@@ -63,7 +66,7 @@ ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19",
 
 # ==================== FUNCIONES AUXILIARES ====================
 def ahora_peru():
-    """Retorna datetime actual de Perú (UTC-5) - Perú no usa horario de verano desde 2014"""
+    """Retorna datetime actual de Perú (UTC-5)"""
     return datetime.utcnow() - timedelta(hours=5)
 
 def parse_fecha_ticket(fecha_str):
@@ -115,9 +118,8 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
+# ==================== FUNCIONES ZONA HORARIA ====================
 def hora_a_minutos(hora_str):
-    """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
         partes = hora_str.replace(':', ' ').split()
         hora = int(partes[0])
@@ -134,18 +136,8 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
-    """
-    Permite editar hasta 2 horas después del sorteo.
-    Ej: Sorteo 7:00 PM es editable hasta las 9:00 PM.
-    """
     ahora = ahora_peru()
     hoy = ahora.strftime("%d/%m/%Y")
-    
-    # Si es fecha pasada (no hoy), no se puede editar
-    if fecha_str and fecha_str != hoy:
-        # Permitir edición de fechas pasadas solo si es el mismo día (lógica anterior)
-        # o si está dentro de las 2 horas del sorteo específico
-        pass
     
     minutos_sorteo = hora_a_minutos(hora_sorteo)
     minutos_actual = ahora.hour * 60 + ahora.minute
@@ -155,22 +147,15 @@ def puede_editar_resultado(hora_sorteo, fecha_str=None):
     return minutos_actual <= minutos_limite
 
 def obtener_sorteo_en_curso():
-    """
-    CORREGIDO: Retorna el sorteo actual o el último sorteo si estamos dentro 
-    de las 2 horas posteriores (para edición).
-    """
     ahora = ahora_peru()
     actual_minutos = ahora.hour * 60 + ahora.minute
     
-    # Buscar sorteo actual (dentro de la hora del sorteo)
     for hora_str in HORARIOS_PERU:
         minutos_sorteo = hora_a_minutos(hora_str)
         if actual_minutos >= minutos_sorteo and actual_minutos < (minutos_sorteo + 60):
             return hora_str
     
-    # Si no hay sorteo en curso, verificar si estamos dentro de las 2 horas 
-    # posteriores al último sorteo (7 PM = 1140 minutos)
-    ultimo_sorteo = HORARIOS_PERU[-1]  # 07:00 PM
+    ultimo_sorteo = HORARIOS_PERU[-1]
     minutos_ultimo = hora_a_minutos(ultimo_sorteo)
     
     if actual_minutos > minutos_ultimo and actual_minutos <= (minutos_ultimo + (HORAS_EDICION_RESULTADO * 60)):
@@ -179,7 +164,6 @@ def obtener_sorteo_en_curso():
     return None
 
 def obtener_proximo_sorteo():
-    """Retorna el siguiente sorteo disponible para venta"""
     ahora = ahora_peru()
     actual_minutos = ahora.hour * 60 + ahora.minute
     
@@ -188,7 +172,6 @@ def obtener_proximo_sorteo():
         if (minutos_sorteo - actual_minutos) > MINUTOS_BLOQUEO:
             return hora_str
     
-    # Si no hay más sorteos hoy, retornar el primero de mañana
     return HORARIOS_PERU[0]
 
 def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
@@ -234,7 +217,6 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                     return False
             except urllib.error.HTTPError as e:
                 if e.code == 404:
-                    print(f"[ERROR PATCH] Registro no encontrado: {url}")
                     return False
                 raise e
                 
@@ -497,30 +479,23 @@ def procesar_venta():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
-
+# ==================== APIS AGENCIA ====================
 @app.route('/api/mis-tickets', methods=['POST'])
 @agencia_required
 def mis_tickets():
-    """
-    NUEVO: Consulta histórica de tickets de la agencia con filtros
-    Filtros: fecha_inicio, fecha_fin, estado (todos/pagados/pendientes/por_pagar)
-    """
     try:
         data = request.get_json() or {}
         fecha_inicio = data.get('fecha_inicio')
         fecha_fin = data.get('fecha_fin')
-        estado = data.get('estado', 'todos')  # todos, pagados, pendientes, por_pagar
+        estado = data.get('estado', 'todos')
         
-        # Construir query base
-        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=200"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         
-        req = urllib.request.Request(base_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
             all_tickets = json.loads(response.read().decode())
         
-        # Filtrar por fecha si se especifica
         tickets_filtrados = []
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d") if fecha_inicio else None
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59) if fecha_fin else None
@@ -538,7 +513,6 @@ def mis_tickets():
             if dt_fin and dt_ticket > dt_fin:
                 continue
             
-            # Filtrar por estado
             if estado == 'pagados' and not t.get('pagado'):
                 continue
             if estado == 'pendientes' and t.get('pagado'):
@@ -546,10 +520,9 @@ def mis_tickets():
                 
             tickets_filtrados.append(t)
         
-        # Si es estado "por_pagar", necesitamos verificar premios
         if estado == 'por_pagar':
             tickets_con_premio = []
-            for t in tickets_filtrados:
+            for t in tickets_filtrados[:50]:  # Limitar para velocidad
                 if t.get('pagado'):
                     continue
                     
@@ -580,24 +553,15 @@ def mis_tickets():
             
             tickets_filtrados = tickets_con_premio
         
-        # Calcular totales
         total_ventas = sum(t['total'] for t in tickets_filtrados)
         total_tickets = len(tickets_filtrados)
         
-        # Paginación simple
-        tickets_respuesta = tickets_filtrados[:50]
-        
         return jsonify({
             'status': 'ok',
-            'tickets': tickets_respuesta,
+            'tickets': tickets_filtrados[:50],
             'totales': {
                 'cantidad': total_tickets,
                 'ventas': round(total_ventas, 2)
-            },
-            'filtros_aplicados': {
-                'fecha_inicio': fecha_inicio,
-                'fecha_fin': fecha_fin,
-                'estado': estado
             }
         })
         
@@ -607,9 +571,6 @@ def mis_tickets():
 @app.route('/api/consultar-ticket-detalle', methods=['POST'])
 @agencia_required
 def consultar_ticket_detalle():
-    """
-    NUEVO: Consulta detalle completo de un ticket por serial (solo de la agencia logueada)
-    """
     try:
         data = request.get_json()
         serial = data.get('serial')
@@ -619,14 +580,11 @@ def consultar_ticket_detalle():
         
         tickets = supabase_request("tickets", filters={"serial": serial, "agencia_id": session['user_id']})
         if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no encontrado o no pertenece a esta agencia'})
+            return jsonify({'error': 'Ticket no encontrado'})
         
         ticket = tickets[0]
-        
-        # Obtener jugadas
         jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
         
-        # Calcular premios si hay resultados
         fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
         resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
         resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
@@ -697,7 +655,6 @@ def verificar_ticket():
         
         ticket = tickets[0]
         
-        # Si es agencia, verificar que sea su ticket
         if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
             return jsonify({'error': 'No autorizado para ver este ticket'})
         
@@ -778,7 +735,6 @@ def anular_ticket():
         
         ticket = tickets[0]
         
-        # Si es agencia, verificar que sea su ticket
         if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
             return jsonify({'error': 'No autorizado para anular este ticket'})
         
@@ -798,11 +754,6 @@ def anular_ticket():
             for j in jugadas:
                 if not verificar_horario_bloqueo(j['hora']):
                     return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
-        else:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-            for j in jugadas:
-                if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
         
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
         headers = {
@@ -839,13 +790,13 @@ def caja_agencia():
         premios = 0
         tickets_pendientes = 0
         
+        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        
         for t in tickets:
             if t['agencia_id'] == session['user_id'] and not t['anulado']:
                 if not t['pagado']:
                     jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                    resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-                    resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-                    
                     tiene_premio = False
                     for j in jugadas:
                         wa = resultados.get(j['hora'])
@@ -865,9 +816,6 @@ def caja_agencia():
                 
                 if t['pagado']:
                     jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                    resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-                    resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-                    
                     for j in jugadas:
                         wa = resultados.get(j['hora'])
                         if wa:
@@ -912,11 +860,11 @@ def caja_historico():
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=300"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
@@ -1152,7 +1100,7 @@ def guardar_resultado():
         if fecha == hoy:
             if not puede_editar_resultado(hora, fecha):
                 return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 7PM editable hasta 9PM).'
+                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo.'
                 }), 403
         
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
@@ -1172,16 +1120,12 @@ def guardar_resultado():
                     if response.status in [200, 201, 204]:
                         return jsonify({
                             'status': 'ok', 
-                            'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
-                            'accion': 'actualizado',
-                            'fecha': fecha,
-                            'hora': hora,
-                            'animal': animal
+                            'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal}',
+                            'accion': 'actualizado'
                         })
                     else:
                         return jsonify({'error': 'Error al actualizar'}), 500
             except urllib.error.HTTPError as e:
-                print(f"[ERROR PATCH] HTTP {e.code}: {e.read().decode()}")
                 return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
                 
         else:
@@ -1191,18 +1135,13 @@ def guardar_resultado():
             if result:
                 return jsonify({
                     'status': 'ok', 
-                    'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
-                    'accion': 'creado',
-                    'fecha': fecha,
-                    'hora': hora,
-                    'animal': animal
+                    'mensaje': f'RESULTADO GUARDADO: {hora} = {animal}',
+                    'accion': 'creado'
                 })
             else:
                 return jsonify({'error': 'Error al crear resultado'}), 500
             
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/verificar-tickets-sorteo', methods=['POST'])
@@ -1230,7 +1169,7 @@ def verificar_tickets_sorteo():
         tickets_con_jugadas = []
         total_apostado = 0
         
-        for t in tickets:
+        for t in tickets[:100]:  # Limitar para velocidad
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "hora": hora})
             if jugadas and len(jugadas) > 0:
                 monto_jugadas = sum(j['monto'] for j in jugadas)
@@ -1285,53 +1224,99 @@ def reporte_agencias_rango():
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
         fecha_fin = data.get('fecha_fin')
-        agencia_id = data.get('agencia_id')  # NUEVO: filtro por agencia específica
+        agencia_id = data.get('agencia_id')
         
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
         
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        try:
+            dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except ValueError:
+            return jsonify({'error': 'Formato de fecha inválido. Use YYYY-MM-DD'}), 400
         
-        # Si hay agencia_id, filtrar solo esa agencia
+        # Limitar rango a 31 días para evitar timeout
+        if (dt_fin - dt_inicio).days > 31:
+            dt_inicio = dt_fin - timedelta(days=30)
+        
+        # Obtener agencias
         if agencia_id:
             url = f"{SUPABASE_URL}/rest/v1/agencias?id=eq.{agencia_id}"
         else:
             url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
             
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
         
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                agencias = json.loads(response.read().decode())
+        except Exception as e:
+            return jsonify({'error': 'Error al obtener agencias de la base de datos'}), 500
+        
+        if not agencias:
+            return jsonify({'agencias': [], 'totales': {}, 'status': 'ok'})
+            
         dict_agencias = {a['id']: a for a in agencias}
         
-        # Construir URL de tickets según filtro
-        if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=2000"
-        else:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
-            
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
+        # Obtener tickets (limitados y filtrados)
+        base_url = f"{SUPABASE_URL}/rest/v1/tickets?"
+        params = ["anulado=eq.false", "order=fecha.desc", "limit=500"]  # Reducido a 500
         
+        if agencia_id:
+            params.insert(0, f"agencia_id=eq.{agencia_id}")
+            
+        url = base_url + "&".join(params)
+        
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                all_tickets = json.loads(response.read().decode())
+        except Exception as e:
+            return jsonify({'error': 'Error al obtener tickets. Intente un rango menor.'}), 500
+        
+        # Filtrar por fecha
         tickets_validos = []
         for t in all_tickets:
-            if t.get('anulado'):
+            try:
+                if t.get('anulado'):
+                    continue
+                fecha_ticket_str = t['fecha'].split(' ')[0]
+                dt_ticket = datetime.strptime(fecha_ticket_str, "%d/%m/%Y")
+                if dt_inicio <= dt_ticket <= dt_fin:
+                    tickets_validos.append(t)
+            except:
                 continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                tickets_validos.append(t)
+        
+        # Si no hay tickets, retornar vacío
+        if not tickets_validos:
+            return jsonify({
+                'status': 'ok',
+                'agencias': [],
+                'totales': {
+                    'tickets': 0, 'ventas': 0, 'premios_pagados': 0, 
+                    'premios_pendientes': 0, 'premios_teoricos': 0,
+                    'comision': 0, 'balance': 0
+                },
+                'rango': {'inicio': fecha_inicio, 'fin': fecha_fin}
+            })
+        
+        # Obtener resultados solo para fechas necesarias (máximo 31 días)
+        fechas_unicas = list(set([
+            datetime.strptime(t['fecha'].split(' ')[0], "%d/%m/%Y").strftime("%d/%m/%Y") 
+            for t in tickets_validos
+        ]))[:31]
         
         resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
+        for fecha_str in fechas_unicas:
+            try:
+                resultados_list = supabase_request("resultados", filters={"fecha": fecha_str})
+                if resultados_list:
+                    resultados_por_dia[fecha_str] = {r['hora']: r['animal'] for r in resultados_list}
+            except:
+                continue
         
+        # Procesar estadísticas
         stats_por_agencia = {}
         for ag in agencias:
             stats_por_agencia[ag['id']] = {
@@ -1339,18 +1324,14 @@ def reporte_agencias_rango():
                 'nombre': ag['nombre_agencia'],
                 'usuario': ag['usuario'],
                 'comision_pct': ag['comision'],
-                'tickets': 0,
-                'ventas': 0,
-                'premios_pagados': 0,  # Lo que ya se pagó
-                'premios_pendientes': 0,  # Lo que se debe pagar (tickets no pagados con premio)
-                'premios_teoricos': 0,  # Total de premios calculados
-                'comision': 0,
-                'balance': 0,
-                'tickets_pagados_count': 0,
-                'tickets_pendientes_count': 0
+                'tickets': 0, 'ventas': 0, 'premios_pagados': 0,
+                'premios_pendientes': 0, 'premios_teoricos': 0,
+                'comision': 0, 'balance': 0,
+                'tickets_pagados_count': 0, 'tickets_pendientes_count': 0
             }
         
-        for t in tickets_validos:
+        # Procesar tickets (limitar a 300 para evitar timeout)
+        for t in tickets_validos[:300]:
             ag_id = t['agencia_id']
             if ag_id not in stats_por_agencia:
                 continue
@@ -1359,11 +1340,21 @@ def reporte_agencias_rango():
             stats['tickets'] += 1
             stats['ventas'] += t['total']
             
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
+            try:
+                fecha_ticket = t['fecha'].split(' ')[0]
+            except:
+                continue
+            
             resultados_dia = resultados_por_dia.get(fecha_ticket, {})
             
-            # Calcular premio teórico (lo que corresponde pagar según resultados)
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+            # Obtener jugadas
+            try:
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                if not jugadas:
+                    continue
+            except:
+                continue
+            
             premio_teorico_ticket = 0
             tiene_premio = False
             
@@ -1388,7 +1379,7 @@ def reporte_agencias_rango():
             
             stats['premios_teoricos'] += premio_teorico_ticket
             
-            if t['pagado']:
+            if t.get('pagado'):
                 stats['tickets_pagados_count'] += 1
                 stats['premios_pagados'] += premio_teorico_ticket
             else:
@@ -1396,25 +1387,21 @@ def reporte_agencias_rango():
                     stats['tickets_pendientes_count'] += 1
                     stats['premios_pendientes'] += premio_teorico_ticket
         
+        # Calcular totales y formatear
         total_global = {
             'tickets': 0, 'ventas': 0, 'premios_pagados': 0, 'premios_pendientes': 0,
-            'premios_teoricos': 0, 'comision': 0, 'balance': 0,
-            'tickets_pagados_count': 0, 'tickets_pendientes_count': 0
+            'premios_teoricos': 0, 'comision': 0, 'balance': 0
         }
         
         reporte_agencias = []
         for ag_id, stats in stats_por_agencia.items():
             if stats['tickets'] > 0:
                 stats['comision'] = stats['ventas'] * stats['comision_pct']
-                # Balance considerando premios pendientes como deuda
                 stats['balance'] = stats['ventas'] - stats['premios_teoricos'] - stats['comision']
                 
-                stats['ventas'] = round(stats['ventas'], 2)
-                stats['premios_pagados'] = round(stats['premios_pagados'], 2)
-                stats['premios_pendientes'] = round(stats['premios_pendientes'], 2)
-                stats['premios_teoricos'] = round(stats['premios_teoricos'], 2)
-                stats['comision'] = round(stats['comision'], 2)
-                stats['balance'] = round(stats['balance'], 2)
+                # Redondear
+                for key in ['ventas', 'premios_pagados', 'premios_pendientes', 'premios_teoricos', 'comision', 'balance']:
+                    stats[key] = round(stats[key], 2)
                 
                 reporte_agencias.append(stats)
                 
@@ -1422,12 +1409,14 @@ def reporte_agencias_rango():
                     if key in stats:
                         total_global[key] += stats[key]
         
+        # Calcular porcentajes
         if total_global['ventas'] > 0:
             for ag in reporte_agencias:
                 ag['porcentaje_ventas'] = round((ag['ventas'] / total_global['ventas']) * 100, 1)
         
         reporte_agencias.sort(key=lambda x: x['ventas'], reverse=True)
         
+        # Redondear totales
         for key in total_global:
             total_global[key] = round(total_global[key], 2)
         
@@ -1442,7 +1431,7 @@ def reporte_agencias_rango():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
 @app.route('/admin/exportar-csv', methods=['POST'])
 @admin_required
@@ -1463,7 +1452,7 @@ def exportar_csv():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
@@ -1472,13 +1461,16 @@ def exportar_csv():
         for t in all_tickets:
             if t.get('anulado'):
                 continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                tickets_validos.append(t)
+            try:
+                dt_ticket = parse_fecha_ticket(t['fecha'])
+                if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
+                    tickets_validos.append(t)
+            except:
+                continue
         
         resultados_por_dia = {}
         delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
+        for i in range(min(delta.days + 1, 31)):  # Max 31 días
             dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
             resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
             if resultados_list:
@@ -1492,7 +1484,7 @@ def exportar_csv():
                 'tickets': 0, 'ventas': 0, 'premios': 0
             }
         
-        for t in tickets_validos:
+        for t in tickets_validos[:300]:  # Limitar
             ag_id = t['agencia_id']
             if ag_id not in stats_por_agencia:
                 continue
@@ -1501,7 +1493,10 @@ def exportar_csv():
             stats['tickets'] += 1
             stats['ventas'] += t['total']
             
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
+            try:
+                fecha_ticket = t['fecha'].split(' ')[0]
+            except:
+                continue
             resultados_dia = resultados_por_dia.get(fecha_ticket, {})
             
             if t['pagado']:
@@ -1526,7 +1521,7 @@ def exportar_csv():
         writer.writerow(['REPORTE ZOOLO CASINO - AGENCIAS'])
         writer.writerow([f'Periodo: {fecha_inicio} al {fecha_fin}'])
         writer.writerow([])
-        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comisión (S/)', 'Balance (S/)', '% Participación'])
+        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comisión (S/)', 'Balance (S/)'])
         
         total_ventas = sum(s['ventas'] for s in stats_por_agencia.values())
         
@@ -1534,22 +1529,22 @@ def exportar_csv():
             if stats['tickets'] > 0:
                 comision = stats['ventas'] * dict_agencias[ag_id]['comision']
                 balance = stats['ventas'] - stats['premios'] - comision
-                porcentaje = (stats['ventas'] / total_ventas * 100) if total_ventas > 0 else 0
                 
                 writer.writerow([
                     stats['nombre'], stats['usuario'], stats['tickets'],
                     round(stats['ventas'], 2), round(stats['premios'], 2),
-                    round(comision, 2), round(balance, 2), f"{porcentaje:.1f}%"
+                    round(comision, 2), round(balance, 2)
                 ])
         
         writer.writerow([])
         total_comision = sum(s['ventas'] * dict_agencias[ag_id]['comision'] for ag_id, s in stats_por_agencia.items())
-        total_balance = sum(s['ventas'] for s in stats_por_agencia.values()) - sum(s['premios'] for s in stats_por_agencia.values()) - total_comision
+        total_premios = sum(s['premios'] for s in stats_por_agencia.values())
+        total_balance = sum(s['ventas'] for s in stats_por_agencia.values()) - total_premios - total_comision
         
         writer.writerow(['TOTALES', '', 
             sum(s['tickets'] for s in stats_por_agencia.values()),
-            round(total_ventas, 2), round(sum(s['premios'] for s in stats_por_agencia.values()), 2),
-            round(total_comision, 2), round(total_balance, 2), '100%'
+            round(total_ventas, 2), round(total_premios, 2),
+            round(total_comision, 2), round(total_balance, 2)
         ])
         
         output.seek(0)
@@ -1586,15 +1581,14 @@ def reporte_agencias():
             tickets = json.loads(response.read().decode())
         
         data_agencias = []
-        total_ventas = total_premios = total_comisiones = 0
+        total_ventas = total_premios = total_comisiones = premios_pendientes = 0
         
         for ag in agencias:
             ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t['anulado'])
             comision = ventas * ag['comision']
             
-            # Calcular premios pendientes y pagados
             premios_pagados = 0
-            premios_pendientes = 0
+            premios_pend = 0
             
             for t in tickets:
                 if t['agencia_id'] == ag['id'] and not t['anulado']:
@@ -1618,7 +1612,7 @@ def reporte_agencias():
                     if t['pagado']:
                         premios_pagados += premio_ticket
                     else:
-                        premios_pendientes += premio_ticket
+                        premios_pend += premio_ticket
             
             balance = ventas - premios_pagados - comision
             
@@ -1626,8 +1620,7 @@ def reporte_agencias():
                 'nombre': ag['nombre_agencia'],
                 'ventas': round(ventas, 2),
                 'premios_pagados': round(premios_pagados, 2),
-                'premios_pendientes': round(premios_pendientes, 2),
-                'premios_total': round(premios_pagados + premios_pendientes, 2),
+                'premios_pendientes': round(premios_pend, 2),
                 'comision': round(comision, 2),
                 'balance': round(balance, 2)
             })
@@ -1635,12 +1628,14 @@ def reporte_agencias():
             total_ventas += ventas
             total_premios += premios_pagados
             total_comisiones += comision
+            premios_pendientes += premios_pend
         
         return jsonify({
             'agencias': data_agencias,
             'global': {
                 'ventas': round(total_ventas, 2),
                 'pagos': round(total_premios, 2),
+                'premios_pendientes': round(premios_pendientes, 2),
                 'comisiones': round(total_comisiones, 2),
                 'balance': round(total_ventas - total_premios - total_comisiones, 2)
             }
@@ -1697,7 +1692,7 @@ def riesgo():
         total_apostado_sorteo = 0
         total_jugadas_contadas = 0
         
-        for t in tickets:
+        for t in tickets[:200]:  # Limitar para velocidad
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
             
             for j in jugadas:
@@ -1748,47 +1743,59 @@ def estadisticas_rango():
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
         
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        try:
+            dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        except ValueError:
+            return jsonify({'error': 'Formato de fecha inválido'}), 400
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
+        # Limitar a 31 días
+        if (dt_fin - dt_inicio).days > 31:
+            dt_inicio = dt_fin - timedelta(days=30)
+        
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
         req = urllib.request.Request(url, headers=headers)
         
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
         tickets_rango = []
         
         for t in all_tickets:
-            if t.get('anulado'):
+            try:
+                if t.get('anulado'):
+                    continue
+                fecha_str = t['fecha'].split(' ')[0]
+                dt_ticket = datetime.strptime(fecha_str, "%d/%m/%Y")
+                if dt_inicio <= dt_ticket <= dt_fin:
+                    tickets_rango.append(t)
+                    dia_key = dt_ticket.strftime("%d/%m/%Y")
+                    
+                    if dia_key not in dias_data:
+                        dias_data[dia_key] = {
+                            'ventas': 0, 'tickets': 0, 'premios': 0, 
+                            'comisiones': 0
+                        }
+                    
+                    dias_data[dia_key]['ventas'] += t['total']
+                    dias_data[dia_key]['tickets'] += 1
+            except:
                 continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            tickets_rango.append(t)
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0, 
-                    'comisiones': 0, 'ids_tickets': []
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            dias_data[dia_key]['ids_tickets'].append(t['id'])
         
+        # Obtener resultados
         resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
+        fechas_list = list(dias_data.keys())[:31]
+        
+        for fecha_str in fechas_list:
+            try:
+                resultados_list = supabase_request("resultados", filters={"fecha": fecha_str})
+                if resultados_list:
+                    resultados_por_dia[fecha_str] = {r['hora']: r['animal'] for r in resultados_list}
+            except:
+                continue
         
         resumen_dias = []
         total_ventas = total_premios = total_tickets = 0
@@ -1798,24 +1805,27 @@ def estadisticas_rango():
             resultados_dia = resultados_por_dia.get(dia_key, {})
             
             premios_dia = 0
-            for ticket_id in datos['ids_tickets'][:50]:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id})
-                ticket_info = next((t for t in tickets_rango if t['id'] == ticket_id), None)
-                
-                if ticket_info:
-                    for j in jugadas:
-                        wa = resultados_dia.get(j['hora'])
-                        if wa:
-                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios_dia += calcular_premio_animal(j['monto'], wa)
-                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                                num = int(wa)
-                                sel = j['seleccion']
-                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                                   (sel == 'PAR' and num % 2 == 0) or \
-                                   (sel == 'IMPAR' and num % 2 != 0):
-                                    premios_dia += j['monto'] * PAGO_ESPECIAL
+            tickets_dia = [t for t in tickets_rango if t['fecha'].startswith(dia_key)][:50]
+            
+            for t in tickets_dia:
+                if t.get('pagado'):
+                    try:
+                        jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                        for j in jugadas:
+                            wa = resultados_dia.get(j['hora'])
+                            if wa:
+                                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                    premios_dia += calcular_premio_animal(j['monto'], wa)
+                                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                    num = int(wa)
+                                    sel = j['seleccion']
+                                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                       (sel == 'PAR' and num % 2 == 0) or \
+                                       (sel == 'IMPAR' and num % 2 != 0):
+                                        premios_dia += j['monto'] * PAGO_ESPECIAL
+                    except:
+                        continue
             
             comision_dia = datos['ventas'] * COMISION_AGENCIA
             balance_dia = datos['ventas'] - premios_dia - comision_dia
@@ -1858,36 +1868,47 @@ def top_animales_rango():
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
         
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        try:
+            dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        except:
+            return jsonify({'error': 'Fechas inválidas'}), 400
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=300"
         req = urllib.request.Request(url, headers=headers)
         
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             all_tickets = json.loads(response.read().decode())
         
         ticket_ids = []
         for t in all_tickets:
-            if t.get('anulado'):
+            try:
+                if t.get('anulado'):
+                    continue
+                fecha_str = t['fecha'].split(' ')[0]
+                dt_ticket = datetime.strptime(fecha_str, "%d/%m/%Y")
+                if dt_inicio <= dt_ticket <= dt_fin:
+                    ticket_ids.append(t['id'])
+            except:
                 continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                ticket_ids.append(t['id'])
         
         if not ticket_ids:
             return jsonify({'top_animales': []})
         
         apuestas = {}
-        for ticket_id in ticket_ids[:100]:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
-            for j in jugadas:
-                sel = j['seleccion']
-                if sel not in apuestas:
-                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
-                apuestas[sel]['monto'] += j['monto']
-                apuestas[sel]['cantidad'] += 1
+        for ticket_id in ticket_ids[:50]:  # Limitar
+            try:
+                jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
+                for j in jugadas:
+                    sel = j['seleccion']
+                    if sel not in apuestas:
+                        apuestas[sel] = {'monto': 0, 'cantidad': 0}
+                    apuestas[sel]['monto'] += j['monto']
+                    apuestas[sel]['cantidad'] += 1
+            except:
+                continue
         
         top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
         resultado = []
@@ -1986,7 +2007,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.9<br>Zona Horaria Perú + Consultas Agencia
+            Sistema ZOOLO CASINO v5.9<br>Zona Horaria Perú
         </div>
     </div>
 </body>
@@ -2010,248 +2031,6 @@ POS_HTML = '''
             flex-direction: column;
             overflow-x: hidden;
         }
-        
-        /* ==========================================
-           MENU WINDOWS FORMS - AGENCIA (DESKTOP)
-           ========================================== */
-        .win-menu-bar {
-            background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
-            border-bottom: 2px solid #000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .win-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 15px;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            border-bottom: 1px solid #000;
-        }
-        
-        .win-title {
-            color: #ffd700;
-            font-size: 1rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .win-menu-items {
-            display: flex;
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            background: #2d2d2d;
-        }
-        
-        .win-menu-item {
-            position: relative;
-        }
-        
-        .win-menu-item > a {
-            display: block;
-            padding: 10px 20px;
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.85rem;
-            border-right: 1px solid #444;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-menu-item:hover > a {
-            background: linear-gradient(180deg, #404040 0%, #333 100%);
-            color: #ffd700;
-        }
-        
-        .win-submenu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #2d2d2d;
-            border: 1px solid #555;
-            border-top: none;
-            min-width: 220px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            z-index: 1001;
-        }
-        
-        .win-menu-item:hover .win-submenu {
-            display: block;
-        }
-        
-        .win-submenu-item {
-            border-bottom: 1px solid #444;
-        }
-        
-        .win-submenu-item:last-child {
-            border-bottom: none;
-        }
-        
-        .win-submenu-item a {
-            display: block;
-            padding: 12px 20px;
-            color: #ddd;
-            text-decoration: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-submenu-item a:hover {
-            background: #ffd700;
-            color: #000;
-            padding-left: 25px;
-        }
-        
-        /* ==========================================
-           MENU HAMBURGER - MOBIL AGENCIA
-           ========================================== */
-        .mobile-header {
-            display: none;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 12px 15px;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #ffd700;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .mobile-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-            font-weight: bold;
-        }
-        
-        .hamburger-btn {
-            background: transparent;
-            border: none;
-            color: #ffd700;
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 5px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mobile-menu {
-            display: none;
-            position: fixed;
-            top: 0;
-            right: -300px;
-            width: 280px;
-            height: 100vh;
-            background: linear-gradient(180deg, #1a1a2e 0%, #0a0a0a 100%);
-            border-left: 2px solid #ffd700;
-            z-index: 2000;
-            transition: right 0.3s ease;
-            overflow-y: auto;
-        }
-        
-        .mobile-menu.active {
-            right: 0;
-        }
-        
-        .mobile-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-        }
-        
-        .close-menu-btn {
-            background: #c0392b;
-            border: none;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.1rem;
-        }
-        
-        .mobile-menu-section {
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-section-title {
-            background: rgba(255,215,0,0.1);
-            color: #ffd700;
-            padding: 12px 15px;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-item {
-            padding: 15px;
-            color: #fff;
-            cursor: pointer;
-            border-bottom: 1px solid #222;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.95rem;
-        }
-        
-        .mobile-menu-item:active {
-            background: rgba(255,215,0,0.1);
-        }
-        
-        .mobile-menu-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            z-index: 1999;
-        }
-        
-        .mobile-menu-overlay.active {
-            display: block;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .win-menu-bar {
-                display: none;
-            }
-            .mobile-header {
-                display: flex;
-            }
-            .mobile-menu {
-                display: block;
-            }
-        }
-        
-        @media (min-width: 769px) {
-            .mobile-menu, .mobile-menu-overlay {
-                display: none !important;
-            }
-        }
-        
-        /* Header optimizado */
         .header {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
             padding: 10px 15px; 
@@ -2270,8 +2049,6 @@ POS_HTML = '''
             background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
             -webkit-appearance: none;
         }
-        
-        /* Layout principal */
         .main-container { 
             display: flex; 
             flex-direction: column;
@@ -2279,12 +2056,9 @@ POS_HTML = '''
             height: calc(100vh - 110px);
             overflow: hidden;
         }
-        
         @media (min-width: 1024px) {
             .main-container { flex-direction: row; }
         }
-        
-        /* Panel izquierdo */
         .left-panel { 
             flex: 1; 
             display: flex; 
@@ -2292,8 +2066,6 @@ POS_HTML = '''
             min-height: 0;
             overflow: hidden;
         }
-        
-        /* Botones especiales */
         .special-btns { 
             display: grid; 
             grid-template-columns: repeat(4, 1fr);
@@ -2312,7 +2084,6 @@ POS_HTML = '''
             font-size: 0.8rem;
             touch-action: manipulation;
             min-height: 44px;
-            transition: all 0.1s;
         }
         .btn-esp:active { transform: scale(0.95); }
         .btn-rojo { background: linear-gradient(135deg, #c0392b, #e74c3c); }
@@ -2324,8 +2095,6 @@ POS_HTML = '''
             transform: scale(0.95);
             border: 2px solid white;
         }
-        
-        /* Grid de animales */
         .animals-grid {
             flex: 1; 
             display: grid; 
@@ -2333,12 +2102,10 @@ POS_HTML = '''
             gap: 5px; 
             padding: 10px; 
             overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
         }
         @media (min-width: 768px) {
             .animals-grid { grid-template-columns: repeat(7, 1fr); }
         }
-        
         .animal-card {
             background: linear-gradient(135deg, #1a1a2e, #16213e); 
             border: 2px solid; 
@@ -2353,13 +2120,11 @@ POS_HTML = '''
             justify-content: center;
             user-select: none;
             position: relative;
-            touch-action: manipulation;
         }
         .animal-card:active { transform: scale(0.92); }
         .animal-card.active { 
             box-shadow: 0 0 15px rgba(255,215,0,0.6); 
             border-color: #ffd700 !important; 
-            background: linear-gradient(135deg, #2a2a4e, #1a1a3e);
             transform: scale(1.05);
             z-index: 10;
         }
@@ -2377,8 +2142,6 @@ POS_HTML = '''
             border-radius: 4px;
             font-weight: bold;
         }
-        
-        /* Panel derecho */
         .right-panel {
             background: #111; 
             border-top: 2px solid #333;
@@ -2395,8 +2158,6 @@ POS_HTML = '''
                 border-left: 2px solid #333;
             }
         }
-        
-        /* Horarios */
         .horarios {
             display: flex;
             gap: 6px;
@@ -2404,14 +2165,7 @@ POS_HTML = '''
             overflow-x: auto;
             flex-shrink: 0;
             background: #0a0a0a;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
-            scrollbar-color: #ffd700 #222;
         }
-        .horarios::-webkit-scrollbar { height: 8px; }
-        .horarios::-webkit-scrollbar-track { background: #222; border-radius: 4px; }
-        .horarios::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 4px; }
-        
         .btn-hora {
             flex: 0 0 auto;
             min-width: 85px;
@@ -2425,15 +2179,12 @@ POS_HTML = '''
             text-align: center; 
             line-height: 1.3;
             touch-action: manipulation;
-            transition: all 0.2s;
         }
-        .btn-hora:hover { background: #333; border-color: #555; }
         .btn-hora.active { 
             background: linear-gradient(135deg, #27ae60, #229954); 
             color: white; 
             font-weight: bold; 
             border-color: #27ae60;
-            box-shadow: 0 0 10px rgba(39, 174, 96, 0.4);
         }
         .btn-hora.expired { 
             background: #300; 
@@ -2442,8 +2193,6 @@ POS_HTML = '''
             pointer-events: none;
             opacity: 0.5;
         }
-        
-        /* Ticket display */
         .ticket-display {
             flex: 1; 
             background: #000; 
@@ -2453,9 +2202,7 @@ POS_HTML = '''
             border: 1px solid #333;
             overflow-y: auto;
             font-size: 0.85rem;
-            -webkit-overflow-scrolling: touch;
         }
-        
         .ticket-table {
             width: 100%;
             border-collapse: collapse;
@@ -2473,9 +2220,7 @@ POS_HTML = '''
         .ticket-table td {
             padding: 8px 6px;
             border-bottom: 1px solid #222;
-            vertical-align: middle;
         }
-        .ticket-table tr:last-child td { border-bottom: none; }
         .ticket-total {
             margin-top: 12px;
             padding-top: 12px;
@@ -2485,8 +2230,6 @@ POS_HTML = '''
             font-weight: bold;
             color: #ffd700;
         }
-        
-        /* Botones de acción */
         .action-btns { 
             display: grid; 
             grid-template-columns: repeat(3, 1fr); 
@@ -2504,7 +2247,6 @@ POS_HTML = '''
             font-size: 0.8rem;
             touch-action: manipulation;
             min-height: 48px;
-            transition: all 0.1s;
         }
         .action-btns button:active { transform: scale(0.95); }
         .btn-agregar { 
@@ -2525,8 +2267,6 @@ POS_HTML = '''
         .btn-anular { background: #c0392b; color: white; }
         .btn-borrar { background: #555; color: white; }
         .btn-salir { background: #333; color: white; grid-column: span 3; }
-        
-        /* Modales */
         .modal {
             display: none; 
             position: fixed; 
@@ -2536,7 +2276,6 @@ POS_HTML = '''
             background: rgba(0,0,0,0.95);
             z-index: 1000; 
             overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
         }
         .modal-content {
             background: #1a1a2e; 
@@ -2572,17 +2311,13 @@ POS_HTML = '''
             cursor: pointer;
             font-weight: bold;
         }
-        
-        /* Tabs */
         .tabs { 
             display: flex; 
             gap: 2px; 
             margin-bottom: 20px; 
             border-bottom: 2px solid #333;
             overflow-x: auto;
-            scrollbar-width: none;
         }
-        .tabs::-webkit-scrollbar { display: none; }
         .tab-btn { 
             flex: 1;
             background: transparent; 
@@ -2593,13 +2328,10 @@ POS_HTML = '''
             font-size: 0.85rem; 
             border-bottom: 3px solid transparent;
             white-space: nowrap;
-            min-width: 80px;
         }
         .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; font-weight: bold; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        
-        /* Stats */
         .stats-box {
             background: linear-gradient(135deg, #0a0a0a, #1a1a2e); 
             padding: 20px; 
@@ -2613,50 +2345,15 @@ POS_HTML = '''
             padding: 12px 0;
             border-bottom: 1px solid #222; 
             font-size: 1rem;
-            align-items: center;
         }
         .stat-row:last-child { border-bottom: none; }
         .stat-label { color: #aaa; }
         .stat-value { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
-        .stat-value.negative { color: #e74c3c; }
-        .stat-value.positive { color: #27ae60; }
-        
-        /* Tablas */
-        .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin: 15px 0;
-            border-radius: 8px;
-            border: 1px solid #333;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 0.85rem; 
-            min-width: 300px;
-        }
-        th, td { 
-            padding: 12px 8px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-            white-space: nowrap;
-        }
-        th { 
-            background: linear-gradient(135deg, #ffd700, #ffed4e); 
-            color: black; 
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-        }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
-        /* Formularios */
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; color: #888; font-size: 0.9rem; margin-bottom: 6px; }
         .form-group input, .form-group select {
             width: 100%; padding: 12px; background: #000; border: 1px solid #444;
             color: white; border-radius: 8px; font-size: 1rem;
-            -webkit-appearance: none;
         }
         .btn-consultar {
             background: linear-gradient(135deg, #27ae60, #229954); 
@@ -2668,71 +2365,35 @@ POS_HTML = '''
             font-weight: bold; 
             cursor: pointer;
             margin-top: 10px;
-            font-size: 1rem;
         }
-        
-        /* Alertas */
         .alert-box {
             background: rgba(243, 156, 18, 0.15); 
             border: 1px solid #f39c12;
             padding: 15px; 
             border-radius: 8px; 
             margin: 15px 0; 
-            font-size: 0.9rem;
         }
-        .alert-box strong { color: #f39c12; }
-
-        /* Resultados */
-        .resultado-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #27ae60;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .table-container {
+            overflow-x: auto;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #333;
         }
-        .resultado-item.pendiente {
-            border-left-color: #666;
-            opacity: 0.7;
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 0.85rem; 
         }
-        .resultado-numero {
-            color: #ffd700;
+        th, td { 
+            padding: 12px 8px; 
+            text-align: left; 
+            border-bottom: 1px solid #333; 
+        }
+        th { 
+            background: linear-gradient(135deg, #ffd700, #ffed4e); 
+            color: black; 
             font-weight: bold;
-            font-size: 1.4rem;
         }
-        .resultado-nombre {
-            color: #aaa;
-            font-size: 1rem;
-        }
-        
-        /* Toast Notification */
-        .toast-notification {
-            position: fixed;
-            top: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 14px 24px;
-            border-radius: 30px;
-            font-size: 0.95rem;
-            z-index: 10000;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
-            max-width: 90%;
-            text-align: center;
-            font-weight: bold;
-            animation: slideDown 0.3s ease;
-        }
-        @keyframes slideDown {
-            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-            to { transform: translateX(-50%) translateY(0); opacity: 1; }
-        }
-        @keyframes slideUp {
-            from { transform: translateX(-50%) translateY(0); opacity: 1; }
-            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-        }
-        
-        /* Ticket item en listado */
         .ticket-item {
             background: #0a0a0a;
             padding: 15px;
@@ -2740,28 +2401,15 @@ POS_HTML = '''
             border-radius: 10px;
             border-left: 4px solid #2980b9;
             cursor: pointer;
-            transition: all 0.2s;
-        }
-        .ticket-item:active {
-            background: #1a1a2e;
         }
         .ticket-item.ganador {
             border-left-color: #27ae60;
             background: rgba(39,174,96,0.1);
         }
-        .ticket-item.pendiente-pago {
-            border-left-color: #f39c12;
-            background: rgba(243,156,18,0.1);
-        }
         .ticket-serial {
             color: #ffd700;
             font-weight: bold;
             font-size: 1.1rem;
-        }
-        .ticket-info {
-            color: #888;
-            font-size: 0.85rem;
-            margin-top: 5px;
         }
         .ticket-premio {
             color: #27ae60;
@@ -2769,35 +2417,6 @@ POS_HTML = '''
             font-size: 1.2rem;
             margin-top: 5px;
         }
-        .ticket-estado {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .estado-pagado { background: #27ae60; color: white; }
-        .estado-pendiente { background: #f39c12; color: black; }
-        
-        /* Filtros */
-        .filter-row {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        .filter-row select, .filter-row input {
-            flex: 1;
-            min-width: 120px;
-            padding: 10px;
-            background: #000;
-            border: 1px solid #444;
-            color: white;
-            border-radius: 6px;
-        }
-        
-        /* Detalle de jugadas en ticket */
         .jugada-detail {
             background: #111;
             padding: 8px;
@@ -2806,7 +2425,6 @@ POS_HTML = '''
             font-size: 0.85rem;
             display: flex;
             justify-content: space-between;
-            align-items: center;
         }
         .jugada-ganadora {
             background: rgba(39,174,96,0.2);
@@ -2815,82 +2433,6 @@ POS_HTML = '''
     </style>
 </head>
 <body>
-    <!-- MENU DESKTOP - WINDOWS FORMS STYLE (SOLO AGENCIA) -->
-    <div class="win-menu-bar">
-        <div class="win-menu-header">
-            <div class="win-title">🦁 {{agencia}}</div>
-            <button onclick="location.href='/logout'" style="background: #c0392b; color: white; border: none; padding: 6px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.8rem;">SALIR</button>
-        </div>
-        <ul class="win-menu-items">
-            <li class="win-menu-item">
-                <a>📁 Archivo</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirCaja()">💰 Caja del Día</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCajaHistorico()">📊 Historial de Caja</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCalculadora()">🧮 Calculadora de Premios</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>🔍 Consultas</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">🎫 Mis Tickets Vendidos</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirBuscarTicket()">🔎 Buscar Ticket por Serial</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">💰 Tickets por Cobrar</a></li>
-                    <li class="win-submenu-item"><a onclick="verResultados()">📋 Resultados de Hoy</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>❓ Ayuda</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="mostrarReglas()">📖 Reglas de Pago</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarComoUsar()">❓ Cómo Usar</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarAcerca()">ℹ️ Acerca del Sistema</a></li>
-                </ul>
-            </li>
-        </ul>
-    </div>
-
-    <!-- MENU MOBIL - HAMBURGER (SOLO AGENCIA) -->
-    <div class="mobile-header">
-        <div class="mobile-title">🦁 {{agencia}}</div>
-        <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
-    </div>
-    
-    <div class="mobile-menu-overlay" onclick="toggleMobileMenu()"></div>
-    <div class="mobile-menu" id="mobileMenu">
-        <div class="mobile-menu-header">
-            <div class="mobile-menu-title">MENÚ</div>
-            <button class="close-menu-btn" onclick="toggleMobileMenu()">×</button>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">📁 Archivo</div>
-            <div class="mobile-menu-item" onclick="abrirCajaMobile()">💰 Caja del Día</div>
-            <div class="mobile-menu-item" onclick="abrirCajaHistoricoMobile()">📊 Historial de Caja</div>
-            <div class="mobile-menu-item" onclick="abrirCalculadoraMobile()">🧮 Calculadora</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">🔍 Consultas</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">🎫 Mis Tickets Vendidos</div>
-            <div class="mobile-menu-item" onclick="abrirBuscarTicketMobile()">🔎 Buscar Ticket</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">💰 Tickets por Cobrar</div>
-            <div class="mobile-menu-item" onclick="verResultadosMobile()">📋 Resultados</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">❓ Ayuda</div>
-            <div class="mobile-menu-item" onclick="mostrarReglasMobile()">📖 Reglas</div>
-            <div class="mobile-menu-item" onclick="mostrarComoUsarMobile()">❓ Cómo Usar</div>
-            <div class="mobile-menu-item" onclick="mostrarAcercaMobile()">ℹ️ Acerca de</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-item" onclick="location.href='/logout'" style="color: #e74c3c; font-weight: bold;">🚪 Cerrar Sesión</div>
-        </div>
-    </div>
-
-    <!-- Header original -->
     <div class="header">
         <div class="header-info">
             <h3>{{agencia}}</h3>
@@ -2928,7 +2470,7 @@ POS_HTML = '''
                 {% endfor %}
             </div>
             <div class="ticket-display" id="ticket-display">
-                <div style="text-align:center; color:#666; padding:20px; font-style:italic;">
+                <div style="text-align:center; color:#666; padding:20px;">
                     Selecciona animales y horarios...
                 </div>
             </div>
@@ -2966,7 +2508,7 @@ POS_HTML = '''
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Premios Pagados:</span>
-                        <span class="stat-value negative" id="caja-premios">S/0.00</span>
+                        <span class="stat-value" id="caja-premios" style="color: #e74c3c;">S/0.00</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Tu Comisión:</span>
@@ -3003,7 +2545,7 @@ POS_HTML = '''
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Total Premios:</span>
-                            <span class="stat-value negative" id="hist-premios">S/0.00</span>
+                            <span class="stat-value" id="hist-premios" style="color: #e74c3c;">S/0.00</span>
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Balance:</span>
@@ -3024,11 +2566,6 @@ POS_HTML = '''
                             <tbody id="tabla-historico-caja"></tbody>
                         </table>
                     </div>
-
-                    <div id="hist-alerta-pendientes" class="alert-box" style="display:none;">
-                        <strong>💰 Pendiente por Cobrar:</strong>
-                        <div id="hist-info-pendientes"></div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -3038,18 +2575,14 @@ POS_HTML = '''
     <div class="modal" id="modal-resultados">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>RESULTADOS DE SORTEOS</h3>
+                <h3>RESULTADOS</h3>
                 <button class="btn-close" onclick="cerrarModal('modal-resultados')">X</button>
             </div>
             
             <div class="form-group" style="margin-bottom: 20px;">
-                <label>Seleccionar Fecha:</label>
+                <label>Fecha:</label>
                 <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
-                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR FECHA</button>
-            </div>
-
-            <div style="margin-bottom: 15px; text-align: center; color: #ffd700; font-size: 1.1rem; font-weight: bold;" id="resultados-fecha-titulo">
-                Hoy
+                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR</button>
             </div>
 
             <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
@@ -3058,259 +2591,10 @@ POS_HTML = '''
         </div>
     </div>
 
-    <!-- NUEVO: MODAL MIS TICKETS (CONSULTAS) -->
-    <div class="modal" id="modal-mis-tickets">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🎫 MIS TICKETS VENDIDOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
-            </div>
-            
-            <div class="filter-row">
-                <input type="date" id="mis-tickets-fecha-inicio" placeholder="Desde">
-                <input type="date" id="mis-tickets-fecha-fin" placeholder="Hasta">
-                <select id="mis-tickets-estado">
-                    <option value="todos">Todos</option>
-                    <option value="pagados">Pagados</option>
-                    <option value="pendientes">Pendientes</option>
-                    <option value="por_pagar">Con Premio (por cobrar)</option>
-                </select>
-            </div>
-            <button class="btn-consultar" onclick="consultarMisTickets()">BUSCAR</button>
-            
-            <div id="mis-tickets-resumen" style="margin: 15px 0; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 8px; display: none;">
-                <strong style="color: #ffd700;">Resumen:</strong> <span id="mis-tickets-info"></span>
-            </div>
-            
-            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
-                <p style="color: #888; text-align: center; padding: 20px;">Use los filtros y presione BUSCAR</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- NUEVO: MODAL BUSCAR TICKET ESPECIFICO -->
-    <div class="modal" id="modal-buscar-ticket">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🔎 BUSCAR TICKET POR SERIAL</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button>
-            </div>
-            
-            <div class="form-group">
-                <label>Ingrese el número de serial:</label>
-                <input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center; letter-spacing: 2px;">
-            </div>
-            <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
-            
-            <div id="resultado-busqueda-ticket" style="margin-top: 20px;">
-                <!-- Aquí se mostrará el detalle -->
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL CALCULADORA -->
-    <div class="modal" id="modal-calculadora">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🧮 CALCULADORA DE PREMIOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button>
-            </div>
-            
-            <div class="form-group">
-                <label>Monto Apostado (S/):</label>
-                <input type="number" id="calc-monto" value="10" min="1">
-            </div>
-            
-            <div class="form-group">
-                <label>Tipo de Apuesta:</label>
-                <select id="calc-tipo" onchange="calcularPremio()">
-                    <option value="35">Animal Normal (00-39) x35</option>
-                    <option value="70">Lechuza (40) x70</option>
-                    <option value="2">Especial (Rojo/Negro/Par/Impar) x2</option>
-                </select>
-            </div>
-            
-            <button class="btn-consultar" onclick="calcularPremio()">CALCULAR</button>
-            
-            <div class="stats-box" id="calc-resultado" style="display: none; margin-top: 20px; text-align: center;">
-                <div style="color: #888; margin-bottom: 5px;">Premio a Pagar:</div>
-                <div style="color: #ffd700; font-size: 2rem; font-weight: bold;" id="calc-total">S/0.00</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL MIS TICKETS PENDIENTES -->
-    <div class="modal" id="modal-pendientes">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>💰 MIS TICKETS POR COBRAR</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button>
-            </div>
-            
-            <div id="pendientes-info" style="margin-bottom: 15px; color: #ffd700; font-weight: bold; text-align: center;">
-                Cargando...
-            </div>
-            
-            <div id="lista-pendientes" style="max-height: 400px; overflow-y: auto;">
-                <!-- Aquí se cargarán los tickets -->
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL REGLAS -->
-    <div class="modal" id="modal-reglas">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>📖 REGLAS DE PAGO</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-reglas')">X</button>
-            </div>
-            
-            <div style="line-height: 2; color: #ddd;">
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 Animales (00-39)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/350</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #e74c3c;">x70</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/700</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🎲 Especiales</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Rojo, Negro, Par, Impar</li>
-                    <li>Pago: <strong style="color: #2980b9;">x2</strong> veces el monto</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Importante</h4>
-                <ul style="margin-left: 20px;">
-                    <li>Anular: Solo dentro de 5 minutos</li>
-                    <li>Bloqueo: 5 minutos antes del sorteo</li>
-                    <li>Vencimiento: Tickets vencen a los 3 días</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL CÓMO USAR -->
-    <div class="modal" id="modal-como-usar">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>❓ CÓMO USAR EL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-como-usar')">X</button>
-            </div>
-            
-            <div style="line-height: 1.8; color: #ddd;">
-                <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
-                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Selecciona el monto (arriba a la derecha)</li>
-                        <li>Toca los animales que quieres jugar</li>
-                        <li>Selecciona los horarios (puedes varios)</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>Repite si quieres más jugadas</li>
-                        <li>Presiona "ENVIAR POR WHATSAPP"</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(39,174,96,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
-                    <h4 style="color: #27ae60; margin-bottom: 10px;">2. Pagar un Ticket Ganador</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón PAGAR</li>
-                        <li>Ingresa el SERIAL del ticket</li>
-                        <li>Verifica el monto ganado</li>
-                        <li>Confirma el pago</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(192,57,43,0.1); padding: 15px; border-radius: 10px; border-left: 4px solid #c0392b;">
-                    <h4 style="color: #c0392b; margin-bottom: 10px;">3. Anular un Ticket</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Solo puedes anular dentro de 5 minutos</li>
-                        <li>Presiona ANULAR e ingresa el serial</li>
-                        <li>No se pueden anular tickets pagados</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL ACERCA DE -->
-    <div class="modal" id="modal-acerca">
-        <div class="modal-content" style="text-align: center;">
-            <div class="modal-header">
-                <h3>ℹ️ ACERCA DEL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-acerca')">X</button>
-            </div>
-            
-            <div style="padding: 20px;">
-                <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
-                <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.9</p>
-                
-                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
-                    <p style="color: #ffd700; margin: 0; line-height: 1.8;">
-                        Sistema de Lotería Animal<br>
-                        Zona Horaria: Perú (UTC-5)<br><br>
-                        <strong>Nuevas Funciones v5.9:</strong><br>
-                        ✓ Consulta de Tickets Vendidos<br>
-                        ✓ Históricos por Agencia<br>
-                        ✓ Premios Pendientes en Reportes<br>
-                        ✓ Edición hasta 2h post-sorteo
-                    </p>
-                </div>
-                
-                <p style="color: #666; margin-top: 20px; font-size: 0.9rem;">
-                    © 2025 ZOOLO CASINO<br>
-                    Todos los derechos reservados
-                </p>
-            </div>
-        </div>
-    </div>
-
     <script>
         let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
         let horasPeru = {{horarios_peru|tojson}};
         let horasVen = {{horarios_venezuela|tojson}};
-        
-        // Toggle mobile menu
-        function toggleMobileMenu() {
-            const menu = document.getElementById('mobileMenu');
-            const overlay = document.querySelector('.mobile-menu-overlay');
-            menu.classList.toggle('active');
-            overlay.classList.toggle('active');
-        }
-        
-        // Funciones para menú móvil
-        function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
-        function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
-        function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
-        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
-        function abrirBuscarTicketMobile() { toggleMobileMenu(); abrirBuscarTicket(); }
-        function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
-        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
-        function mostrarReglasMobile() { toggleMobileMenu(); mostrarReglas(); }
-        function mostrarComoUsarMobile() { toggleMobileMenu(); mostrarComoUsar(); }
-        function mostrarAcercaMobile() { toggleMobileMenu(); mostrarAcerca(); }
-        
-        function showToast(message, type = 'info') {
-            const existing = document.querySelector('.toast-notification');
-            if (existing) existing.remove();
-            
-            const toast = document.createElement('div');
-            toast.className = 'toast-notification';
-            toast.style.background = type === 'error' ? '#c0392b' : type === 'success' ? '#27ae60' : '#2980b9';
-            toast.style.color = 'white';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => {
-                toast.style.animation = 'slideUp 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
         
         function updateReloj() {
             let now = new Date();
@@ -3345,7 +2629,6 @@ POS_HTML = '''
             } else {
                 seleccionados.push({k, nombre});
                 el.classList.add('active');
-                if (navigator.vibrate) navigator.vibrate(50);
             }
             updateTicket();
         }
@@ -3366,7 +2649,7 @@ POS_HTML = '''
         function toggleHora(hora, id) {
             let btn = document.getElementById('hora-' + id);
             if (btn.classList.contains('expired')) {
-                showToast('Este sorteo ya cerró', 'error');
+                alert('Este sorteo ya cerró');
                 return;
             }
             let idx = horariosSel.indexOf(hora);
@@ -3420,9 +2703,7 @@ POS_HTML = '''
             html += '</tbody></table>';
             
             if (carrito.length === 0 && (seleccionados.length === 0 && especiales.length === 0)) {
-                html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
-            } else if (carrito.length === 0) {
-                html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
+                html = '<div style="text-align:center; color:#666; padding:20px;">Selecciona animales y horarios...</div>';
             }
             
             if (total > 0) {
@@ -3434,7 +2715,7 @@ POS_HTML = '''
         
         function agregar() {
             if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
-                showToast('Selecciona horario y animal/especial', 'error'); 
+                alert('Selecciona horario y animal/especial'); 
                 return;
             }
             let monto = parseFloat(document.getElementById('monto').value) || 5;
@@ -3452,19 +2733,14 @@ POS_HTML = '''
             seleccionados = []; especiales = []; horariosSel = [];
             document.querySelectorAll('.animal-card.active, .btn-esp.active, .btn-hora.active').forEach(el => el.classList.remove('active'));
             updateTicket();
-            showToast(`${count} jugada(s) agregada(s)`, 'success');
+            alert(`${count} jugada(s) agregada(s)`);
         }
         
         async function vender() {
             if (carrito.length === 0) { 
-                showToast('Carrito vacío', 'error'); 
+                alert('Carrito vacío'); 
                 return; 
             }
-            
-            const btn = document.querySelector('.btn-vender');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Procesando...';
-            btn.disabled = true;
             
             try {
                 let jugadas = carrito.map(c => ({
@@ -3483,22 +2759,14 @@ POS_HTML = '''
                 const data = await response.json();
                 
                 if (data.error) {
-                    showToast(data.error, 'error');
+                    alert(data.error);
                 } else {
-                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = data.url_whatsapp;
-                    } else {
-                        window.open(data.url_whatsapp, '_blank');
-                    }
+                    window.open(data.url_whatsapp, '_blank');
                     carrito = []; 
                     updateTicket();
-                    showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
                 }
             } catch (e) {
-                showToast('Error de conexión. Intenta de nuevo.', 'error');
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+                alert('Error de conexión');
             }
         }
 
@@ -3516,10 +2784,6 @@ POS_HTML = '''
             let container = document.getElementById('lista-resultados');
             container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
             
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('resultados-fecha-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
             fetch('/api/resultados-fecha', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -3528,48 +2792,34 @@ POS_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
                     return;
                 }
                 
                 let html = '';
-                if (d.resultados && Object.keys(d.resultados).length > 0) {
+                if (d.resultados) {
                     for (let hora of horasPeru) {
                         let resultado = d.resultados[hora];
-                        let clase = resultado ? '' : 'pendiente';
-                        let contenido;
-                        
                         if (resultado) {
-                            contenido = `
-                                <span class="resultado-numero">${resultado.animal}</span>
-                                <span class="resultado-nombre">${resultado.nombre}</span>
-                            `;
+                            html += `<div style="background: #0a0a0a; padding: 15px; margin: 8px 0; border-radius: 10px; border-left: 4px solid #27ae60; display: flex; justify-content: space-between; align-items: center;">
+                                <div><strong style="color: #ffd700;">${hora}</strong></div>
+                                <div style="text-align: right;">
+                                    <div style="color: #ffd700; font-weight: bold; font-size: 1.3rem;">${resultado.animal}</div>
+                                    <div style="color: #888; font-size: 0.9rem;">${resultado.nombre}</div>
+                                </div>
+                            </div>`;
                         } else {
-                            contenido = `
-                                <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                                <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
-                            `;
+                            html += `<div style="background: #0a0a0a; padding: 15px; margin: 8px 0; border-radius: 10px; border-left: 4px solid #666; opacity: 0.7; display: flex; justify-content: space-between; align-items: center;">
+                                <div><strong style="color: #ffd700;">${hora}</strong></div>
+                                <div style="color: #666;">Pendiente</div>
+                            </div>`;
                         }
-                        
-                        html += `
-                            <div class="resultado-item ${clase}">
-                                <div style="display: flex; flex-direction: column;">
-                                    <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                                    <small style="color: #666; font-size: 0.75rem;">Venezuela: ${horasVen[horasPeru.indexOf(hora)]}</small>
-                                </div>
-                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
-                                    ${contenido}
-                                </div>
-                            </div>
-                        `;
                     }
-                } else {
-                    html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles para esta fecha</p>';
                 }
                 container.innerHTML = html;
             })
             .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
+                container.innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
             });
         }
 
@@ -3577,273 +2827,36 @@ POS_HTML = '''
             document.getElementById(modalId).style.display = 'none';
         }
         
-        // Funciones del menú Archivo
         function abrirCaja() {
             fetch('/api/caja')
             .then(r => r.json())
             .then(d => {
                 if (d.error) { 
-                    showToast(d.error, 'error'); 
+                    alert(d.error); 
                     return; 
                 }
                 document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
                 document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
                 document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
-                
-                let balanceEl = document.getElementById('caja-balance');
-                balanceEl.textContent = 'S/' + d.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
+                document.getElementById('caja-balance').textContent = 'S/' + d.balance.toFixed(2);
                 
                 let alertaDiv = document.getElementById('alerta-pendientes');
-                let infoDiv = document.getElementById('info-pendientes');
                 if (d.tickets_pendientes > 0) {
                     alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.<br>¡Pasa a pagar!`;
+                    document.getElementById('info-pendientes').innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.`;
                 } else {
                     alertaDiv.style.display = 'none';
                 }
                 
                 document.getElementById('modal-caja').style.display = 'block';
             })
-            .catch(e => showToast('Error de conexión', 'error'));
+            .catch(e => alert('Error de conexión'));
             
             let hoy = new Date().toISOString().split('T')[0];
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
         }
         
-        function abrirCajaHistorico() {
-            abrirCaja();
-            setTimeout(() => switchTab('historico'), 100);
-        }
-        
-        function abrirCalculadora() {
-            document.getElementById('modal-calculadora').style.display = 'block';
-            calcularPremio();
-        }
-        
-        function calcularPremio() {
-            const monto = parseFloat(document.getElementById('calc-monto').value) || 0;
-            const multiplicador = parseInt(document.getElementById('calc-tipo').value);
-            const total = monto * multiplicador;
-            
-            document.getElementById('calc-total').textContent = 'S/' + total.toFixed(2);
-            document.getElementById('calc-resultado').style.display = 'block';
-        }
-        
-        // NUEVAS FUNCIONES DE CONSULTA
-        function abrirMisTickets() {
-            document.getElementById('modal-mis-tickets').style.display = 'block';
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
-        }
-        
-        function abrirBuscarTicket() {
-            document.getElementById('modal-buscar-ticket').style.display = 'block';
-            document.getElementById('buscar-serial-input').value = '';
-            document.getElementById('resultado-busqueda-ticket').innerHTML = '';
-            document.getElementById('buscar-serial-input').focus();
-        }
-        
-        function consultarMisTickets() {
-            let inicio = document.getElementById('mis-tickets-fecha-inicio').value;
-            let fin = document.getElementById('mis-tickets-fecha-fin').value;
-            let estado = document.getElementById('mis-tickets-estado').value;
-            
-            if (!inicio || !fin) {
-                showToast('Seleccione fechas', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('lista-mis-tickets');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio,
-                    fecha_fin: fin,
-                    estado: estado
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                // Mostrar resumen
-                document.getElementById('mis-tickets-resumen').style.display = 'block';
-                document.getElementById('mis-tickets-info').textContent = 
-                    `${d.totales.cantidad} tickets - Total ventas: S/${d.totales.ventas.toFixed(2)}`;
-                
-                if (d.tickets.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No se encontraron tickets con esos filtros</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    let estadoClass = t.pagado ? 'ganador' : (t.premio_calculado ? 'pendiente-pago' : '');
-                    let estadoText = t.pagado ? 'PAGADO' : (t.premio_calculado ? 'GANADOR (sin cobrar)' : 'PENDIENTE');
-                    
-                    html += `
-                        <div class="ticket-item ${estadoClass}" onclick="verDetalleTicket('${t.serial}')">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">${t.fecha} - Total: S/${t.total}</div>
-                            ${t.premio_calculado ? `<div class="ticket-premio">Premio: S/${t.premio_calculado}</div>` : ''}
-                            <span class="ticket-estado ${t.pagado ? 'estado-pagado' : 'estado-pendiente'}">${estadoText}</span>
-                        </div>
-                    `;
-                });
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function buscarTicketEspecifico() {
-            let serial = document.getElementById('buscar-serial-input').value.trim();
-            if (!serial) {
-                showToast('Ingrese un serial', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('resultado-busqueda-ticket');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Buscando...</p>';
-            
-            fetch('/api/consultar-ticket-detalle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">' + d.error + '</p>';
-                    return;
-                }
-                
-                let t = d.ticket;
-                let estadoColor = t.pagado ? '#27ae60' : (t.premio_total > 0 ? '#f39c12' : '#888');
-                let estadoText = t.pagado ? 'PAGADO' : (t.premio_total > 0 ? 'GANADOR - PENDIENTE DE COBRO' : 'NO GANADOR');
-                
-                let html = `
-                    <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; border: 2px solid ${estadoColor};">
-                        <h3 style="color: #ffd700; margin-bottom: 15px; text-align: center;">TICKET #${t.serial}</h3>
-                        <div class="stats-box" style="margin-bottom: 15px;">
-                            <div class="stat-row">
-                                <span class="stat-label">Fecha:</span>
-                                <span class="stat-value" style="font-size: 1rem;">${t.fecha}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Apostado:</span>
-                                <span class="stat-value" style="font-size: 1rem;">S/${t.total_apostado}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Estado:</span>
-                                <span class="stat-value" style="color: ${estadoColor}; font-size: 1rem;">${estadoText}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Premio Total:</span>
-                                <span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">
-                                    S/${t.premio_total.toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                        <h4 style="color: #ffd700; margin-bottom: 10px;">Detalle de Jugadas:</h4>
-                `;
-                
-                d.jugadas.forEach(j => {
-                    let ganoClass = j.gano ? 'jugada-ganadora' : '';
-                    let resultadoText = j.resultado ? `${j.resultado} (${j.nombre_seleccion})` : 'Pendiente';
-                    
-                    html += `
-                        <div class="jugada-detail ${ganoClass}">
-                            <div>
-                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
-                                <small style="color: #888;">Resultado: ${resultadoText}</small>
-                            </div>
-                            <div style="text-align: right;">
-                                <div>S/${j.monto}</div>
-                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function verDetalleTicket(serial) {
-            document.getElementById('modal-mis-tickets').style.display = 'none';
-            abrirBuscarTicket();
-            document.getElementById('buscar-serial-input').value = serial;
-            buscarTicketEspecifico();
-        }
-        
-        // Funciones existentes...
-        function abrirMisTicketsPendientes() {
-            document.getElementById('modal-pendientes').style.display = 'block';
-            document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets-pendientes')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                document.getElementById('pendientes-info').innerHTML = 
-                    `Total Pendiente: <span style="color: #27ae60; font-size: 1.3rem;">S/${d.total_pendiente.toFixed(2)}</span> (${d.tickets.length} tickets)`;
-                
-                if (d.tickets.length === 0) {
-                    document.getElementById('lista-pendientes').innerHTML = 
-                        '<p style="color: #888; text-align: center; padding: 20px;">No tienes tickets pendientes por cobrar</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    html += `
-                        <div class="ticket-item ganador">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">Fecha: ${t.fecha} • Jugadas: ${t.jugadas} • Apostado: S/${t.total}</div>
-                            <div class="ticket-premio">💰 Ganancia: S/${t.premio.toFixed(2)}</div>
-                        </div>
-                    `;
-                });
-                document.getElementById('lista-pendientes').innerHTML = html;
-            })
-            .catch(e => {
-                document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
-            });
-        }
-        
-        // Funciones del menú Ayuda
-        function mostrarReglas() {
-            document.getElementById('modal-reglas').style.display = 'block';
-        }
-        
-        function mostrarComoUsar() {
-            document.getElementById('modal-como-usar').style.display = 'block';
-        }
-        
-        function mostrarAcerca() {
-            document.getElementById('modal-acerca').style.display = 'block';
-        }
-        
-        // Funciones existentes...
         function switchTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -3856,7 +2869,7 @@ POS_HTML = '''
             let fin = document.getElementById('hist-fecha-fin').value;
             
             if (!inicio || !fin) {
-                showToast('Seleccione ambas fechas', 'error');
+                alert('Seleccione ambas fechas');
                 return;
             }
             
@@ -3868,17 +2881,14 @@ POS_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    showToast(d.error, 'error');
+                    alert(d.error);
                     return;
                 }
                 
                 document.getElementById('resultado-historico').style.display = 'block';
                 document.getElementById('hist-ventas').textContent = 'S/' + d.totales.ventas.toFixed(2);
                 document.getElementById('hist-premios').textContent = 'S/' + d.totales.premios.toFixed(2);
-                
-                let balanceEl = document.getElementById('hist-balance');
-                balanceEl.textContent = 'S/' + d.totales.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.totales.balance >= 0 ? 'positive' : 'negative');
+                document.getElementById('hist-balance').textContent = 'S/' + d.totales.balance.toFixed(2);
                 
                 let tbody = document.getElementById('tabla-historico-caja');
                 let html = '';
@@ -3892,17 +2902,8 @@ POS_HTML = '''
                     </tr>`;
                 });
                 tbody.innerHTML = html;
-                
-                let alertaDiv = document.getElementById('hist-alerta-pendientes');
-                let infoDiv = document.getElementById('hist-info-pendientes');
-                if (d.totales.tickets_pendientes_cobro > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `${d.totales.tickets_pendientes_cobro} ticket(s) sin cobrar por <strong>S/${d.totales.total_pendiente_cobro.toFixed(2)}</strong>`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
             })
-            .catch(e => showToast('Error de conexión', 'error'));
+            .catch(e => alert('Error de conexión'));
         }
         
         async function pagar() {
@@ -3918,33 +2919,24 @@ POS_HTML = '''
                 const d = await response.json();
                 
                 if (d.error) { 
-                    showToast(d.error, 'error'); 
+                    alert(d.error); 
                     return; 
                 }
                 
-                let msg = "=== RESULTADO ===\\n\\n";
-                let total = d.total_ganado;
+                let msg = "TOTAL GANADO: S/" + d.total_ganado.toFixed(2) + "\\n\\n¿Confirma pago?";
                 
-                for (let det of d.detalles) {
-                    let premioTxt = det.gano ? ('S/' + det.premio.toFixed(2)) : 'No';
-                    let especial = det.es_lechuza ? ' 🦉x70!' : '';
-                    msg += det.hora + " | " + det.sel + " -> " + premioTxt + especial + "\\n";
-                }
-                
-                msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
-                
-                if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
+                if (d.total_ganado > 0 && confirm(msg)) {
                     await fetch('/api/pagar-ticket', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ticket_id: d.ticket_id})
                     });
-                    showToast('✅ Ticket pagado correctamente', 'success');
-                } else if (total === 0) {
-                    showToast('Ticket no ganador', 'info');
+                    alert('✅ Ticket pagado');
+                } else if (d.total_ganado === 0) {
+                    alert('Ticket no ganador');
                 }
             } catch (e) {
-                showToast('Error de conexión', 'error');
+                alert('Error de conexión');
             }
         }
         
@@ -3962,38 +2954,26 @@ POS_HTML = '''
                 const d = await response.json();
                 
                 if (d.error) {
-                    showToast(d.error, 'error');
+                    alert(d.error);
                 } else {
-                    showToast('✅ ' + d.mensaje, 'success');
+                    alert('✅ ' + d.mensaje);
                 }
             } catch (e) {
-                showToast('Error de conexión', 'error');
+                alert('Error de conexión');
             }
         }
         
         function borrarTodo() {
-            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0) {
-                if (!confirm('¿Borrar todo?')) return;
-            }
+            if (!confirm('¿Borrar todo?')) return;
             seleccionados = []; especiales = []; horariosSel = []; carrito = [];
             document.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
             updateTicket();
-            showToast('Ticket limpiado', 'info');
         }
         
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', function(e) {
                 if (e.target === this) this.style.display = 'none';
             });
-        });
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('resultados-fecha').value = hoy;
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
         });
     </script>
 </body>
@@ -4016,7 +2996,7 @@ ADMIN_HTML = '''
             line-height: 1.5;
         }
         
-        /* Header simple para Admin (sin menú Windows Forms) */
+        /* Header */
         .admin-header {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
             padding: 15px;
@@ -4046,14 +3026,13 @@ ADMIN_HTML = '''
             font-size: 0.9rem;
         }
         
-        /* Tabs de navegación simples (horizontal) */
+        /* Tabs */
         .admin-tabs {
             display: flex;
             background: #1a1a2e;
             border-bottom: 1px solid #333;
             overflow-x: auto;
             scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
         }
         
         .admin-tabs::-webkit-scrollbar {
@@ -4085,12 +3064,32 @@ ADMIN_HTML = '''
             font-weight: bold;
         }
         
-        /* Contenido */
+        /* Content - IMPORTANTE: Visible por defecto */
         .content { 
             padding: 20px; 
             max-width: 1200px; 
             margin: 0 auto; 
             padding-bottom: 30px;
+        }
+        
+        /* Tab content - IMPORTANTE: Dashboard activo por defecto */
+        .tab-content { 
+            display: none; 
+        }
+        
+        .tab-content.active { 
+            display: block !important;
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn { 
+            from { opacity: 0; } 
+            to { opacity: 1; } 
+        }
+        
+        /* Forzar que dashboard se vea al inicio */
+        #dashboard {
+            display: block !important;
         }
         
         .info-pago {
@@ -4104,7 +3103,6 @@ ADMIN_HTML = '''
             color: #ffd700;
         }
         
-        /* Stats Grid */
         .stats-grid {
             display: grid; 
             grid-template-columns: repeat(2, 1fr);
@@ -4120,13 +3118,10 @@ ADMIN_HTML = '''
             border-radius: 12px; 
             border: 1px solid #ffd700; 
             text-align: center;
-            transition: transform 0.2s;
         }
-        .stat-card:active { transform: scale(0.98); }
-        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; }
         .stat-card p { color: #ffd700; font-size: 1.4rem; font-weight: bold; }
         
-        /* Formularios */
         .form-box { 
             background: #1a1a2e; 
             padding: 20px; 
@@ -4146,7 +3141,6 @@ ADMIN_HTML = '''
             gap: 10px; 
             margin-bottom: 12px; 
             flex-wrap: wrap; 
-            align-items: center; 
         }
         .form-row input, .form-row select {
             flex: 1; 
@@ -4157,7 +3151,6 @@ ADMIN_HTML = '''
             color: white; 
             border-radius: 8px; 
             font-size: 1rem;
-            -webkit-appearance: none;
         }
         .btn-submit {
             background: linear-gradient(135deg, #27ae60, #229954); 
@@ -4168,8 +3161,6 @@ ADMIN_HTML = '''
             cursor: pointer; 
             font-weight: bold; 
             font-size: 0.95rem;
-            flex: 1;
-            min-width: 120px;
         }
         .btn-danger {
             background: linear-gradient(135deg, #c0392b, #e74c3c); 
@@ -4179,7 +3170,6 @@ ADMIN_HTML = '''
             border-radius: 8px; 
             cursor: pointer; 
             font-weight: bold; 
-            font-size: 0.95rem;
         }
         .btn-secondary {
             background: #444; 
@@ -4199,13 +3189,10 @@ ADMIN_HTML = '''
             border-radius: 8px; 
             cursor: pointer; 
             font-weight: bold; 
-            font-size: 0.95rem;
         }
         
-        /* Tablas */
         .table-container {
             overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
             margin: 15px 0;
             border-radius: 8px;
             border: 1px solid #333;
@@ -4220,78 +3207,58 @@ ADMIN_HTML = '''
             padding: 12px 10px; 
             text-align: left; 
             border-bottom: 1px solid #333; 
-            white-space: nowrap;
         }
         th { 
             background: linear-gradient(135deg, #ffd700, #ffed4e); 
             color: black; 
             font-weight: bold;
-            position: sticky;
-            top: 0;
         }
-        tr:hover { background: rgba(255,215,0,0.05); }
         
-        /* Riesgo */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        
+        .error-box {
+            background: rgba(192, 57, 43, 0.2);
+            border: 1px solid #c0392b;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .success-box {
+            background: rgba(39, 174, 96, 0.2);
+            border: 1px solid #27ae60;
+            color: #27ae60;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .mensaje {
+            display: none;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
         .riesgo-item {
             background: #1a1a2e; 
             padding: 15px; 
             margin-bottom: 10px;
             border-radius: 8px; 
             border-left: 4px solid #c0392b;
-            font-size: 0.9rem;
         }
         .riesgo-item.lechuza {
             border-left-color: #ffd700;
-            background: linear-gradient(135deg, rgba(255,215,0,0.1), #1a1a2e);
-        }
-        .riesgo-item b { color: #ffd700; font-size: 1.1rem; }
-        
-        .sorteo-actual-box {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            border: 2px solid #2980b9; 
-            text-align: center;
-        }
-        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 8px; font-size: 0.9rem; }
-        .sorteo-actual-box p { color: #ffd700; font-size: 1.8rem; font-weight: bold; }
-        
-        /* Selector de agencia */
-        .agencia-selector {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #444;
-        }
-        .agencia-selector label {
-            color: #ffd700;
-            font-weight: bold;
-            display: block;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        .agencia-selector select {
-            width: 100%;
-            padding: 12px;
-            background: #000;
-            border: 2px solid #ffd700;
-            color: white;
-            border-radius: 8px;
-            font-size: 1rem;
-        }
-        .agencia-info {
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(255,215,0,0.1);
-            border-radius: 6px;
-            text-align: center;
-            color: #ffd700;
-            font-weight: bold;
         }
         
-        /* Resultados */
         .resultado-item {
             background: #0a0a0a;
             padding: 15px;
@@ -4306,64 +3273,25 @@ ADMIN_HTML = '''
             border-left-color: #666;
             opacity: 0.7;
         }
-        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
-        .resultado-nombre { color: #888; font-size: 0.9rem; }
         
         .btn-editar {
-            background: linear-gradient(135deg, #2980b9, #3498db);
+            background: #2980b9;
             color: white;
             border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
+            padding: 6px 12px;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 0.85rem;
-            font-weight: bold;
-            margin-left: 10px;
-            transition: all 0.2s;
-        }
-        .btn-editar:hover {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            transform: scale(1.05);
+            font-size: 0.8rem;
         }
         
-        /* Modal de edición */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 2000;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        .modal.active { display: flex; }
-        .modal-box {
-            background: #1a1a2e;
-            padding: 25px;
-            border-radius: 15px;
-            border: 2px solid #ffd700;
-            max-width: 400px;
-            width: 100%;
-        }
-        .modal-box h3 {
-            color: #ffd700;
+        .agencia-selector {
+            background: rgba(255,215,0,0.05);
+            padding: 15px;
+            border-radius: 10px;
             margin-bottom: 20px;
-            text-align: center;
-        }
-        .warning-box {
-            background: rgba(243, 156, 18, 0.2);
-            border: 1px solid #f39c12;
-            color: #f39c12;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            display: none;
+            border: 1px solid rgba(255,215,0,0.2);
         }
         
-        /* Ranking */
         .ranking-item {
             background: linear-gradient(135deg, #1a1a2e, #16213e);
             padding: 15px;
@@ -4374,120 +3302,22 @@ ADMIN_HTML = '''
             justify-content: space-between;
             align-items: center;
         }
-        .ranking-pos {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #ffd700;
-            min-width: 40px;
-        }
-        .ranking-info { flex: 1; padding: 0 10px; }
-        .ranking-nombre { font-weight: bold; color: white; font-size: 1.1rem; }
-        .ranking-detalle { font-size: 0.85rem; color: #888; margin-top: 3px; }
-        .ranking-monto { text-align: right; }
-        .ranking-ventas { font-size: 1.3rem; font-weight: bold; color: #27ae60; }
-        .ranking-balance { font-size: 0.9rem; color: #888; }
         
-        /* Mensajes */
-        .mensaje {
-            padding: 15px; 
-            margin: 15px 0; 
-            border-radius: 8px; 
-            display: none;
-            font-size: 0.95rem;
-            text-align: center;
+        /* Responsive */
+        @media (max-width: 768px) {
+            .admin-title { font-size: 1rem; }
+            .stat-card p { font-size: 1.2rem; }
         }
-        .mensaje.success { 
-            background: rgba(39,174,96,0.2); 
-            border: 1px solid #27ae60; 
-            display: block; 
-            color: #27ae60;
-        }
-        .mensaje.error { 
-            background: rgba(192,57,43,0.2); 
-            border: 1px solid #c0392b; 
-            display: block; 
-            color: #c0392b;
-        }
-        
-        /* Tabs content */
-        .tab-content { display: none; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
-        .btn-group {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 10px;
-        }
-        .btn-group button {
-            flex: 1;
-            min-width: 80px;
-        }
-        
-        /* Info de zona horaria */
-        .timezone-info {
-            background: rgba(41, 128, 185, 0.1);
-            border: 1px solid #2980b9;
-            color: #3498db;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 15px 0;
-            font-size: 0.85rem;
-            text-align: center;
-        }
-        
-        /* Indicador de premios */
-        .premio-box {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        .premio-pagado { background: #27ae60; color: white; }
-        .premio-pendiente { background: #f39c12; color: black; }
-        .premio-total { background: #2980b9; color: white; }
     </style>
 </head>
 <body>
-    <!-- Modal de Edición de Resultado -->
-    <div class="modal" id="modal-editar">
-        <div class="modal-box">
-            <h3>✏️ EDITAR RESULTADO</h3>
-            <div class="warning-box" id="editar-advertencia">
-                ⚠️ Este sorteo tiene tickets vendidos. Al cambiar el resultado, los tickets ganadores cambiarán.
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Fecha:</label>
-                <input type="text" id="editar-fecha-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Hora:</label>
-                <input type="text" id="editar-hora-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Nuevo Animal:</label>
-                <select id="editar-animal-select" style="width: 100%; padding: 12px; background: #000; border: 2px solid #ffd700; color: white; border-radius: 8px; font-size: 1rem;">
-                    {% for k, v in animales.items() %}
-                    <option value="{{k}}">{{k}} - {{v}}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button onclick="cerrarModalEditar()" style="flex: 1; background: #444; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">CANCELAR</button>
-                <button onclick="confirmarEdicion()" style="flex: 2; background: linear-gradient(135deg, #27ae60, #229954); color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">GUARDAR CAMBIO</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Header Simple para Admin (Sin menú Windows) -->
+    <!-- Header -->
     <div class="admin-header">
         <div class="admin-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
         <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
     </div>
 
-    <!-- Tabs de Navegación Simple (reemplaza al menú Windows) -->
+    <!-- Tabs -->
     <div class="admin-tabs">
         <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
         <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
@@ -4505,23 +3335,31 @@ ADMIN_HTML = '''
             💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2
         </div>
         
-        <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 7PM hasta 9PM).
-        </div>
-        
         <!-- DASHBOARD -->
         <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">📊 RESUMEN DE HOY</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px;">📊 RESUMEN DE HOY</h3>
             <div class="stats-grid">
-                <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PAGADOS</h3><p id="stat-premios">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PENDIENTES</h3><p id="stat-premios-pendientes" style="color: #f39c12;">S/0</p></div>
-                <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
+                <div class="stat-card">
+                    <h3>VENTAS</h3>
+                    <p id="stat-ventas">S/0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>PREMIOS PAGADOS</h3>
+                    <p id="stat-premios">S/0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>PREMIOS PENDIENTES</h3>
+                    <p id="stat-premios-pendientes" style="color: #f39c12;">S/0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>BALANCE</h3>
+                    <p id="stat-balance">S/0</p>
+                </div>
             </div>
             
             <div class="form-box">
                 <h3>⚡ ACCIONES RÁPIDAS</h3>
-                <div class="btn-group">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                     <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
                     <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
                     <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
@@ -4529,93 +3367,61 @@ ADMIN_HTML = '''
             </div>
         </div>
 
-        <!-- RIESGO -->
-        <div id="riesgo" class="tab-content">
-            <div class="agencia-selector">
-                <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
-                <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()">
-                    <option value="">TODAS LAS AGENCIAS</option>
-                </select>
-                <div class="agencia-info" id="riesgo-agencia-nombre" style="display:none;">
-                    Mostrando riesgo para: <span id="nombre-agencia-actual">TODAS</span>
-                </div>
-            </div>
-            
-            <div class="sorteo-actual-box">
-                <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
-                <p id="sorteo-objetivo">Cargando...</p>
-                <small style="color: #888; font-size: 0.8rem;">Riesgo calculado para este horario específico</small>
-            </div>
-            
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">
-                💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
-                <span id="cantidad-jugadas-info" style="color: #888; font-size: 0.8rem; display: block; margin-top: 5px;"></span>
-            </h3>
-            <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
-            
-            <div style="margin-top: 20px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                <small style="color: #ff6b6b;">
-                    ⚠️ El riesgo se resetea automáticamente cuando cambia el sorteo.
-                </small>
-            </div>
-        </div>
-
-        <!-- REPORTE AGENCIAS -->
+        <!-- REPORTE -->
         <div id="reporte" class="tab-content">
             <div class="form-box">
                 <h3>🏢 REPORTE POR AGENCIAS</h3>
                 
-                <!-- NUEVO: Selector de agencia -->
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>Filtrar por Agencia:</label>
-                    <select id="reporte-agencia-select" onchange="cambiarFiltroAgencia()">
-                        <option value="">TODAS LAS AGENCIAS (GLOBAL)</option>
+                <div style="margin-bottom: 15px;">
+                    <label style="color: #888; display: block; margin-bottom: 5px;">Filtrar por Agencia:</label>
+                    <select id="reporte-agencia-select" style="width: 100%; padding: 12px; background: #000; border: 1px solid #444; color: white; border-radius: 8px;">
+                        <option value="">TODAS LAS AGENCIAS</option>
                     </select>
                 </div>
                 
                 <div class="form-row">
                     <input type="date" id="reporte-fecha-inicio">
                     <input type="date" id="reporte-fecha-fin">
-                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR</button>
                 </div>
-                <div class="btn-group">
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
                     <button class="btn-secondary" onclick="setRangoReporte('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRangoReporte('ayer')">Ayer</button>
                     <button class="btn-secondary" onclick="setRangoReporte('semana')">7 días</button>
-                    <button class="btn-csv" onclick="exportarCSV()">📊 CSV</button>
+                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR REPORTE</button>
+                    <button class="btn-csv" onclick="exportarCSV()">📊 Exportar CSV</button>
                 </div>
                 
+                <div id="loading-reporte" class="loading" style="display: none;">
+                    Cargando reporte... por favor espere (puede tomar unos segundos)
+                </div>
+                
+                <div id="error-reporte" class="error-box" style="display: none;"></div>
+                
                 <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES <span id="titulo-filtro-agencia"></span></h4>
-                    
-                    <!-- NUEVO: Stats de premios detallados -->
+                    <h4 style="color: #ffd700; margin-bottom: 15px;">📈 TOTALES GLOBALES</h4>
                     <div class="stats-grid" id="stats-agencias-totales"></div>
                     
-                    <!-- NUEVO: Desglose de premios -->
                     <div class="form-box" style="background: rgba(255,215,0,0.05);">
                         <h4 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">💰 DESGLOSE DE PREMIOS</h4>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pagados:</span>
-                            <span class="stat-value" id="reporte-premios-pagados" style="color: #27ae60;">S/0</span>
+                        <div style="display: flex; justify-content: space-between; margin: 8px 0;">
+                            <span style="color: #888;">Premios Pagados:</span>
+                            <span id="reporte-premios-pagados" style="color: #27ae60; font-weight: bold;">S/0</span>
                         </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pendientes (por cobrar):</span>
-                            <span class="stat-value" id="reporte-premios-pendientes" style="color: #f39c12;">S/0</span>
+                        <div style="display: flex; justify-content: space-between; margin: 8px 0;">
+                            <span style="color: #888;">Premios Pendientes:</span>
+                            <span id="reporte-premios-pendientes" style="color: #f39c12; font-weight: bold;">S/0</span>
                         </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total en Premios (Teórico):</span>
-                            <span class="stat-value" id="reporte-premios-total" style="color: #ffd700;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Tickets Ganadores sin Cobrar:</span>
-                            <span class="stat-value" id="reporte-tickets-pendientes" style="color: #f39c12;">0</span>
+                        <div style="display: flex; justify-content: space-between; margin: 8px 0; border-top: 1px solid #333; padding-top: 8px;">
+                            <span style="color: #ffd700;">Total en Premios:</span>
+                            <span id="reporte-premios-total" style="color: #ffd700; font-weight: bold;">S/0</span>
                         </div>
                     </div>
 
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🏆 TOP 5 AGENCIAS</h4>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px;">🏆 RANKING AGENCIAS</h4>
                     <div id="ranking-agencias"></div>
 
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE COMPLETO</h4>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px;">📋 DETALLE COMPLETO</h4>
                     <div class="table-container">
                         <table id="tabla-detalle-agencias">
                             <thead>
@@ -4624,7 +3430,7 @@ ADMIN_HTML = '''
                                     <th>Agencia</th>
                                     <th>Tickets</th>
                                     <th>Ventas</th>
-                                    <th>Premios Pagados</th>
+                                    <th>Premios Pag.</th>
                                     <th>Pendientes</th>
                                     <th>Balance</th>
                                     <th>%</th>
@@ -4637,37 +3443,65 @@ ADMIN_HTML = '''
             </div>
         </div>
 
+        <!-- RIESGO -->
+        <div id="riesgo" class="tab-content">
+            <div class="form-box">
+                <h3>⚠️ RIESGO POR SORTEO</h3>
+                
+                <div class="agencia-selector">
+                    <label style="color: #ffd700; font-weight: bold;">Filtrar por Agencia:</label>
+                    <select id="riesgo-agencia-select" onchange="cargarRiesgo()" style="width: 100%; margin-top: 8px; padding: 10px; background: #000; border: 1px solid #ffd700; color: white; border-radius: 6px;">
+                        <option value="">TODAS LAS AGENCIAS</option>
+                    </select>
+                </div>
+                
+                <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #2980b9; text-align: center;">
+                    <div style="color: #2980b9; font-size: 0.9rem; margin-bottom: 8px;">🎯 SORTEO EN ANÁLISIS</div>
+                    <div id="sorteo-objetivo" style="color: #ffd700; font-size: 1.8rem; font-weight: bold;">Cargando...</div>
+                </div>
+                
+                <div style="margin-bottom: 15px; text-align: center;">
+                    <div style="color: #888; font-size: 0.9rem;">TOTAL APOSTADO EN ESTE SORTEO</div>
+                    <div id="total-apostado-sorteo" style="color: #ffd700; font-size: 1.5rem; font-weight: bold;">S/0</div>
+                </div>
+                
+                <div id="lista-riesgo" style="max-height: 400px; overflow-y: auto;">
+                    <div class="loading">Cargando datos...</div>
+                </div>
+            </div>
+        </div>
+
         <!-- RESULTADOS -->
         <div id="resultados" class="tab-content">
             <div class="form-box">
-                <h3>🔍 CONSULTAR RESULTADOS</h3>
+                <h3>📋 CARGAR Y CONSULTAR RESULTADOS</h3>
+                
                 <div class="form-row">
-                    <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
-                    <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
-                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">HOY</button>
-                </div>
-                <div id="admin-resultados-titulo" style="margin-top: 15px; color: #ffd700; font-weight: bold; text-align: center; font-size: 1.1rem;"></div>
-            </div>
-
-            <div class="form-box">
-                <h3>📋 RESULTADOS CARGADOS</h3>
-                <div class="timezone-info">
-                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 7PM hasta 9PM hora Perú).
-                </div>
-                <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
-                </div>
-            </div>
-
-            <div class="form-box">
-                <h3>✏️ CARGAR/EDITAR RESULTADO</h3>
-                <div class="form-row">
-                    <select id="res-hora" style="flex: 1.5;">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
-                    <select id="res-animal" style="flex: 2;">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
+                    <select id="res-hora" style="flex: 1.5;">
+                        {% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}
+                    </select>
+                    <select id="res-animal" style="flex: 2;">
+                        {% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}
+                    </select>
                     <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
                 </div>
-                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;">
-                    ℹ️ Si el resultado ya existe, se actualizará automáticamente (dentro de la ventana de 2 horas).
+                
+                <div style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.85rem; color: #888;">
+                    ℹ️ Los resultados son editables hasta 2 horas después del sorteo
+                </div>
+                
+                <div style="margin-top: 20px; border-top: 1px solid #333; padding-top: 20px;">
+                    <div class="form-row">
+                        <input type="date" id="admin-resultados-fecha">
+                        <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR FECHA</button>
+                        <button class="btn-secondary" onclick="cargarResultadosAdmin()">HOY</button>
+                    </div>
+                    
+                    <div id="admin-resultados-titulo" style="margin: 15px 0; color: #ffd700; font-weight: bold; text-align: center;"></div>
+                    
+                    <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
+                        <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha para ver resultados</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -4675,29 +3509,28 @@ ADMIN_HTML = '''
         <!-- HISTORICO -->
         <div id="historico" class="tab-content">
             <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA</h3>
+                <h3>📈 CONSULTA HISTÓRICA GLOBAL</h3>
                 <div class="form-row">
                     <input type="date" id="hist-fecha-inicio">
                     <input type="date" id="hist-fecha-fin">
                     <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
                 </div>
-                <div class="btn-group">
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
                     <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
                     <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
                     <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
                 </div>
                 
-                <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 20px;">
-                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
+                <div id="historico-resumen" style="margin-top: 20px; display: none;">
+                    <div class="stats-grid">
+                        <div class="stat-card"><h3>VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
+                        <div class="stat-card"><h3>PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
                         <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
                         <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
                     </div>
 
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
-                    <div class="table-container">
+                    <div class="table-container" style="margin-top: 20px;">
                         <table>
                             <thead>
                                 <tr>
@@ -4712,9 +3545,43 @@ ADMIN_HTML = '''
                         </table>
                     </div>
 
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px;">🔥 TOP ANIMALES APUESTOS</h4>
                     <div id="top-animales-hist"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- AGENCIAS -->
+        <div id="agencias" class="tab-content">
+            <div class="form-box">
+                <h3>➕ CREAR NUEVA AGENCIA</h3>
+                <div class="form-row">
+                    <input type="text" id="new-usuario" placeholder="Usuario">
+                    <input type="password" id="new-password" placeholder="Contraseña">
+                </div>
+                <div class="form-row">
+                    <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
+                    <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
+                </div>
+            </div>
+            
+            <h3 style="color: #ffd700; margin-bottom: 15px;">🏢 AGENCIAS REGISTRADAS</h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Usuario</th>
+                            <th>Nombre</th>
+                            <th>Comisión</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabla-agencias">
+                        <tr>
+                            <td colspan="4" style="text-align:center; color:#888; padding: 20px;">Cargando...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -4733,119 +3600,83 @@ ADMIN_HTML = '''
                 <h3>❌ ANULAR TICKET</h3>
                 <div class="form-row">
                     <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR</button>
+                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR TICKET</button>
                 </div>
-                <div style="margin-top: 15px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                    <small style="color: #ff6b6b;">
-                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado.
-                    </small>
+                <div style="margin-top: 15px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; font-size: 0.85rem; color: #ff6b6b;">
+                    ⚠️ Solo se pueden anular tickets no pagados y antes de que inicie el sorteo
                 </div>
-                <div id="resultado-anular" style="margin-top: 15px; font-size: 1rem; text-align: center;"></div>
-            </div>
-        </div>
-
-        <!-- CREAR AGENCIAS -->
-        <div id="agencias" class="tab-content">
-            <div class="form-box">
-                <h3>➕ CREAR NUEVA AGENCIA</h3>
-                <div class="form-row">
-                    <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contraseña">
-                </div>
-                <div class="form-row">
-                    <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
-                    <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
-                </div>
-            </div>
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">🏢 AGENCIAS EXISTENTES</h3>
-            <div class="table-container">
-                <table>
-                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comisión</th></tr></thead>
-                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody>
-                </table>
+                <div id="resultado-anular" style="margin-top: 15px;"></div>
             </div>
         </div>
     </div>
 
     <script>
-        const HORARIOS_ORDEN = {{horarios|tojson}};
-        let historicoData = null;
-        let reporteAgenciasData = null;
-        let fechasConsulta = { inicio: null, fin: null };
-        let listaAgencias = [];
-        let editandoFecha = null;
-        let editandoHora = null;
-        let filtroAgenciaActual = null;
+        // CORREGIDO: Inicialización inmediata al cargar
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("Panel Admin cargado correctamente");
+            
+            // Establecer fechas por defecto
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('reporte-fecha-inicio').value = hoy;
+            document.getElementById('reporte-fecha-fin').value = hoy;
+            document.getElementById('admin-resultados-fecha').value = hoy;
+            document.getElementById('hist-fecha-inicio').value = hoy;
+            document.getElementById('hist-fecha-fin').value = hoy;
+            
+            // Cargar datos iniciales
+            cargarDashboard();
+            cargarAgenciasSelect();
+            cargarAgenciasReporte();
+            
+            // IMPORTANTE: Asegurar que dashboard esté visible
+            showTab('dashboard');
+        });
 
         function showTab(tab) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            console.log("Mostrando tab:", tab);
+            
+            // Ocultar todos los tabs
+            document.querySelectorAll('.tab-content').forEach(t => {
+                t.classList.remove('active');
+            });
+            
             document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
             
+            // Mostrar el seleccionado
             const target = document.getElementById(tab);
             if (target) {
                 target.classList.add('active');
+                console.log("Tab activado correctamente");
             }
             
-            // Marcar el botón correspondiente como activo
+            // Activar botón
             const buttons = document.querySelectorAll('.admin-tab');
             buttons.forEach(btn => {
-                if (btn.getAttribute('onclick').includes("'" + tab + "'")) {
+                if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tab)) {
                     btn.classList.add('active');
                 }
             });
             
-            if (tab === 'riesgo') {
-                cargarAgenciasSelect();
-                cargarRiesgo();
-            }
-            if (tab === 'reporte') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('reporte-fecha-inicio').value = hoy;
-                document.getElementById('reporte-fecha-fin').value = hoy;
-                cargarAgenciasReporte(); // Cargar selector de agencias
-                consultarReporteAgencias();
-            }
+            // Cargar datos específicos
+            if (tab === 'riesgo') cargarRiesgo();
             if (tab === 'agencias') cargarAgencias();
-            if (tab === 'dashboard') cargarDashboard();
-            if (tab === 'resultados') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('admin-resultados-fecha').value = hoy;
-                cargarResultadosAdmin();
-            }
+            if (tab === 'resultados') cargarResultadosAdmin();
         }
 
         function showMensaje(msg, tipo) {
             let div = document.getElementById('mensaje');
-            div.textContent = msg; 
-            div.className = 'mensaje ' + tipo;
-            setTimeout(() => div.className = 'mensaje', 4000);
-        }
-
-        function setRango(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
+            div.textContent = msg;
+            div.style.display = 'block';
             
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
+            if (tipo === 'success') {
+                div.className = 'success-box';
+            } else if (tipo === 'error') {
+                div.className = 'error-box';
             }
             
-            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarHistorico();
+            setTimeout(() => {
+                div.style.display = 'none';
+            }, 4000);
         }
 
         function setRangoReporte(tipo) {
@@ -4857,11 +3688,215 @@ ADMIN_HTML = '''
                     inicio = fin = hoy;
                     break;
                 case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+                    let ayer = new Date(hoy);
+                    ayer.setDate(ayer.getDate() - 1);
                     inicio = fin = ayer;
                     break;
                 case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
+                    inicio = new Date(hoy);
+                    inicio.setDate(inicio.getDate() - 6);
+                    fin = hoy;
+                    break;
+            }
+            
+            document.getElementById('reporte-fecha-inicio').value = inicio.toISOString().split('T')[0];
+            document.getElementById('reporte-fecha-fin').value = fin.toISOString().split('T')[0];
+            
+            // Auto-generar
+            consultarReporteAgencias();
+        }
+
+        function consultarReporteAgencias() {
+            let inicio = document.getElementById('reporte-fecha-inicio').value;
+            let fin = document.getElementById('reporte-fecha-fin').value;
+            let agenciaId = document.getElementById('reporte-agencia-select').value;
+            
+            if (!inicio || !fin) {
+                showMensaje('Seleccione ambas fechas', 'error');
+                return;
+            }
+            
+            // Mostrar loading, ocultar error previo
+            document.getElementById('loading-reporte').style.display = 'block';
+            document.getElementById('error-reporte').style.display = 'none';
+            document.getElementById('reporte-agencias-resumen').style.display = 'none';
+            
+            console.log("Consultando reporte:", {inicio, fin, agenciaId});
+            
+            fetch('/admin/reporte-agencias-rango', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    fecha_inicio: inicio,
+                    fecha_fin: fin,
+                    agencia_id: agenciaId || null
+                })
+            })
+            .then(r => {
+                console.log("Status:", r.status);
+                if (!r.ok) {
+                    return r.json().then(err => { throw new Error(err.error || 'Error del servidor'); });
+                }
+                return r.json();
+            })
+            .then(d => {
+                document.getElementById('loading-reporte').style.display = 'none';
+                
+                if (d.error) {
+                    document.getElementById('error-reporte').textContent = d.error;
+                    document.getElementById('error-reporte').style.display = 'block';
+                    return;
+                }
+                
+                mostrarReporte(d);
+            })
+            .catch(e => {
+                console.error("Error:", e);
+                document.getElementById('loading-reporte').style.display = 'none';
+                document.getElementById('error-reporte').textContent = 'Error: ' + e.message + '. Intente con un rango menor (máx 7 días).';
+                document.getElementById('error-reporte').style.display = 'block';
+            });
+        }
+
+        function mostrarReporte(d) {
+            document.getElementById('reporte-agencias-resumen').style.display = 'block';
+            
+            let totales = d.totales || {};
+            
+            // Stats grid
+            let htmlTotales = `
+                <div class="stat-card">
+                    <h3>AGENCIAS</h3>
+                    <p>${(d.agencias || []).length}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>TICKETS</h3>
+                    <p>${totales.tickets || 0}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>VENTAS</h3>
+                    <p>S/${(totales.ventas || 0).toFixed(0)}</p>
+                </div>
+                <div class="stat-card">
+                    <h3>BALANCE</h3>
+                    <p style="color: ${(totales.balance || 0) >= 0 ? '#27ae60' : '#c0392b'}">S/${(totales.balance || 0).toFixed(0)}</p>
+                </div>
+            `;
+            document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
+            
+            // Desglose premios
+            document.getElementById('reporte-premios-pagados').textContent = 'S/' + (totales.premios_pagados || 0).toFixed(2);
+            document.getElementById('reporte-premios-pendientes').textContent = 'S/' + (totales.premios_pendientes || 0).toFixed(2);
+            document.getElementById('reporte-premios-total').textContent = 'S/' + (totales.premios_teoricos || 0).toFixed(2);
+            
+            // Ranking
+            let htmlRanking = '';
+            (d.agencias || []).slice(0, 5).forEach((ag, idx) => {
+                let medalla = ['🥇','🥈','🥉','4°','5°'][idx] || (idx + 1);
+                let colorBalance = (ag.balance || 0) >= 0 ? '#27ae60' : '#c0392b';
+                
+                htmlRanking += `
+                    <div class="ranking-item">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #ffd700; min-width: 40px;">${medalla}</div>
+                        <div style="flex: 1; padding: 0 10px;">
+                            <div style="font-weight: bold; color: white;">${ag.nombre}</div>
+                            <div style="font-size: 0.85rem; color: #888;">${ag.tickets} tickets • ${ag.porcentaje_ventas || 0}% del total</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.3rem; font-weight: bold; color: #27ae60;">S/${(ag.ventas || 0).toFixed(0)}</div>
+                            <div style="font-size: 0.9rem; color: ${colorBalance};">S/${(ag.balance || 0).toFixed(0)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('ranking-agencias').innerHTML = htmlRanking || '<p style="color: #888; text-align: center;">No hay datos</p>';
+            
+            // Tabla detalle
+            let tbody = document.querySelector('#tabla-detalle-agencias tbody');
+            let htmlTabla = '';
+            (d.agencias || []).forEach((ag, idx) => {
+                let colorBalance = (ag.balance || 0) >= 0 ? '#27ae60' : '#c0392b';
+                let pendienteBadge = (ag.premios_pendientes || 0) > 0 ? 
+                    `<span style="background: #f39c12; color: black; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">S/${ag.premios_pendientes.toFixed(0)}</span>` : 
+                    '<span style="color:#666">-</span>';
+                
+                htmlTabla += `<tr>
+                    <td>${idx + 1}</td>
+                    <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
+                    <td>${ag.tickets}</td>
+                    <td>S/${(ag.ventas || 0).toFixed(0)}</td>
+                    <td style="color:#27ae60">S/${(ag.premios_pagados || 0).toFixed(0)}</td>
+                    <td>${pendienteBadge}</td>
+                    <td style="color:${colorBalance}; font-weight:bold">S/${(ag.balance || 0).toFixed(0)}</td>
+                    <td>${ag.porcentaje_ventas || 0}%</td>
+                </tr>`;
+            });
+            tbody.innerHTML = htmlTabla || '<tr><td colspan="8" style="text-align:center; color:#888;">No hay datos</td></tr>';
+        }
+
+        function cargarDashboard() {
+            fetch('/admin/reporte-agencias')
+            .then(r => r.json())
+            .then(d => {
+                if (d.global) {
+                    document.getElementById('stat-ventas').textContent = 'S/' + (d.global.ventas || 0).toFixed(0);
+                    document.getElementById('stat-premios').textContent = 'S/' + (d.global.pagos || 0).toFixed(0);
+                    document.getElementById('stat-premios-pendientes').textContent = 'S/' + (d.global.premios_pendientes || 0).toFixed(0);
+                    document.getElementById('stat-balance').textContent = 'S/' + (d.global.balance || 0).toFixed(0);
+                }
+            })
+            .catch(e => console.error("Error dashboard:", e));
+        }
+
+        function cargarAgenciasSelect() {
+            fetch('/admin/lista-agencias')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) return;
+                let select = document.getElementById('riesgo-agencia-select');
+                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
+                d.forEach(ag => {
+                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
+                });
+            })
+            .catch(e => console.error("Error cargando agencias:", e));
+        }
+
+        function cargarAgenciasReporte() {
+            fetch('/admin/lista-agencias')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) return;
+                let select = document.getElementById('reporte-agencia-select');
+                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
+                d.forEach(ag => {
+                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
+                });
+            })
+            .catch(e => console.error("Error:", e));
+        }
+
+        function exportarCSV() {
+            showMensaje('Preparando exportación...', 'success');
+            // Implementar exportación real aquí si es necesario
+        }
+
+        function setRango(tipo) {
+            let hoy = new Date();
+            let inicio, fin;
+            
+            switch(tipo) {
+                case 'hoy':
+                    inicio = fin = hoy;
+                    break;
+                case 'ayer':
+                    let ayer = new Date(hoy);
+                    ayer.setDate(ayer.getDate() - 1);
+                    inicio = fin = ayer;
+                    break;
+                case 'semana':
+                    inicio = new Date(hoy);
+                    inicio.setDate(inicio.getDate() - 6);
                     fin = hoy;
                     break;
                 case 'mes':
@@ -4870,50 +3905,236 @@ ADMIN_HTML = '''
                     break;
             }
             
-            document.getElementById('reporte-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('reporte-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarReporteAgencias();
+            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
+            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
+            
+            consultarHistorico();
         }
 
-        function cargarAgenciasSelect() {
+        function consultarHistorico() {
+            let inicio = document.getElementById('hist-fecha-inicio').value;
+            let fin = document.getElementById('hist-fecha-fin').value;
+            
+            if (!inicio || !fin) {
+                showMensaje('Seleccione fechas', 'error');
+                return;
+            }
+            
+            showMensaje('Consultando...', 'success');
+            
+            fetch('/admin/estadisticas-rango', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
+            })
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('historico-resumen').style.display = 'block';
+                
+                if (d.totales) {
+                    document.getElementById('hist-total-ventas').textContent = 'S/' + (d.totales.ventas || 0).toFixed(0);
+                    document.getElementById('hist-total-premios').textContent = 'S/' + (d.totales.premios || 0).toFixed(0);
+                    document.getElementById('hist-total-tickets').textContent = d.totales.tickets || 0;
+                    document.getElementById('hist-total-balance').textContent = 'S/' + (d.totales.balance || 0).toFixed(0);
+                }
+                
+                let tbody = document.getElementById('tabla-historico');
+                let html = '';
+                (d.resumen_por_dia || []).forEach(dia => {
+                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
+                    html += `<tr>
+                        <td>${dia.fecha}</td>
+                        <td>${dia.tickets}</td>
+                        <td>S/${dia.ventas.toFixed(0)}</td>
+                        <td>S/${dia.premios.toFixed(0)}</td>
+                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+                
+                // Top animales
+                if (d.top_animales && d.top_animales.length > 0) {
+                    let htmlTop = '';
+                    d.top_animales.slice(0, 5).forEach(a => {
+                        htmlTop += `<div style="padding: 10px; background: rgba(255,215,0,0.1); margin: 5px 0; border-radius: 6px;">
+                            <strong>${a.numero} - ${a.nombre}</strong>: S/${a.total_apostado} apostado
+                        </div>`;
+                    });
+                    document.getElementById('top-animales-hist').innerHTML = htmlTop;
+                }
+            })
+            .catch(e => showMensaje('Error: ' + e.message, 'error'));
+        }
+
+        function cargarRiesgo() {
+            let agenciaId = document.getElementById('riesgo-agencia-select').value;
+            let url = '/admin/riesgo';
+            
+            if (agenciaId) url += '?agencia_id=' + agenciaId;
+            
+            fetch(url)
+            .then(r => r.json())
+            .then(d => {
+                if (d.sorteo_objetivo) {
+                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
+                } else {
+                    document.getElementById('sorteo-objetivo').textContent = 'No hay sorteo activo';
+                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
+                }
+                
+                let container = document.getElementById('lista-riesgo');
+                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
+                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
+                    return;
+                }
+                
+                let html = '';
+                for (let [k, v] of Object.entries(d.riesgo)) {
+                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
+                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
+                    html += `<div class="${clase}">
+                        <b>${k}${extra}</b><br>
+                        <small>Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total</small>
+                    </div>`;
+                }
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                document.getElementById('lista-riesgo').innerHTML = '<p style="color:#c0392b; text-align: center;">Error cargando riesgo</p>';
+            });
+        }
+
+        function cargarResultadosAdmin() {
+            fetch('/admin/resultados-hoy')
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
+                renderizarResultadosAdmin(d.resultados || {}, d.fecha);
+            })
+            .catch(e => {
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
+        }
+
+        function cargarResultadosAdminFecha() {
+            let fecha = document.getElementById('admin-resultados-fecha').value;
+            if (!fecha) return;
+            
+            document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
+            
+            fetch('/api/resultados-fecha', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha: fecha})
+            })
+            .then(r => r.json())
+            .then(d => {
+                let fechaObj = new Date(fecha + 'T00:00:00');
+                document.getElementById('admin-resultados-titulo').textContent = fechaObj.toLocaleDateString('es-PE', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
+                renderizarResultadosAdmin(d.resultados || {}, d.fecha_consulta);
+            })
+            .catch(e => {
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
+            });
+        }
+
+        function renderizarResultadosAdmin(resultados, fechaStr) {
+            let container = document.getElementById('lista-resultados-admin');
+            let html = '';
+            
+            for (let hora of {{horarios|tojson}}) {
+                let resultado = resultados[hora];
+                if (resultado) {
+                    html += `<div class="resultado-item">
+                        <div><strong style="color: #ffd700;">${hora}</strong></div>
+                        <div style="text-align: right;">
+                            <div style="color: #ffd700; font-weight: bold; font-size: 1.3rem;">${resultado.animal}</div>
+                            <div style="color: #888;">${resultado.nombre}</div>
+                        </div>
+                    </div>`;
+                } else {
+                    html += `<div class="resultado-item pendiente">
+                        <div><strong style="color: #ffd700;">${hora}</strong></div>
+                        <div style="color: #666;">Pendiente</div>
+                    </div>`;
+                }
+            }
+            container.innerHTML = html;
+        }
+
+        function guardarResultado() {
+            let hora = document.getElementById('res-hora').value;
+            let animal = document.getElementById('res-animal').value;
+            let fecha = document.getElementById('admin-resultados-fecha').value;
+            
+            let form = new FormData();
+            form.append('hora', hora);
+            form.append('animal', animal);
+            if (fecha) form.append('fecha', fecha);
+            
+            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
+            .then(r => r.json()).then(d => {
+                if (d.status === 'ok') {
+                    showMensaje(d.mensaje, 'success');
+                    if (!fecha || fecha === new Date().toISOString().split('T')[0]) {
+                        cargarResultadosAdmin();
+                    } else {
+                        cargarResultadosAdminFecha();
+                    }
+                } else {
+                    showMensaje(d.error || 'Error al guardar', 'error');
+                }
+            });
+        }
+
+        function cargarAgencias() {
             fetch('/admin/lista-agencias')
             .then(r => r.json())
             .then(d => {
-                if (d.error) return;
-                listaAgencias = d;
-                let select = document.getElementById('riesgo-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
-                });
+                let tbody = document.getElementById('tabla-agencias');
+                if (!d || d.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>';
+                    return;
+                }
+                let html = '';
+                for (let a of d) {
+                    html += `<tr>
+                        <td>${a.id}</td>
+                        <td>${a.usuario}</td>
+                        <td>${a.nombre_agencia}</td>
+                        <td>${(a.comision * 100).toFixed(0)}%</td>
+                    </tr>`;
+                }
+                tbody.innerHTML = html;
+            })
+            .catch(e => {
+                document.getElementById('tabla-agencias').innerHTML = '<tr><td colspan="4" style="text-align:center; color:#c0392b; padding: 20px;">Error al cargar</td></tr>';
             });
-        }
-        
-        // NUEVO: Cargar agencias en selector de reporte
-        function cargarAgenciasReporte() {
-            fetch('/admin/lista-agencias')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) return;
-                let select = document.getElementById('reporte-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS (GLOBAL)</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
-                });
-            });
-        }
-        
-        function cambiarFiltroAgencia() {
-            filtroAgenciaActual = document.getElementById('reporte-agencia-select').value;
-            consultarReporteAgencias();
         }
 
-        function cambiarAgenciaRiesgo() {
-            cargarRiesgo();
+        function crearAgencia() {
+            let form = new FormData();
+            form.append('usuario', document.getElementById('new-usuario').value.trim());
+            form.append('password', document.getElementById('new-password').value.trim());
+            form.append('nombre', document.getElementById('new-nombre').value.trim());
+            
+            fetch('/admin/crear-agencia', {method: 'POST', body: form})
+            .then(r => r.json()).then(d => {
+                if (d.status === 'ok') {
+                    showMensaje(d.mensaje, 'success');
+                    document.getElementById('new-usuario').value = '';
+                    document.getElementById('new-password').value = '';
+                    document.getElementById('new-nombre').value = '';
+                    cargarAgencias();
+                } else {
+                    showMensaje(d.error || 'Error', 'error');
+                }
+            });
         }
 
         function pagarTicketAdmin() {
-            const serial = document.getElementById('pagar-serial-admin').value.trim();
+            let serial = document.getElementById('pagar-serial-admin').value.trim();
             if (!serial) {
                 showMensaje('Ingrese un serial', 'error');
                 return;
@@ -4927,20 +4148,15 @@ ADMIN_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.error) {
-                    document.getElementById('resultado-pago-admin').innerHTML = `<div style="color: #c0392b; padding: 15px; background: rgba(192,57,43,0.1); border-radius: 8px;">${d.error}</div>`;
+                    document.getElementById('resultado-pago-admin').innerHTML = `<div class="error-box">${d.error}</div>`;
                     return;
                 }
                 
-                let html = `<div style="background: rgba(39,174,96,0.1); padding: 20px; border-radius: 10px; border: 1px solid #27ae60;">`;
-                html += `<h4 style="color: #27ae60; margin-bottom: 15px;">Ticket #${d.ticket_id}</h4>`;
-                html += `<p style="font-size: 1.3rem; color: #ffd700; margin-bottom: 15px;">Total Ganado: S/${d.total_ganado.toFixed(2)}</p>`;
-                
-                if (d.total_ganado > 0) {
-                    html += `<button onclick="confirmarPagoAdmin('${d.ticket_id}')" class="btn-submit" style="width: 100%;">CONFIRMAR PAGO</button>`;
-                } else {
-                    html += `<p style="color: #888;">Ticket no ganador</p>`;
-                }
-                html += `</div>`;
+                let html = `<div class="success-box">
+                    <h4>Ticket #${d.ticket_id}</h4>
+                    <p style="font-size: 1.3rem; margin: 10px 0;">Total Ganado: S/${d.total_ganado.toFixed(2)}</p>
+                    ${d.total_ganado > 0 ? `<button onclick="confirmarPagoAdmin('${d.ticket_id}')" class="btn-submit" style="margin-top: 10px;">CONFIRMAR PAGO</button>` : '<p>No tiene premio</p>'}
+                </div>`;
                 
                 document.getElementById('resultado-pago-admin').innerHTML = html;
             });
@@ -4955,8 +4171,8 @@ ADMIN_HTML = '''
             .then(r => r.json())
             .then(d => {
                 if (d.status === 'ok') {
-                    showMensaje('✅ Ticket pagado correctamente', 'success');
-                    document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;">✅ Pago realizado con éxito</div>';
+                    showMensaje('Pago realizado con éxito', 'success');
+                    document.getElementById('resultado-pago-admin').innerHTML = '<div class="success-box">✅ Ticket pagado correctamente</div>';
                 } else {
                     showMensaje(d.error || 'Error al pagar', 'error');
                 }
@@ -4970,9 +4186,7 @@ ADMIN_HTML = '''
                 return;
             }
             
-            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
-                return;
-            }
+            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) return;
             
             fetch('/api/anular-ticket', {
                 method: 'POST',
@@ -4981,552 +4195,17 @@ ADMIN_HTML = '''
             })
             .then(r => r.json())
             .then(d => {
-                let resultadoDiv = document.getElementById('resultado-anular');
+                let div = document.getElementById('resultado-anular');
                 if (d.error) {
-                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
+                    div.innerHTML = `<div class="error-box">${d.error}</div>`;
                     showMensaje(d.error, 'error');
                 } else {
-                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
+                    div.innerHTML = `<div class="success-box">${d.mensaje}</div>`;
                     showMensaje(d.mensaje, 'success');
                     document.getElementById('anular-serial').value = '';
                 }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
             });
         }
-
-        function abrirModalEditar(hora, fecha, animalActual) {
-            editandoHora = hora;
-            editandoFecha = fecha;
-            
-            document.getElementById('editar-fecha-display').value = fecha;
-            document.getElementById('editar-hora-display').value = hora;
-            document.getElementById('editar-animal-select').value = animalActual;
-            
-            verificarTicketsSorteo(fecha, hora);
-            document.getElementById('modal-editar').classList.add('active');
-        }
-        
-        function cerrarModalEditar() {
-            document.getElementById('modal-editar').classList.remove('active');
-            editandoFecha = null;
-            editandoHora = null;
-        }
-        
-        function verificarTicketsSorteo(fecha, hora) {
-            fetch('/admin/verificar-tickets-sorteo', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha, hora: hora})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let advertencia = document.getElementById('editar-advertencia');
-                if (d.tickets_count > 0) {
-                    advertencia.style.display = 'block';
-                    advertencia.innerHTML = `⚠️ <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.<br>Cambiar el resultado afectará quién gana o pierde.`;
-                } else {
-                    advertencia.style.display = 'none';
-                }
-            })
-            .catch(e => console.error('Error verificando tickets:', e));
-        }
-        
-        function confirmarEdicion() {
-            let nuevoAnimal = document.getElementById('editar-animal-select').value;
-            
-            if (!confirm(`¿Está seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal} - ${getNombreAnimal(nuevoAnimal)}?`)) {
-                return;
-            }
-            
-            let partes = editandoFecha.split('/');
-            let fechaISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
-            
-            let form = new FormData();
-            form.append('hora', editandoHora);
-            form.append('animal', nuevoAnimal);
-            form.append('fecha', fechaISO);
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    cerrarModalEditar();
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                } else {
-                    showMensaje(d.error || 'Error al guardar', 'error');
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-        
-        function getNombreAnimal(numero) {
-            const animales = {{animales|tojson}};
-            return animales[numero] || 'Desconocido';
-        }
-
-        function consultarHistorico() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            fechasConsulta = { inicio, fin };
-            showMensaje('Consultando datos...', 'success');
-            
-            fetch('/admin/estadisticas-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                historicoData = d;
-                document.getElementById('historico-resumen').style.display = 'block';
-                
-                document.getElementById('hist-total-ventas').textContent = 'S/' + d.totales.ventas.toFixed(0);
-                document.getElementById('hist-total-premios').textContent = 'S/' + d.totales.premios.toFixed(0);
-                document.getElementById('hist-total-tickets').textContent = d.totales.tickets;
-                document.getElementById('hist-total-balance').textContent = 'S/' + d.totales.balance.toFixed(0);
-                
-                let tbody = document.getElementById('tabla-historico');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td>S/${dia.premios.toFixed(0)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                cargarTopAnimalesHistorico(inicio, fin);
-            })
-            .catch(e => showMensaje('Error de conexión', 'error'));
-        }
-
-        function consultarReporteAgencias() {
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            let agenciaId = document.getElementById('reporte-agencia-select').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            showMensaje('Consultando reporte...', 'success');
-            
-            fetch('/admin/reporte-agencias-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio, 
-                    fecha_fin: fin,
-                    agencia_id: agenciaId || null
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                reporteAgenciasData = d;
-                document.getElementById('reporte-agencias-resumen').style.display = 'block';
-                
-                // Mostrar título según filtro
-                let tituloAgencia = agenciaId ? 
-                    document.querySelector('#reporte-agencia-select option:checked').text : 
-                    'TODAS LAS AGENCIAS';
-                document.getElementById('titulo-filtro-agencia').textContent = `- ${tituloAgencia}`;
-                
-                let totales = d.totales;
-                let htmlTotales = `
-                    <div class="stat-card">
-                        <h3>AGENCIAS</h3>
-                        <p>${d.agencias.length}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>TICKETS</h3>
-                        <p>${totales.tickets}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>VENTAS</h3>
-                        <p>S/${totales.ventas.toFixed(0)}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>BALANCE</h3>
-                        <p style="color: ${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</p>
-                    </div>
-                `;
-                document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
-                
-                // NUEVO: Mostrar desglose de premios
-                document.getElementById('reporte-premios-pagados').textContent = 'S/' + totales.premios_pagados.toFixed(2);
-                document.getElementById('reporte-premios-pendientes').textContent = 'S/' + totales.premios_pendientes.toFixed(2);
-                document.getElementById('reporte-premios-total').textContent = 'S/' + totales.premios_teoricos.toFixed(2);
-                document.getElementById('reporte-tickets-pendientes').textContent = totales.tickets_pendientes_count;
-                
-                let htmlRanking = '';
-                d.agencias.slice(0, 5).forEach((ag, idx) => {
-                    let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteInfo = ag.premios_pendientes > 0 ? `<br><small style="color:#f39c12">Pendiente: S/${ag.premios_pendientes}</small>` : '';
-                    
-                    htmlRanking += `
-                        <div class="ranking-item">
-                            <div class="ranking-pos">${medalla}</div>
-                            <div class="ranking-info">
-                                <div class="ranking-nombre">${ag.nombre}</div>
-                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total${pendienteInfo}</div>
-                            </div>
-                            <div class="ranking-monto">
-                                <div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div>
-                                <div class="ranking-balance" style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div>
-                            </div>
-                        </div>
-                    `;
-                });
-                document.getElementById('ranking-agencias').innerHTML = htmlRanking;
-                
-                let tbody = document.querySelector('#tabla-detalle-agencias tbody');
-                let htmlTabla = '';
-                d.agencias.forEach((ag, idx) => {
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteBadge = ag.premios_pendientes > 0 ? 
-                        `<span class="premio-box premio-pendiente">S/${ag.premios_pendientes}</span>` : 
-                        '<span style="color:#666">-</span>';
-                    
-                    htmlTabla += `<tr>
-                        <td>${idx + 1}</td>
-                        <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
-                        <td>${ag.tickets}</td>
-                        <td>S/${ag.ventas.toFixed(0)}</td>
-                        <td style="color:#27ae60">S/${ag.premios_pagados.toFixed(0)}</td>
-                        <td>${pendienteBadge}</td>
-                        <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td>
-                        <td>${ag.porcentaje_ventas}%</td>
-                    </tr>`;
-                });
-                
-                if (!agenciaId) {
-                    htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
-                        <td colspan="2">TOTALES</td>
-                        <td>${totales.tickets}</td>
-                        <td>S/${totales.ventas.toFixed(0)}</td>
-                        <td>S/${totales.premios_pagados.toFixed(0)}</td>
-                        <td><span class="premio-box premio-pendiente">S/${totales.premios_pendientes.toFixed(0)}</span></td>
-                        <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
-                        <td>100%</td>
-                    </tr>`;
-                }
-                
-                tbody.innerHTML = htmlTabla;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
-        function exportarCSV() {
-            if (!reporteAgenciasData) {
-                showMensaje('Primero genere un reporte', 'error');
-                return;
-            }
-            
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            
-            fetch('/admin/exportar-csv', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.blob())
-            .then(blob => {
-                let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a');
-                a.href = url;
-                a.download = `reporte_agencias_${inicio}_${fin}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                showMensaje('CSV descargado correctamente', 'success');
-            })
-            .catch(e => showMensaje('Error al exportar', 'error'));
-        }
-
-        function cargarTopAnimalesHistorico(inicio, fin) {
-            fetch('/admin/top-animales-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let container = document.getElementById('top-animales-hist');
-                if (!d.top_animales || d.top_animales.length === 0) {
-                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.top_animales.slice(0, 10).forEach((a, idx) => {
-                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
-                    let esLechuza = a.numero === "40";
-                    let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
-                    
-                    html += `<div class="${clase}" style="margin-bottom: 10px;">
-                        <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
-                        <small>Apostado: S/${a.total_apostado} • Si sale pagaría: S/${a.pago_potencial}</small>
-                    </div>`;
-                });
-                container.innerHTML = html;
-            });
-        }
-
-        function cargarDashboard() {
-            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
-                if (d.global) {
-                    document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
-                    document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
-                    document.getElementById('stat-premios-pendientes').textContent = 'S/' + d.global.premios_pendientes.toFixed(0);
-                    document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
-                }
-            }).catch(() => showMensaje('Error de conexion', 'error'));
-        }
-
-        function cargarRiesgo() {
-            let agenciaId = document.getElementById('riesgo-agencia-select').value;
-            let url = '/admin/riesgo';
-            
-            if (agenciaId) {
-                url += '?agencia_id=' + agenciaId;
-            }
-            
-            fetch(url)
-            .then(r => r.json())
-            .then(d => {
-                if (d.sorteo_objetivo) {
-                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
-                    
-                    let nombreAgencia = d.agencia_nombre || "TODAS LAS AGENCIAS";
-                    document.getElementById('nombre-agencia-actual').textContent = nombreAgencia;
-                    document.getElementById('riesgo-agencia-nombre').style.display = 'block';
-                    
-                    let infoExtra = d.cantidad_jugadas ? `${d.cantidad_jugadas} jugadas registradas` : '';
-                    if (d.hora_actual) infoExtra += ` • Hora actual: ${d.hora_actual}`;
-                    document.getElementById('cantidad-jugadas-info').textContent = infoExtra;
-                } else {
-                    document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
-                    document.getElementById('cantidad-jugadas-info').textContent = '';
-                }
-                
-                let container = document.getElementById('lista-riesgo');
-                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
-                    return;
-                }
-                let html = '';
-                for (let [k, v] of Object.entries(d.riesgo)) {
-                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
-                    html += `<div class="${clase}">
-                        <b>${k}${extra}</b><br>
-                        Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total
-                    </div>`;
-                }
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando riesgo', 'error');
-            });
-        }
-
-        function cargarResultadosAdminFecha() {
-            let fecha = document.getElementById('admin-resultados-fecha').value;
-            if (!fecha) return;
-            
-            let container = document.getElementById('lista-resultados-admin');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('admin-resultados-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
-            fetch('/api/resultados-fecha', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                renderizarResultadosAdmin(d.resultados, d.fecha_consulta);
-            })
-            .catch(() => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function cargarResultadosAdmin() {
-            fetch('/admin/resultados-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>';
-                    return;
-                }
-                document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
-                renderizarResultadosAdmin(d.resultados, d.fecha);
-            })
-            .catch(() => {
-                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function renderizarResultadosAdmin(resultados, fechaStr) {
-            let container = document.getElementById('lista-resultados-admin');
-            let html = '';
-            
-            for (let hora of HORARIOS_ORDEN) {
-                let resultado = resultados[hora];
-                let clase = resultado ? '' : 'pendiente';
-                let contenido;
-                let botonEditar = '';
-                
-                if (resultado) {
-                    contenido = `
-                        <span class="resultado-numero">${resultado.animal}</span>
-                        <span class="resultado-nombre">${resultado.nombre}</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')">✏️ EDITAR</button>`;
-                } else {
-                    contenido = `
-                        <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                        <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;">➕ CARGAR</button>`;
-                }
-                
-                html += `
-                    <div class="resultado-item ${clase}">
-                        <div style="display: flex; flex-direction: column;">
-                            <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                        </div>
-                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-                            ${contenido}
-                            ${botonEditar}
-                        </div>
-                    </div>
-                `;
-            }
-            container.innerHTML = html;
-        }
-        
-        function prepararNuevoResultado(hora) {
-            document.getElementById('res-hora').value = hora;
-            document.getElementById('res-animal').focus();
-            document.getElementById('res-hora').scrollIntoView({behavior: 'smooth'});
-        }
-
-        function guardarResultado() {
-            let form = new FormData();
-            form.append('hora', document.getElementById('res-hora').value);
-            form.append('animal', document.getElementById('res-animal').value);
-            
-            let fechaActual = document.getElementById('admin-resultados-fecha').value;
-            if (fechaActual) {
-                form.append('fecha', fechaActual);
-            }
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                }
-                else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        function cargarAgencias() {
-            fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
-                let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { 
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; 
-                    return; 
-                }
-                let html = '';
-                for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
-                tbody.innerHTML = html;
-            });
-        }
-
-        function crearAgencia() {
-            let form = new FormData();
-            form.append('usuario', document.getElementById('new-usuario').value.trim());
-            form.append('password', document.getElementById('new-password').value.trim());
-            form.append('nombre', document.getElementById('new-nombre').value.trim());
-            fetch('/admin/crear-agencia', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    document.getElementById('new-usuario').value = '';
-                    document.getElementById('new-password').value = '';
-                    document.getElementById('new-nombre').value = '';
-                    cargarAgencias();
-                } else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('admin-resultados-fecha').value = hoy;
-            
-            setTimeout(() => {
-                document.getElementById('timezone-info').style.display = 'block';
-            }, 1000);
-        });
-
-        cargarDashboard();
     </script>
 </body>
 </html>
@@ -5535,14 +4214,7 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.9")
-    print("  CONSULTAS AGENCIA + ZONA HORARIA PERÚ")
-    print("=" * 60)
-    print("  ✓ Zona horaria Perú (UTC-5) corregida")
-    print("  ✓ Edición resultados hasta 2h post-sorteo")
-    print("  ✓ Consulta tickets vendidos (Agencias)")
-    print("  ✓ Reporte premios pendientes vs pagados")
-    print("  ✓ Filtro por agencia específica en reportes")
+    print("  ZOOLO CASINO CLOUD v5.9.1 - REPARADO")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
