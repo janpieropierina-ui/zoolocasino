@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v5.8 - MENU WINDOWS SOLO PARA AGENCIAS
+ZOOLO CASINO CLOUD v5.9 - CONSULTAS AGENCIA + ZONA HORARIA PERÚ + PREMIOS PENDIENTES
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co  ').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
@@ -30,7 +30,7 @@ COMISION_AGENCIA = 0.15
 MINUTOS_BLOQUEO = 5
 HORAS_EDICION_RESULTADO = 2
 
-# Horarios
+# Horarios Perú (fijos)
 HORARIOS_PERU = [
     "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
     "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM",
@@ -61,19 +61,23 @@ ANIMALES = {
 ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19", 
          "21", "23", "25", "27", "30", "32", "34", "36", "37", "39"]
 
-# [Todas las funciones auxiliares se mantienen igual...]
 # ==================== FUNCIONES AUXILIARES ====================
 def ahora_peru():
+    """Retorna datetime actual de Perú (UTC-5) - Perú no usa horario de verano desde 2014"""
     return datetime.utcnow() - timedelta(hours=5)
 
 def parse_fecha_ticket(fecha_str):
+    """Parsea fechas en formato dd/mm/YYYY o dd/mm/YYYY HH:MM AM/PM"""
     try:
         return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
     except:
         try:
             return datetime.strptime(fecha_str, "%d/%m/%Y")
         except:
-            return None
+            try:
+                return datetime.strptime(fecha_str, "%Y-%m-%d")
+            except:
+                return None
 
 def get_color(num):
     if num in ["0", "00"]: 
@@ -111,8 +115,9 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-# ==================== FUNCIONES ZONA HORARIA ====================
+# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
 def hora_a_minutos(hora_str):
+    """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
         partes = hora_str.replace(':', ' ').split()
         hora = int(partes[0])
@@ -129,10 +134,17 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
+    """
+    Permite editar hasta 2 horas después del sorteo.
+    Ej: Sorteo 7:00 PM es editable hasta las 9:00 PM.
+    """
     ahora = ahora_peru()
     hoy = ahora.strftime("%d/%m/%Y")
     
+    # Si es fecha pasada (no hoy), no se puede editar
     if fecha_str and fecha_str != hoy:
+        # Permitir edición de fechas pasadas solo si es el mismo día (lógica anterior)
+        # o si está dentro de las 2 horas del sorteo específico
         pass
     
     minutos_sorteo = hora_a_minutos(hora_sorteo)
@@ -143,28 +155,41 @@ def puede_editar_resultado(hora_sorteo, fecha_str=None):
     return minutos_actual <= minutos_limite
 
 def obtener_sorteo_en_curso():
+    """
+    CORREGIDO: Retorna el sorteo actual o el último sorteo si estamos dentro 
+    de las 2 horas posteriores (para edición).
+    """
     ahora = ahora_peru()
     actual_minutos = ahora.hour * 60 + ahora.minute
     
+    # Buscar sorteo actual (dentro de la hora del sorteo)
     for hora_str in HORARIOS_PERU:
         minutos_sorteo = hora_a_minutos(hora_str)
-        
         if actual_minutos >= minutos_sorteo and actual_minutos < (minutos_sorteo + 60):
             return hora_str
     
-    return obtener_proximo_sorteo()
+    # Si no hay sorteo en curso, verificar si estamos dentro de las 2 horas 
+    # posteriores al último sorteo (7 PM = 1140 minutos)
+    ultimo_sorteo = HORARIOS_PERU[-1]  # 07:00 PM
+    minutos_ultimo = hora_a_minutos(ultimo_sorteo)
+    
+    if actual_minutos > minutos_ultimo and actual_minutos <= (minutos_ultimo + (HORAS_EDICION_RESULTADO * 60)):
+        return ultimo_sorteo
+    
+    return None
 
 def obtener_proximo_sorteo():
+    """Retorna el siguiente sorteo disponible para venta"""
     ahora = ahora_peru()
     actual_minutos = ahora.hour * 60 + ahora.minute
     
     for hora_str in HORARIOS_PERU:
         minutos_sorteo = hora_a_minutos(hora_str)
-        
         if (minutos_sorteo - actual_minutos) > MINUTOS_BLOQUEO:
             return hora_str
     
-    return None
+    # Si no hay más sorteos hoy, retornar el primero de mañana
+    return HORARIOS_PERU[0]
 
 def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
@@ -174,6 +199,10 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
         for k, v in filters.items():
             if k.endswith('__like'):
                 filter_params.append(f"{k.replace('__like', '')}=like.{urllib.parse.quote(str(v))}")
+            elif k.endswith('__gte'):
+                filter_params.append(f"{k.replace('__gte', '')}=gte.{urllib.parse.quote(str(v))}")
+            elif k.endswith('__lte'):
+                filter_params.append(f"{k.replace('__lte', '')}=lte.{urllib.parse.quote(str(v))}")
             else:
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
@@ -302,7 +331,6 @@ def admin():
         horarios=HORARIOS_PERU
     )
 
-# [Todas las API routes se mantienen exactamente igual...]
 # ==================== API POS ====================
 @app.route('/api/resultados-hoy')
 @login_required
@@ -456,7 +484,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text=  {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -464,6 +492,194 @@ def procesar_venta():
             'ticket_id': ticket_id,
             'total': total,
             'url_whatsapp': url_whatsapp
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
+
+@app.route('/api/mis-tickets', methods=['POST'])
+@agencia_required
+def mis_tickets():
+    """
+    NUEVO: Consulta histórica de tickets de la agencia con filtros
+    Filtros: fecha_inicio, fecha_fin, estado (todos/pagados/pendientes/por_pagar)
+    """
+    try:
+        data = request.get_json() or {}
+        fecha_inicio = data.get('fecha_inicio')
+        fecha_fin = data.get('fecha_fin')
+        estado = data.get('estado', 'todos')  # todos, pagados, pendientes, por_pagar
+        
+        # Construir query base
+        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        
+        req = urllib.request.Request(base_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
+        
+        # Filtrar por fecha si se especifica
+        tickets_filtrados = []
+        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d") if fecha_inicio else None
+        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59) if fecha_fin else None
+        
+        for t in all_tickets:
+            if t.get('anulado'):
+                continue
+                
+            dt_ticket = parse_fecha_ticket(t['fecha'])
+            if not dt_ticket:
+                continue
+                
+            if dt_inicio and dt_ticket < dt_inicio:
+                continue
+            if dt_fin and dt_ticket > dt_fin:
+                continue
+            
+            # Filtrar por estado
+            if estado == 'pagados' and not t.get('pagado'):
+                continue
+            if estado == 'pendientes' and t.get('pagado'):
+                continue
+                
+            tickets_filtrados.append(t)
+        
+        # Si es estado "por_pagar", necesitamos verificar premios
+        if estado == 'por_pagar':
+            tickets_con_premio = []
+            for t in tickets_filtrados:
+                if t.get('pagado'):
+                    continue
+                    
+                fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
+                resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
+                resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+                
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                tiene_premio = 0
+                
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            tiene_premio += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            sel = j['seleccion']
+                            num = int(wa)
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                tiene_premio += j['monto'] * PAGO_ESPECIAL
+                
+                if tiene_premio > 0:
+                    t['premio_calculado'] = round(tiene_premio, 2)
+                    tickets_con_premio.append(t)
+            
+            tickets_filtrados = tickets_con_premio
+        
+        # Calcular totales
+        total_ventas = sum(t['total'] for t in tickets_filtrados)
+        total_tickets = len(tickets_filtrados)
+        
+        # Paginación simple
+        tickets_respuesta = tickets_filtrados[:50]
+        
+        return jsonify({
+            'status': 'ok',
+            'tickets': tickets_respuesta,
+            'totales': {
+                'cantidad': total_tickets,
+                'ventas': round(total_ventas, 2)
+            },
+            'filtros_aplicados': {
+                'fecha_inicio': fecha_inicio,
+                'fecha_fin': fecha_fin,
+                'estado': estado
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/consultar-ticket-detalle', methods=['POST'])
+@agencia_required
+def consultar_ticket_detalle():
+    """
+    NUEVO: Consulta detalle completo de un ticket por serial (solo de la agencia logueada)
+    """
+    try:
+        data = request.get_json()
+        serial = data.get('serial')
+        
+        if not serial:
+            return jsonify({'error': 'Serial requerido'}), 400
+        
+        tickets = supabase_request("tickets", filters={"serial": serial, "agencia_id": session['user_id']})
+        if not tickets or len(tickets) == 0:
+            return jsonify({'error': 'Ticket no encontrado o no pertenece a esta agencia'})
+        
+        ticket = tickets[0]
+        
+        # Obtener jugadas
+        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
+        
+        # Calcular premios si hay resultados
+        fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
+        resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
+        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        
+        jugadas_detalle = []
+        total_premio = 0
+        
+        for j in jugadas:
+            wa = resultados.get(j['hora'])
+            premio = 0
+            gano = False
+            
+            if wa:
+                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                    premio = calcular_premio_animal(j['monto'], wa)
+                    gano = True
+                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                    sel = j['seleccion']
+                    num = int(wa)
+                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                       (sel == 'PAR' and num % 2 == 0) or \
+                       (sel == 'IMPAR' and num % 2 != 0):
+                        premio = j['monto'] * PAGO_ESPECIAL
+                        gano = True
+            
+            if gano:
+                total_premio += premio
+            
+            jugadas_detalle.append({
+                'hora': j['hora'],
+                'tipo': j['tipo'],
+                'seleccion': j['seleccion'],
+                'nombre_seleccion': ANIMALES.get(j['seleccion'], j['seleccion']) if j['tipo'] == 'animal' else j['seleccion'],
+                'monto': j['monto'],
+                'resultado': wa,
+                'gano': gano,
+                'premio': round(premio, 2) if gano else 0
+            })
+        
+        return jsonify({
+            'status': 'ok',
+            'ticket': {
+                'id': ticket['id'],
+                'serial': ticket['serial'],
+                'fecha': ticket['fecha'],
+                'total_apostado': ticket['total'],
+                'pagado': ticket['pagado'],
+                'anulado': ticket['anulado'],
+                'premio_total': round(total_premio, 2),
+                'ganancia_neta': round(total_premio - ticket['total'], 2) if total_premio > 0 else -ticket['total']
+            },
+            'jugadas': jugadas_detalle
         })
         
     except Exception as e:
@@ -480,6 +696,10 @@ def verificar_ticket():
             return jsonify({'error': 'Ticket no existe'})
         
         ticket = tickets[0]
+        
+        # Si es agencia, verificar que sea su ticket
+        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
+            return jsonify({'error': 'No autorizado para ver este ticket'})
         
         if ticket['anulado']:
             return jsonify({'error': 'TICKET ANULADO'})
@@ -557,6 +777,10 @@ def anular_ticket():
             return jsonify({'error': 'Ticket no existe'})
         
         ticket = tickets[0]
+        
+        # Si es agencia, verificar que sea su ticket
+        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
+            return jsonify({'error': 'No autorizado para anular este ticket'})
         
         if ticket['pagado']:
             return jsonify({'error': 'Ya esta pagado, no se puede anular'})
@@ -1061,6 +1285,7 @@ def reporte_agencias_rango():
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
         fecha_fin = data.get('fecha_fin')
+        agencia_id = data.get('agencia_id')  # NUEVO: filtro por agencia específica
         
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
@@ -1068,7 +1293,12 @@ def reporte_agencias_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
+        # Si hay agencia_id, filtrar solo esa agencia
+        if agencia_id:
+            url = f"{SUPABASE_URL}/rest/v1/agencias?id=eq.{agencia_id}"
+        else:
+            url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
+            
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -1076,7 +1306,12 @@ def reporte_agencias_rango():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+        # Construir URL de tickets según filtro
+        if agencia_id:
+            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=2000"
+        else:
+            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+            
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
@@ -1106,11 +1341,13 @@ def reporte_agencias_rango():
                 'comision_pct': ag['comision'],
                 'tickets': 0,
                 'ventas': 0,
-                'premios': 0,
+                'premios_pagados': 0,  # Lo que ya se pagó
+                'premios_pendientes': 0,  # Lo que se debe pagar (tickets no pagados con premio)
+                'premios_teoricos': 0,  # Total de premios calculados
                 'comision': 0,
                 'balance': 0,
-                'tickets_pagados': 0,
-                'tickets_pendientes': 0
+                'tickets_pagados_count': 0,
+                'tickets_pendientes_count': 0
             }
         
         for t in tickets_validos:
@@ -1125,55 +1362,57 @@ def reporte_agencias_rango():
             fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
             resultados_dia = resultados_por_dia.get(fecha_ticket, {})
             
-            if t['pagado']:
-                stats['tickets_pagados'] += 1
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            stats['premios'] += calcular_premio_animal(j['monto'], wa)
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            num = int(wa)
-                            sel = j['seleccion']
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                stats['premios'] += j['monto'] * PAGO_ESPECIAL
-            else:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                tiene_premio = False
-                for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+            # Calcular premio teórico (lo que corresponde pagar según resultados)
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+            premio_teorico_ticket = 0
+            tiene_premio = False
+            
+            for j in jugadas:
+                wa = resultados_dia.get(j['hora'])
+                if wa:
+                    premio_jugada = 0
+                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                        premio_jugada = calcular_premio_animal(j['monto'], wa)
+                        premio_teorico_ticket += premio_jugada
+                        tiene_premio = True
+                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                        sel = j['seleccion']
+                        num = int(wa)
+                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                           (sel == 'PAR' and num % 2 == 0) or \
+                           (sel == 'IMPAR' and num % 2 != 0):
+                            premio_jugada = j['monto'] * PAGO_ESPECIAL
+                            premio_teorico_ticket += premio_jugada
                             tiene_premio = True
-                            break
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            num = int(wa)
-                            sel = j['seleccion']
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                tiene_premio = True
-                                break
+            
+            stats['premios_teoricos'] += premio_teorico_ticket
+            
+            if t['pagado']:
+                stats['tickets_pagados_count'] += 1
+                stats['premios_pagados'] += premio_teorico_ticket
+            else:
                 if tiene_premio:
-                    stats['tickets_pendientes'] += 1
+                    stats['tickets_pendientes_count'] += 1
+                    stats['premios_pendientes'] += premio_teorico_ticket
         
         total_global = {
-            'tickets': 0, 'ventas': 0, 'premios': 0, 'comision': 0,
-            'balance': 0, 'tickets_pagados': 0, 'tickets_pendientes': 0
+            'tickets': 0, 'ventas': 0, 'premios_pagados': 0, 'premios_pendientes': 0,
+            'premios_teoricos': 0, 'comision': 0, 'balance': 0,
+            'tickets_pagados_count': 0, 'tickets_pendientes_count': 0
         }
         
         reporte_agencias = []
         for ag_id, stats in stats_por_agencia.items():
             if stats['tickets'] > 0:
                 stats['comision'] = stats['ventas'] * stats['comision_pct']
-                stats['balance'] = stats['ventas'] - stats['premios'] - stats['comision']
+                # Balance considerando premios pendientes como deuda
+                stats['balance'] = stats['ventas'] - stats['premios_teoricos'] - stats['comision']
+                
                 stats['ventas'] = round(stats['ventas'], 2)
-                stats['premios'] = round(stats['premios'], 2)
+                stats['premios_pagados'] = round(stats['premios_pagados'], 2)
+                stats['premios_pendientes'] = round(stats['premios_pendientes'], 2)
+                stats['premios_teoricos'] = round(stats['premios_teoricos'], 2)
                 stats['comision'] = round(stats['comision'], 2)
                 stats['balance'] = round(stats['balance'], 2)
                 
@@ -1196,7 +1435,8 @@ def reporte_agencias_rango():
             'status': 'ok',
             'agencias': reporte_agencias,
             'totales': total_global,
-            'rango': {'inicio': fecha_inicio, 'fin': fecha_fin, 'dias': (dt_fin - dt_inicio).days + 1}
+            'rango': {'inicio': fecha_inicio, 'fin': fecha_fin, 'dias': (dt_fin - dt_inicio).days + 1},
+            'filtro_agencia': agencia_id
         })
         
     except Exception as e:
@@ -1352,15 +1592,20 @@ def reporte_agencias():
             ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t['anulado'])
             comision = ventas * ag['comision']
             
-            premios = 0
+            # Calcular premios pendientes y pagados
+            premios_pagados = 0
+            premios_pendientes = 0
+            
             for t in tickets:
-                if t['agencia_id'] == ag['id'] and t['pagado']:
+                if t['agencia_id'] == ag['id'] and not t['anulado']:
                     jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                    premio_ticket = 0
+                    
                     for j in jugadas:
                         wa = resultados.get(j['hora'])
                         if wa:
                             if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                premios += calcular_premio_animal(j['monto'], wa)
+                                premio_ticket += calcular_premio_animal(j['monto'], wa)
                             elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
                                 sel = j['seleccion']
                                 num = int(wa)
@@ -1368,20 +1613,27 @@ def reporte_agencias():
                                    (sel == 'NEGRO' and str(wa) not in ROJOS) or \
                                    (sel == 'PAR' and num % 2 == 0) or \
                                    (sel == 'IMPAR' and num % 2 != 0):
-                                    premios += j['monto'] * PAGO_ESPECIAL
+                                    premio_ticket += j['monto'] * PAGO_ESPECIAL
+                    
+                    if t['pagado']:
+                        premios_pagados += premio_ticket
+                    else:
+                        premios_pendientes += premio_ticket
             
-            balance = ventas - premios - comision
+            balance = ventas - premios_pagados - comision
             
             data_agencias.append({
                 'nombre': ag['nombre_agencia'],
                 'ventas': round(ventas, 2),
-                'premios': round(premios, 2),
+                'premios_pagados': round(premios_pagados, 2),
+                'premios_pendientes': round(premios_pendientes, 2),
+                'premios_total': round(premios_pagados + premios_pendientes, 2),
                 'comision': round(comision, 2),
                 'balance': round(balance, 2)
             })
             
             total_ventas += ventas
-            total_premios += premios
+            total_premios += premios_pagados
             total_comisiones += comision
         
         return jsonify({
@@ -1550,7 +1802,7 @@ def estadisticas_rango():
                 jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id})
                 ticket_info = next((t for t in tickets_rango if t['id'] == ticket_id), None)
                 
-                if ticket_info and ticket_info['pagado']:
+                if ticket_info:
                     for j in jugadas:
                         wa = resultados_dia.get(j['hora'])
                         if wa:
@@ -1734,7 +1986,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v5.8<br>Menu Windows solo para Agencias
+            Sistema ZOOLO CASINO v5.9<br>Zona Horaria Perú + Consultas Agencia
         </div>
     </div>
 </body>
@@ -1825,7 +2077,7 @@ POS_HTML = '''
             background: #2d2d2d;
             border: 1px solid #555;
             border-top: none;
-            min-width: 200px;
+            min-width: 220px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             z-index: 1001;
         }
@@ -2298,7 +2550,7 @@ POS_HTML = '''
         @media (min-width: 768px) {
             .modal-content {
                 margin: 40px auto; 
-                max-width: 600px;
+                max-width: 700px;
                 min-height: auto;
             }
         }
@@ -2480,21 +2732,6 @@ POS_HTML = '''
             to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
         }
         
-        /* Calculadora en modal */
-        .calc-result {
-            background: rgba(255,215,0,0.1);
-            border: 2px solid #ffd700;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            margin-top: 20px;
-        }
-        .calc-result h4 {
-            color: #ffd700;
-            font-size: 1.5rem;
-            margin: 0;
-        }
-        
         /* Ticket item en listado */
         .ticket-item {
             background: #0a0a0a;
@@ -2502,10 +2739,19 @@ POS_HTML = '''
             margin: 8px 0;
             border-radius: 10px;
             border-left: 4px solid #2980b9;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ticket-item:active {
+            background: #1a1a2e;
         }
         .ticket-item.ganador {
             border-left-color: #27ae60;
             background: rgba(39,174,96,0.1);
+        }
+        .ticket-item.pendiente-pago {
+            border-left-color: #f39c12;
+            background: rgba(243,156,18,0.1);
         }
         .ticket-serial {
             color: #ffd700;
@@ -2522,6 +2768,49 @@ POS_HTML = '''
             font-weight: bold;
             font-size: 1.2rem;
             margin-top: 5px;
+        }
+        .ticket-estado {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .estado-pagado { background: #27ae60; color: white; }
+        .estado-pendiente { background: #f39c12; color: black; }
+        
+        /* Filtros */
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-row select, .filter-row input {
+            flex: 1;
+            min-width: 120px;
+            padding: 10px;
+            background: #000;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 6px;
+        }
+        
+        /* Detalle de jugadas en ticket */
+        .jugada-detail {
+            background: #111;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .jugada-ganadora {
+            background: rgba(39,174,96,0.2);
+            border: 1px solid #27ae60;
         }
     </style>
 </head>
@@ -2544,9 +2833,10 @@ POS_HTML = '''
             <li class="win-menu-item">
                 <a>🔍 Consultas</a>
                 <ul class="win-submenu">
+                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">🎫 Mis Tickets Vendidos</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirBuscarTicket()">🔎 Buscar Ticket por Serial</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">💰 Tickets por Cobrar</a></li>
                     <li class="win-submenu-item"><a onclick="verResultados()">📋 Resultados de Hoy</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">🎫 Mis Tickets Pendientes</a></li>
-                    <li class="win-submenu-item"><a onclick="verificarTicket()">🔎 Verificar Ticket</a></li>
                 </ul>
             </li>
             <li class="win-menu-item">
@@ -2582,9 +2872,10 @@ POS_HTML = '''
         
         <div class="mobile-menu-section">
             <div class="mobile-menu-section-title">🔍 Consultas</div>
+            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">🎫 Mis Tickets Vendidos</div>
+            <div class="mobile-menu-item" onclick="abrirBuscarTicketMobile()">🔎 Buscar Ticket</div>
+            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">💰 Tickets por Cobrar</div>
             <div class="mobile-menu-item" onclick="verResultadosMobile()">📋 Resultados</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">🎫 Tickets Pendientes</div>
-            <div class="mobile-menu-item" onclick="verificarTicketMobile()">🔎 Verificar Ticket</div>
         </div>
         
         <div class="mobile-menu-section">
@@ -2767,6 +3058,56 @@ POS_HTML = '''
         </div>
     </div>
 
+    <!-- NUEVO: MODAL MIS TICKETS (CONSULTAS) -->
+    <div class="modal" id="modal-mis-tickets">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🎫 MIS TICKETS VENDIDOS</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
+            </div>
+            
+            <div class="filter-row">
+                <input type="date" id="mis-tickets-fecha-inicio" placeholder="Desde">
+                <input type="date" id="mis-tickets-fecha-fin" placeholder="Hasta">
+                <select id="mis-tickets-estado">
+                    <option value="todos">Todos</option>
+                    <option value="pagados">Pagados</option>
+                    <option value="pendientes">Pendientes</option>
+                    <option value="por_pagar">Con Premio (por cobrar)</option>
+                </select>
+            </div>
+            <button class="btn-consultar" onclick="consultarMisTickets()">BUSCAR</button>
+            
+            <div id="mis-tickets-resumen" style="margin: 15px 0; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 8px; display: none;">
+                <strong style="color: #ffd700;">Resumen:</strong> <span id="mis-tickets-info"></span>
+            </div>
+            
+            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
+                <p style="color: #888; text-align: center; padding: 20px;">Use los filtros y presione BUSCAR</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NUEVO: MODAL BUSCAR TICKET ESPECIFICO -->
+    <div class="modal" id="modal-buscar-ticket">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔎 BUSCAR TICKET POR SERIAL</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Ingrese el número de serial:</label>
+                <input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center; letter-spacing: 2px;">
+            </div>
+            <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
+            
+            <div id="resultado-busqueda-ticket" style="margin-top: 20px;">
+                <!-- Aquí se mostrará el detalle -->
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL CALCULADORA -->
     <div class="modal" id="modal-calculadora">
         <div class="modal-content">
@@ -2791,9 +3132,9 @@ POS_HTML = '''
             
             <button class="btn-consultar" onclick="calcularPremio()">CALCULAR</button>
             
-            <div class="calc-result" id="calc-resultado" style="display: none;">
-                <div style="color: #888; font-size: 0.9rem; margin-bottom: 5px;">Premio a Pagar:</div>
-                <h4 id="calc-total">S/0.00</h4>
+            <div class="stats-box" id="calc-resultado" style="display: none; margin-top: 20px; text-align: center;">
+                <div style="color: #888; margin-bottom: 5px;">Premio a Pagar:</div>
+                <div style="color: #ffd700; font-size: 2rem; font-weight: bold;" id="calc-total">S/0.00</div>
             </div>
         </div>
     </div>
@@ -2802,7 +3143,7 @@ POS_HTML = '''
     <div class="modal" id="modal-pendientes">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🎫 MIS TICKETS PENDIENTES</h3>
+                <h3>💰 MIS TICKETS POR COBRAR</h3>
                 <button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button>
             </div>
             
@@ -2907,17 +3248,17 @@ POS_HTML = '''
             <div style="padding: 20px;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
                 <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.8</p>
+                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.9</p>
                 
                 <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
                     <p style="color: #ffd700; margin: 0; line-height: 1.8;">
                         Sistema de Lotería Animal<br>
-                        Desarrollado para Agencias<br><br>
-                        <strong>Características:</strong><br>
-                        ✓ Menú Windows Forms (Agencias)<br>
-                        ✓ Gestión de Tickets<br>
-                        ✓ Cálculo Automático<br>
-                        ✓ Resultados en Vivo
+                        Zona Horaria: Perú (UTC-5)<br><br>
+                        <strong>Nuevas Funciones v5.9:</strong><br>
+                        ✓ Consulta de Tickets Vendidos<br>
+                        ✓ Históricos por Agencia<br>
+                        ✓ Premios Pendientes en Reportes<br>
+                        ✓ Edición hasta 2h post-sorteo
                     </p>
                 </div>
                 
@@ -2946,9 +3287,10 @@ POS_HTML = '''
         function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
         function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
         function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
-        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
+        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
+        function abrirBuscarTicketMobile() { toggleMobileMenu(); abrirBuscarTicket(); }
         function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
-        function verificarTicketMobile() { toggleMobileMenu(); verificarTicket(); }
+        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
         function mostrarReglasMobile() { toggleMobileMenu(); mostrarReglas(); }
         function mostrarComoUsarMobile() { toggleMobileMenu(); mostrarComoUsar(); }
         function mostrarAcercaMobile() { toggleMobileMenu(); mostrarAcerca(); }
@@ -3289,7 +3631,167 @@ POS_HTML = '''
             document.getElementById('calc-resultado').style.display = 'block';
         }
         
-        // Funciones del menú Consultas
+        // NUEVAS FUNCIONES DE CONSULTA
+        function abrirMisTickets() {
+            document.getElementById('modal-mis-tickets').style.display = 'block';
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
+            document.getElementById('mis-tickets-fecha-fin').value = hoy;
+        }
+        
+        function abrirBuscarTicket() {
+            document.getElementById('modal-buscar-ticket').style.display = 'block';
+            document.getElementById('buscar-serial-input').value = '';
+            document.getElementById('resultado-busqueda-ticket').innerHTML = '';
+            document.getElementById('buscar-serial-input').focus();
+        }
+        
+        function consultarMisTickets() {
+            let inicio = document.getElementById('mis-tickets-fecha-inicio').value;
+            let fin = document.getElementById('mis-tickets-fecha-fin').value;
+            let estado = document.getElementById('mis-tickets-estado').value;
+            
+            if (!inicio || !fin) {
+                showToast('Seleccione fechas', 'error');
+                return;
+            }
+            
+            let container = document.getElementById('lista-mis-tickets');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
+            
+            fetch('/api/mis-tickets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    fecha_inicio: inicio,
+                    fecha_fin: fin,
+                    estado: estado
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
+                    return;
+                }
+                
+                // Mostrar resumen
+                document.getElementById('mis-tickets-resumen').style.display = 'block';
+                document.getElementById('mis-tickets-info').textContent = 
+                    `${d.totales.cantidad} tickets - Total ventas: S/${d.totales.ventas.toFixed(2)}`;
+                
+                if (d.tickets.length === 0) {
+                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No se encontraron tickets con esos filtros</p>';
+                    return;
+                }
+                
+                let html = '';
+                d.tickets.forEach(t => {
+                    let estadoClass = t.pagado ? 'ganador' : (t.premio_calculado ? 'pendiente-pago' : '');
+                    let estadoText = t.pagado ? 'PAGADO' : (t.premio_calculado ? 'GANADOR (sin cobrar)' : 'PENDIENTE');
+                    
+                    html += `
+                        <div class="ticket-item ${estadoClass}" onclick="verDetalleTicket('${t.serial}')">
+                            <div class="ticket-serial">#${t.serial}</div>
+                            <div class="ticket-info">${t.fecha} - Total: S/${t.total}</div>
+                            ${t.premio_calculado ? `<div class="ticket-premio">Premio: S/${t.premio_calculado}</div>` : ''}
+                            <span class="ticket-estado ${t.pagado ? 'estado-pagado' : 'estado-pendiente'}">${estadoText}</span>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
+            });
+        }
+        
+        function buscarTicketEspecifico() {
+            let serial = document.getElementById('buscar-serial-input').value.trim();
+            if (!serial) {
+                showToast('Ingrese un serial', 'error');
+                return;
+            }
+            
+            let container = document.getElementById('resultado-busqueda-ticket');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Buscando...</p>';
+            
+            fetch('/api/consultar-ticket-detalle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">' + d.error + '</p>';
+                    return;
+                }
+                
+                let t = d.ticket;
+                let estadoColor = t.pagado ? '#27ae60' : (t.premio_total > 0 ? '#f39c12' : '#888');
+                let estadoText = t.pagado ? 'PAGADO' : (t.premio_total > 0 ? 'GANADOR - PENDIENTE DE COBRO' : 'NO GANADOR');
+                
+                let html = `
+                    <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; border: 2px solid ${estadoColor};">
+                        <h3 style="color: #ffd700; margin-bottom: 15px; text-align: center;">TICKET #${t.serial}</h3>
+                        <div class="stats-box" style="margin-bottom: 15px;">
+                            <div class="stat-row">
+                                <span class="stat-label">Fecha:</span>
+                                <span class="stat-value" style="font-size: 1rem;">${t.fecha}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Apostado:</span>
+                                <span class="stat-value" style="font-size: 1rem;">S/${t.total_apostado}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Estado:</span>
+                                <span class="stat-value" style="color: ${estadoColor}; font-size: 1rem;">${estadoText}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Premio Total:</span>
+                                <span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">
+                                    S/${t.premio_total.toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+                        <h4 style="color: #ffd700; margin-bottom: 10px;">Detalle de Jugadas:</h4>
+                `;
+                
+                d.jugadas.forEach(j => {
+                    let ganoClass = j.gano ? 'jugada-ganadora' : '';
+                    let resultadoText = j.resultado ? `${j.resultado} (${j.nombre_seleccion})` : 'Pendiente';
+                    
+                    html += `
+                        <div class="jugada-detail ${ganoClass}">
+                            <div>
+                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
+                                <small style="color: #888;">Resultado: ${resultadoText}</small>
+                            </div>
+                            <div style="text-align: right;">
+                                <div>S/${j.monto}</div>
+                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
+            });
+        }
+        
+        function verDetalleTicket(serial) {
+            document.getElementById('modal-mis-tickets').style.display = 'none';
+            abrirBuscarTicket();
+            document.getElementById('buscar-serial-input').value = serial;
+            buscarTicketEspecifico();
+        }
+        
+        // Funciones existentes...
         function abrirMisTicketsPendientes() {
             document.getElementById('modal-pendientes').style.display = 'block';
             document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
@@ -3326,35 +3828,6 @@ POS_HTML = '''
             .catch(e => {
                 document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
             });
-        }
-        
-        function verificarTicket() {
-            let serial = prompt('Ingrese el SERIAL del ticket a verificar:');
-            if (!serial) return;
-            
-            fetch('/api/verificar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showToast(d.error, 'error');
-                } else {
-                    let msg = `Ticket #${d.ticket_id}\\n`;
-                    msg += `Total Ganado: S/${d.total_ganado.toFixed(2)}\\n\\n`;
-                    msg += 'Detalles:\\n';
-                    d.detalles.forEach(det => {
-                        let status = det.gano ? '✅ GANÓ' : '❌ No ganó';
-                        msg += `${det.hora}: ${det.sel} - ${status}`;
-                        if (det.gano) msg += ` S/${det.premio.toFixed(2)}`;
-                        msg += '\\n';
-                    });
-                    alert(msg);
-                }
-            })
-            .catch(e => showToast('Error de conexión', 'error'));
         }
         
         // Funciones del menú Ayuda
@@ -3519,6 +3992,8 @@ POS_HTML = '''
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
             document.getElementById('resultados-fecha').value = hoy;
+            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
+            document.getElementById('mis-tickets-fecha-fin').value = hoy;
         });
     </script>
 </body>
@@ -3961,6 +4436,18 @@ ADMIN_HTML = '''
             font-size: 0.85rem;
             text-align: center;
         }
+        
+        /* Indicador de premios */
+        .premio-box {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .premio-pagado { background: #27ae60; color: white; }
+        .premio-pendiente { background: #f39c12; color: black; }
+        .premio-total { background: #2980b9; color: white; }
     </style>
 </head>
 <body>
@@ -4019,7 +4506,7 @@ ADMIN_HTML = '''
         </div>
         
         <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú:</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 7PM editable hasta 9PM).
+            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 7PM hasta 9PM).
         </div>
         
         <!-- DASHBOARD -->
@@ -4027,8 +4514,8 @@ ADMIN_HTML = '''
             <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">📊 RESUMEN DE HOY</h3>
             <div class="stats-grid">
                 <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS</h3><p id="stat-premios">S/0</p></div>
-                <div class="stat-card"><h3>COMISIONES</h3><p id="stat-comisiones">S/0</p></div>
+                <div class="stat-card"><h3>PREMIOS PAGADOS</h3><p id="stat-premios">S/0</p></div>
+                <div class="stat-card"><h3>PREMIOS PENDIENTES</h3><p id="stat-premios-pendientes" style="color: #f39c12;">S/0</p></div>
                 <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
             </div>
             
@@ -4077,6 +4564,15 @@ ADMIN_HTML = '''
         <div id="reporte" class="tab-content">
             <div class="form-box">
                 <h3>🏢 REPORTE POR AGENCIAS</h3>
+                
+                <!-- NUEVO: Selector de agencia -->
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label>Filtrar por Agencia:</label>
+                    <select id="reporte-agencia-select" onchange="cambiarFiltroAgencia()">
+                        <option value="">TODAS LAS AGENCIAS (GLOBAL)</option>
+                    </select>
+                </div>
+                
                 <div class="form-row">
                     <input type="date" id="reporte-fecha-inicio">
                     <input type="date" id="reporte-fecha-fin">
@@ -4090,8 +4586,31 @@ ADMIN_HTML = '''
                 </div>
                 
                 <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES</h4>
+                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES <span id="titulo-filtro-agencia"></span></h4>
+                    
+                    <!-- NUEVO: Stats de premios detallados -->
                     <div class="stats-grid" id="stats-agencias-totales"></div>
+                    
+                    <!-- NUEVO: Desglose de premios -->
+                    <div class="form-box" style="background: rgba(255,215,0,0.05);">
+                        <h4 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">💰 DESGLOSE DE PREMIOS</h4>
+                        <div class="stat-row">
+                            <span class="stat-label">Premios Pagados:</span>
+                            <span class="stat-value" id="reporte-premios-pagados" style="color: #27ae60;">S/0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Premios Pendientes (por cobrar):</span>
+                            <span class="stat-value" id="reporte-premios-pendientes" style="color: #f39c12;">S/0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Total en Premios (Teórico):</span>
+                            <span class="stat-value" id="reporte-premios-total" style="color: #ffd700;">S/0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Tickets Ganadores sin Cobrar:</span>
+                            <span class="stat-value" id="reporte-tickets-pendientes" style="color: #f39c12;">0</span>
+                        </div>
+                    </div>
 
                     <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🏆 TOP 5 AGENCIAS</h4>
                     <div id="ranking-agencias"></div>
@@ -4105,7 +4624,8 @@ ADMIN_HTML = '''
                                     <th>Agencia</th>
                                     <th>Tickets</th>
                                     <th>Ventas</th>
-                                    <th>Premios</th>
+                                    <th>Premios Pagados</th>
+                                    <th>Pendientes</th>
                                     <th>Balance</th>
                                     <th>%</th>
                                 </tr>
@@ -4132,7 +4652,7 @@ ADMIN_HTML = '''
             <div class="form-box">
                 <h3>📋 RESULTADOS CARGADOS</h3>
                 <div class="timezone-info">
-                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 7PM hasta 9PM).
+                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 7PM hasta 9PM hora Perú).
                 </div>
                 <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
                     <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
@@ -4255,6 +4775,7 @@ ADMIN_HTML = '''
         let listaAgencias = [];
         let editandoFecha = null;
         let editandoHora = null;
+        let filtroAgenciaActual = null;
 
         function showTab(tab) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -4281,6 +4802,7 @@ ADMIN_HTML = '''
                 let hoy = new Date().toISOString().split('T')[0];
                 document.getElementById('reporte-fecha-inicio').value = hoy;
                 document.getElementById('reporte-fecha-fin').value = hoy;
+                cargarAgenciasReporte(); // Cargar selector de agencias
                 consultarReporteAgencias();
             }
             if (tab === 'agencias') cargarAgencias();
@@ -4365,6 +4887,25 @@ ADMIN_HTML = '''
                     select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
                 });
             });
+        }
+        
+        // NUEVO: Cargar agencias en selector de reporte
+        function cargarAgenciasReporte() {
+            fetch('/admin/lista-agencias')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) return;
+                let select = document.getElementById('reporte-agencia-select');
+                select.innerHTML = '<option value="">TODAS LAS AGENCIAS (GLOBAL)</option>';
+                d.forEach(ag => {
+                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
+                });
+            });
+        }
+        
+        function cambiarFiltroAgencia() {
+            filtroAgenciaActual = document.getElementById('reporte-agencia-select').value;
+            consultarReporteAgencias();
         }
 
         function cambiarAgenciaRiesgo() {
@@ -4586,6 +5127,7 @@ ADMIN_HTML = '''
         function consultarReporteAgencias() {
             let inicio = document.getElementById('reporte-fecha-inicio').value;
             let fin = document.getElementById('reporte-fecha-fin').value;
+            let agenciaId = document.getElementById('reporte-agencia-select').value;
             
             if (!inicio || !fin) {
                 showMensaje('Seleccione ambas fechas', 'error');
@@ -4597,7 +5139,11 @@ ADMIN_HTML = '''
             fetch('/admin/reporte-agencias-rango', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
+                body: JSON.stringify({
+                    fecha_inicio: inicio, 
+                    fecha_fin: fin,
+                    agencia_id: agenciaId || null
+                })
             })
             .then(r => r.json())
             .then(d => {
@@ -4608,6 +5154,12 @@ ADMIN_HTML = '''
                 
                 reporteAgenciasData = d;
                 document.getElementById('reporte-agencias-resumen').style.display = 'block';
+                
+                // Mostrar título según filtro
+                let tituloAgencia = agenciaId ? 
+                    document.querySelector('#reporte-agencia-select option:checked').text : 
+                    'TODAS LAS AGENCIAS';
+                document.getElementById('titulo-filtro-agencia').textContent = `- ${tituloAgencia}`;
                 
                 let totales = d.totales;
                 let htmlTotales = `
@@ -4630,16 +5182,24 @@ ADMIN_HTML = '''
                 `;
                 document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
                 
+                // NUEVO: Mostrar desglose de premios
+                document.getElementById('reporte-premios-pagados').textContent = 'S/' + totales.premios_pagados.toFixed(2);
+                document.getElementById('reporte-premios-pendientes').textContent = 'S/' + totales.premios_pendientes.toFixed(2);
+                document.getElementById('reporte-premios-total').textContent = 'S/' + totales.premios_teoricos.toFixed(2);
+                document.getElementById('reporte-tickets-pendientes').textContent = totales.tickets_pendientes_count;
+                
                 let htmlRanking = '';
                 d.agencias.slice(0, 5).forEach((ag, idx) => {
                     let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
                     let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
+                    let pendienteInfo = ag.premios_pendientes > 0 ? `<br><small style="color:#f39c12">Pendiente: S/${ag.premios_pendientes}</small>` : '';
+                    
                     htmlRanking += `
                         <div class="ranking-item">
                             <div class="ranking-pos">${medalla}</div>
                             <div class="ranking-info">
                                 <div class="ranking-nombre">${ag.nombre}</div>
-                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total</div>
+                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total${pendienteInfo}</div>
                             </div>
                             <div class="ranking-monto">
                                 <div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div>
@@ -4654,25 +5214,33 @@ ADMIN_HTML = '''
                 let htmlTabla = '';
                 d.agencias.forEach((ag, idx) => {
                     let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
+                    let pendienteBadge = ag.premios_pendientes > 0 ? 
+                        `<span class="premio-box premio-pendiente">S/${ag.premios_pendientes}</span>` : 
+                        '<span style="color:#666">-</span>';
+                    
                     htmlTabla += `<tr>
                         <td>${idx + 1}</td>
                         <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
                         <td>${ag.tickets}</td>
                         <td>S/${ag.ventas.toFixed(0)}</td>
-                        <td>S/${ag.premios.toFixed(0)}</td>
+                        <td style="color:#27ae60">S/${ag.premios_pagados.toFixed(0)}</td>
+                        <td>${pendienteBadge}</td>
                         <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td>
                         <td>${ag.porcentaje_ventas}%</td>
                     </tr>`;
                 });
                 
-                htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
-                    <td colspan="2">TOTALES</td>
-                    <td>${totales.tickets}</td>
-                    <td>S/${totales.ventas.toFixed(0)}</td>
-                    <td>S/${totales.premios.toFixed(0)}</td>
-                    <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
-                    <td>100%</td>
-                </tr>`;
+                if (!agenciaId) {
+                    htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
+                        <td colspan="2">TOTALES</td>
+                        <td>${totales.tickets}</td>
+                        <td>S/${totales.ventas.toFixed(0)}</td>
+                        <td>S/${totales.premios_pagados.toFixed(0)}</td>
+                        <td><span class="premio-box premio-pendiente">S/${totales.premios_pendientes.toFixed(0)}</span></td>
+                        <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
+                        <td>100%</td>
+                    </tr>`;
+                }
                 
                 tbody.innerHTML = htmlTabla;
             })
@@ -4746,7 +5314,7 @@ ADMIN_HTML = '''
                 if (d.global) {
                     document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
                     document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
-                    document.getElementById('stat-comisiones').textContent = 'S/' + d.global.comisiones.toFixed(0);
+                    document.getElementById('stat-premios-pendientes').textContent = 'S/' + d.global.premios_pendientes.toFixed(0);
                     document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
                 }
             }).catch(() => showMensaje('Error de conexion', 'error'));
@@ -4967,11 +5535,14 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v5.8")
-    print("  MENU WINDOWS SOLO PARA AGENCIAS")
+    print("  ZOOLO CASINO CLOUD v5.9")
+    print("  CONSULTAS AGENCIA + ZONA HORARIA PERÚ")
     print("=" * 60)
-    print("  - Agencia: Menu Windows Forms + Drawer Mobile")
-    print("  - Admin: Tabs horizontales simples (sin menu)")
+    print("  ✓ Zona horaria Perú (UTC-5) corregida")
+    print("  ✓ Edición resultados hasta 2h post-sorteo")
+    print("  ✓ Consulta tickets vendidos (Agencias)")
+    print("  ✓ Reporte premios pendientes vs pagados")
+    print("  ✓ Filtro por agencia específica en reportes")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
