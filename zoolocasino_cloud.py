@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v6.0 - CON TRIPLETAS Y NUEVOS HORARIOS
+ZOOLO CASINO CLOUD v5.9.1 - CORREGIDO
 """
 
 import os
@@ -16,7 +16,7 @@ from flask import Flask, render_template_string, request, session, redirect, jso
 from collections import defaultdict
 
 # ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co ').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
@@ -26,20 +26,21 @@ app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
 PAGO_ANIMAL_NORMAL = 35      
 PAGO_LECHUZA = 70           
 PAGO_ESPECIAL = 2           
-PAGO_TRIPLETA = 50          # NUEVO: Pago 1 por 50 para tripletas
 COMISION_AGENCIA = 0.15
 MINUTOS_BLOQUEO = 5
 HORAS_EDICION_RESULTADO = 2
 
-# ==================== NUEVOS HORARIOS ACTUALIZADOS ====================
+# Horarios Perú (fijos)
 HORARIOS_PERU = [
-    "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
-    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM"
+    "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM",
+    "05:00 PM", "06:00 PM", "07:00 PM"
 ]
 
 HORARIOS_VENEZUELA = [
-    "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM",
-    "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"
+    "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM",
+    "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM",
+    "06:00 PM", "07:00 PM", "08:00 PM"
 ]
 
 # 42 Animales
@@ -66,6 +67,7 @@ def ahora_peru():
     try:
         return datetime.now(timezone.utc) - timedelta(hours=5)
     except:
+        # Fallback para Python < 3.12
         return datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=5)
 
 def parse_fecha_ticket(fecha_str):
@@ -352,6 +354,7 @@ def resultados_fecha():
         fecha_str = data.get('fecha')
         
         if not fecha_str:
+            # Si no hay fecha, usar hoy
             fecha_obj = ahora_peru()
         else:
             fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d")
@@ -392,9 +395,8 @@ def procesar_venta():
         if not jugadas:
             return jsonify({'error': 'Ticket vacio'}), 400
         
-        # Verificar bloqueo solo para jugadas normales (no tripletas que son todo el día)
         for j in jugadas:
-            if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
+            if not verificar_horario_bloqueo(j['hora']):
                 return jsonify({'error': f"El sorteo {j['hora']} ya cerro"}), 400
         
         serial = generar_serial()
@@ -417,33 +419,18 @@ def procesar_venta():
         ticket_id = result[0]['id']
         
         for j in jugadas:
-            if j['tipo'] == 'tripleta':
-                # Guardar tripleta en tabla separada
-                nums = j['seleccion'].split(',')
-                tripleta_data = {
-                    "ticket_id": ticket_id,
-                    "animal1": nums[0],
-                    "animal2": nums[1],
-                    "animal3": nums[2],
-                    "monto": j['monto'],
-                    "fecha": fecha.split(' ')[0],  # Solo la fecha sin hora
-                    "pagado": False
-                }
-                supabase_request("tripletas", method="POST", data=tripleta_data)
-            else:
-                jugada_data = {
-                    "ticket_id": ticket_id,
-                    "hora": j['hora'],
-                    "seleccion": j['seleccion'],
-                    "monto": j['monto'],
-                    "tipo": j['tipo']
-                }
-                supabase_request("jugadas", method="POST", data=jugada_data)
+            jugada_data = {
+                "ticket_id": ticket_id,
+                "hora": j['hora'],
+                "seleccion": j['seleccion'],
+                "monto": j['monto'],
+                "tipo": j['tipo']
+            }
+            supabase_request("jugadas", method="POST", data=jugada_data)
         
         jugadas_por_hora = defaultdict(list)
         for j in jugadas:
-            if j['tipo'] != 'tripleta':
-                jugadas_por_hora[j['hora']].append(j)
+            jugadas_por_hora[j['hora']].append(j)
         
         lineas = [
             f"*{session['nombre_agencia']}*",
@@ -454,7 +441,6 @@ def procesar_venta():
             ""
         ]
         
-        # Agrupar jugadas normales por hora
         for hora_peru in HORARIOS_PERU:
             if hora_peru not in jugadas_por_hora:
                 continue
@@ -480,16 +466,6 @@ def procesar_venta():
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")
         
-        # Agregar tripletas al ticket de texto
-        tripletas_en_ticket = [j for j in jugadas if j['tipo'] == 'tripleta']
-        if tripletas_en_ticket:
-            lineas.append("*TRIPLETAS (Paga x50)*")
-            for t in tripletas_en_ticket:
-                nums = t['seleccion'].split(',')
-                nombres = [ANIMALES.get(n, '')[0:3].upper() for n in nums]
-                lineas.append(f"{'-'.join(nombres)} (x50) S/{int(t['monto'])}")
-            lineas.append("")
-        
         lineas.append("------------------------")
         lineas.append(f"*TOTAL: S/{int(total)}*")
         lineas.append("")
@@ -497,7 +473,7 @@ def procesar_venta():
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text= {urllib.parse.quote(texto_whatsapp)}"
+        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
         
         return jsonify({
             'status': 'ok',
@@ -521,6 +497,7 @@ def mis_tickets():
         fecha_fin = data.get('fecha_fin')
         estado = data.get('estado', 'todos')
         
+        # Construir query base
         base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         
@@ -528,6 +505,7 @@ def mis_tickets():
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
         
+        # Filtrar por fecha si se especifica
         tickets_filtrados = []
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d") if fecha_inicio else None
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59) if fecha_fin else None
@@ -557,12 +535,30 @@ def mis_tickets():
             for t in tickets_filtrados:
                 if t.get('pagado'):
                     continue
+                    
+                fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
+                resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
+                resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
                 
-                # Calcular premio incluyendo tripletas
-                premio_total = calcular_premio_ticket(t)
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                tiene_premio = 0
                 
-                if premio_total > 0:
-                    t['premio_calculado'] = round(premio_total, 2)
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            tiene_premio += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            sel = j['seleccion']
+                            num = int(wa)
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                tiene_premio += j['monto'] * PAGO_ESPECIAL
+                
+                if tiene_premio > 0:
+                    t['premio_calculado'] = round(tiene_premio, 2)
                     tickets_con_premio.append(t)
             
             tickets_filtrados = tickets_con_premio
@@ -589,50 +585,6 @@ def mis_tickets():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def calcular_premio_ticket(ticket):
-    """Calcula el premio total de un ticket incluyendo tripletas"""
-    try:
-        fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        total_premio = 0
-        
-        # Jugadas normales
-        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-        for j in jugadas:
-            wa = resultados.get(j['hora'])
-            if wa:
-                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                    total_premio += calcular_premio_animal(j['monto'], wa)
-                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                    sel = j['seleccion']
-                    num = int(wa)
-                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                       (sel == 'PAR' and num % 2 == 0) or \
-                       (sel == 'IMPAR' and num % 2 != 0):
-                        total_premio += j['monto'] * PAGO_ESPECIAL
-        
-        # Tripletas
-        tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
-        if tripletas:
-            for trip in tripletas:
-                # Verificar si los 3 números salieron durante el día
-                nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                nums_encontrados = []
-                
-                for hora, animal in resultados.items():
-                    if animal in nums and animal not in nums_encontrados:
-                        nums_encontrados.append(animal)
-                
-                if len(nums_encontrados) == 3:  # Salieron los 3
-                    total_premio += trip['monto'] * PAGO_TRIPLETA
-        
-        return total_premio
-    except:
-        return 0
-
 @app.route('/api/consultar-ticket-detalle', methods=['POST'])
 @agencia_required
 def consultar_ticket_detalle():
@@ -658,7 +610,6 @@ def consultar_ticket_detalle():
         jugadas_detalle = []
         total_premio = 0
         
-        # Procesar jugadas normales
         for j in jugadas:
             wa = resultados.get(j['hora'])
             premio = 0
@@ -691,35 +642,6 @@ def consultar_ticket_detalle():
                 'gano': gano,
                 'premio': round(premio, 2) if gano else 0
             })
-        
-        # Procesar tripletas
-        tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
-        if tripletas:
-            for trip in tripletas:
-                nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                nombres = [ANIMALES.get(n, n) for n in nums]
-                nums_encontrados = []
-                
-                for hora, animal in resultados.items():
-                    if animal in nums and animal not in nums_encontrados:
-                        nums_encontrados.append(animal)
-                
-                gano = len(nums_encontrados) == 3
-                premio = trip['monto'] * PAGO_TRIPLETA if gano else 0
-                
-                if gano:
-                    total_premio += premio
-                
-                jugadas_detalle.append({
-                    'hora': 'Todo el día',
-                    'tipo': 'tripleta',
-                    'seleccion': f"{trip['animal1']},{trip['animal2']},{trip['animal3']}",
-                    'nombre_seleccion': f"{' - '.join(nombres)}",
-                    'monto': trip['monto'],
-                    'resultado': f"Salieron: {', '.join(nums_encontrados)}" if nums_encontrados else "Pendiente",
-                    'gano': gano,
-                    'premio': round(premio, 2)
-                })
         
         return jsonify({
             'status': 'ok',
@@ -759,13 +681,44 @@ def verificar_ticket():
         if ticket['pagado']:
             return jsonify({'error': 'YA FUE PAGADO'})
         
-        total_ganado = calcular_premio_ticket(ticket)
+        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
+        
+        fecha_ticket = ticket['fecha'].split(' ')[0]
+        resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
+        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        
+        total_ganado = 0
+        detalles = []
+        
+        for j in jugadas:
+            wa = resultados.get(j['hora'])
+            premio = 0
+            if wa:
+                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                    premio = calcular_premio_animal(j['monto'], wa)
+                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                    sel = j['seleccion']
+                    num = int(wa)
+                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                       (sel == 'PAR' and num % 2 == 0) or \
+                       (sel == 'IMPAR' and num % 2 != 0):
+                        premio = j['monto'] * PAGO_ESPECIAL
+            
+            total_ganado += premio
+            detalles.append({
+                'hora': j['hora'],
+                'sel': j['seleccion'],
+                'gano': premio > 0,
+                'premio': premio,
+                'es_lechuza': str(wa) == "40" and j['tipo'] == 'animal' and str(wa) == str(j['seleccion'])
+            })
         
         return jsonify({
             'status': 'ok',
             'ticket_id': ticket['id'],
             'total_ganado': total_ganado,
-            'detalles': []  # Simplificado para la respuesta
+            'detalles': detalles
         })
         
     except Exception as e:
@@ -776,8 +729,6 @@ def verificar_ticket():
 def pagar_ticket():
     try:
         ticket_id = request.json.get('ticket_id')
-        
-        # Marcar ticket como pagado
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -787,16 +738,6 @@ def pagar_ticket():
         data = json.dumps({"pagado": True}).encode()
         req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
         urllib.request.urlopen(req, timeout=15)
-        
-        # Marcar tripletas como pagadas también
-        url_trip = f"{SUPABASE_URL}/rest/v1/tripletas?ticket_id=eq.{urllib.parse.quote(str(ticket_id))}"
-        data_trip = json.dumps({"pagado": True}).encode()
-        req_trip = urllib.request.Request(url_trip, data=data_trip, headers=headers, method="PATCH")
-        try:
-            urllib.request.urlopen(req_trip, timeout=15)
-        except:
-            pass  # Si no hay tripletas, no importa el error
-        
         return jsonify({'status': 'ok', 'mensaje': 'Ticket pagado'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -874,12 +815,46 @@ def caja_agencia():
         
         for t in tickets:
             if t['agencia_id'] == session['user_id'] and not t['anulado']:
-                premio_ticket = calcular_premio_ticket(t)
+                if not t['pagado']:
+                    jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                    resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+                    resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+                    
+                    tiene_premio = False
+                    for j in jugadas:
+                        wa = resultados.get(j['hora'])
+                        if wa:
+                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                tiene_premio = True
+                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                sel = j['seleccion']
+                                num = int(wa)
+                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                   (sel == 'PAR' and num % 2 == 0) or \
+                                   (sel == 'IMPAR' and num % 2 != 0):
+                                    tiene_premio = True
+                    if tiene_premio:
+                        tickets_pendientes += 1
                 
                 if t['pagado']:
-                    premios += premio_ticket
-                elif premio_ticket > 0:
-                    tickets_pendientes += 1
+                    jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                    resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+                    resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+                    
+                    for j in jugadas:
+                        wa = resultados.get(j['hora'])
+                        if wa:
+                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                premios += calcular_premio_animal(j['monto'], wa)
+                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                sel = j['seleccion']
+                                num = int(wa)
+                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                   (sel == 'PAR' and num % 2 == 0) or \
+                                   (sel == 'IMPAR' and num % 2 != 0):
+                                    premios += j['monto'] * PAGO_ESPECIAL
         
         balance = ventas - premios - comision
         
@@ -934,7 +909,9 @@ def caja_historico():
             
             if dia_key not in dias_data:
                 dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0,
+                    'ventas': 0, 
+                    'tickets': 0, 
+                    'premios': 0,
                     'pendientes': 0
                 }
             
@@ -942,19 +919,53 @@ def caja_historico():
             dias_data[dia_key]['tickets'] += 1
             total_ventas += t['total']
             
-            premio_ticket = calcular_premio_ticket(t)
+            resultados_list = supabase_request("resultados", filters={"fecha": dia_key})
+            resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
             
             if t['pagado']:
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                premio_ticket = 0
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            premio_ticket += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            num = int(wa)
+                            sel = j['seleccion']
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                premio_ticket += j['monto'] * PAGO_ESPECIAL
+                
                 dias_data[dia_key]['premios'] += premio_ticket
                 total_premios += premio_ticket
-            elif premio_ticket > 0:
-                dias_data[dia_key]['pendientes'] += 1
-                tickets_pendientes_cobro.append({
-                    'serial': t['serial'],
-                    'fecha': t['fecha'],
-                    'monto': t['total'],
-                    'premio': round(premio_ticket, 2)
-                })
+            else:
+                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                tiene_premio = 0
+                for j in jugadas:
+                    wa = resultados.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            tiene_premio += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            sel = j['seleccion']
+                            num = int(wa)
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                tiene_premio += j['monto'] * PAGO_ESPECIAL
+                
+                if tiene_premio > 0:
+                    dias_data[dia_key]['pendientes'] += 1
+                    tickets_pendientes_cobro.append({
+                        'serial': t['serial'],
+                        'fecha': t['fecha'],
+                        'monto': t['total'],
+                        'premio': round(tiene_premio, 2)
+                    })
         
         resumen_dias = []
         for dia_key in sorted(dias_data.keys()):
@@ -1004,21 +1015,39 @@ def mis_tickets_pendientes():
         with urllib.request.urlopen(req, timeout=15) as response:
             tickets = json.loads(response.read().decode())
         
+        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        
         tickets_con_premio = []
         
         for t in tickets:
-            premio_total = calcular_premio_ticket(t)
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+            total_premio = 0
+            tiene_premio = False
             
-            if premio_total > 0:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-                
+            for j in jugadas:
+                wa = resultados.get(j['hora'])
+                if wa:
+                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                        total_premio += calcular_premio_animal(j['monto'], wa)
+                        tiene_premio = True
+                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                        sel = j['seleccion']
+                        num = int(wa)
+                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                           (sel == 'PAR' and num % 2 == 0) or \
+                           (sel == 'IMPAR' and num % 2 != 0):
+                            total_premio += j['monto'] * PAGO_ESPECIAL
+                            tiene_premio = True
+            
+            if tiene_premio:
                 tickets_con_premio.append({
                     'serial': t['serial'],
                     'fecha': t['fecha'],
                     'total': t['total'],
-                    'premio': round(premio_total, 2),
-                    'jugadas': len(jugadas) + len(tripletas)
+                    'premio': round(total_premio, 2),
+                    'jugadas': len(jugadas)
                 })
         
         return jsonify({
@@ -1097,7 +1126,7 @@ def guardar_resultado():
         if fecha == hoy:
             if not puede_editar_resultado(hora, fecha):
                 return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 6PM editable hasta 8PM).'
+                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 7PM editable hasta 9PM).'
                 }), 403
         
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
@@ -1223,83 +1252,6 @@ def admin_resultados_hoy():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/tripletas-hoy')
-@admin_required
-def tripletas_hoy():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        # Obtener todas las tripletas de hoy
-        url = f"{SUPABASE_URL}/rest/v1/tripletas?fecha=eq.{urllib.parse.quote(hoy)}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tripletas = json.loads(response.read().decode())
-        
-        if not tripletas:
-            return jsonify({'tripletas': [], 'total': 0, 'ganadoras': 0})
-        
-        # Obtener resultados del día
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        # Procesar cada tripleta
-        tripletas_procesadas = []
-        ganadoras = 0
-        
-        for trip in tripletas:
-            # Obtener info del ticket
-            tickets = supabase_request("tickets", filters={"id": trip['ticket_id']})
-            if not tickets:
-                continue
-            
-            ticket = tickets[0]
-            agencias = supabase_request("agencias", filters={"id": ticket['agencia_id']})
-            nombre_agencia = agencias[0]['nombre_agencia'] if agencias else 'Desconocida'
-            
-            # Verificar si ganó
-            nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-            nums_encontrados = []
-            
-            for hora, animal in resultados.items():
-                if animal in nums and animal not in nums_encontrados:
-                    nums_encontrados.append(animal)
-            
-            gano = len(nums_encontrados) == 3
-            if gano:
-                ganadoras += 1
-            
-            nombres_animales = [ANIMALES.get(n, n) for n in nums]
-            
-            tripletas_procesadas.append({
-                'id': trip['id'],
-                'serial': ticket['serial'],
-                'agencia': nombre_agencia,
-                'animal1': trip['animal1'],
-                'animal2': trip['animal2'],
-                'animal3': trip['animal3'],
-                'nombres': nombres_animales,
-                'monto': trip['monto'],
-                'premio': trip['monto'] * PAGO_TRIPLETA if gano else 0,
-                'gano': gano,
-                'salieron': nums_encontrados,
-                'pagado': trip.get('pagado', False)
-            })
-        
-        return jsonify({
-            'tripletas': tripletas_procesadas,
-            'total': len(tripletas_procesadas),
-            'ganadoras': ganadoras,
-            'total_premios': sum(t['premio'] for t in tripletas_procesadas)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/admin/reporte-agencias-rango', methods=['POST'])
 @admin_required
 def reporte_agencias_rango():
@@ -1382,11 +1334,10 @@ def reporte_agencias_rango():
             fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
             resultados_dia = resultados_por_dia.get(fecha_ticket, {})
             
+            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
             premio_teorico_ticket = 0
             tiene_premio = False
             
-            # Jugadas normales
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
             for j in jugadas:
                 wa = resultados_dia.get(j['hora'])
                 if wa:
@@ -1405,21 +1356,6 @@ def reporte_agencias_rango():
                             premio_jugada = j['monto'] * PAGO_ESPECIAL
                             premio_teorico_ticket += premio_jugada
                             tiene_premio = True
-            
-            # Tripletas
-            tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-            if tripletas:
-                for trip in tripletas:
-                    nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                    nums_encontrados = []
-                    
-                    for hora, animal in resultados_dia.items():
-                        if animal in nums and animal not in nums_encontrados:
-                            nums_encontrados.append(animal)
-                    
-                    if len(nums_encontrados) == 3:
-                        premio_teorico_ticket += trip['monto'] * PAGO_TRIPLETA
-                        tiene_premio = True
             
             stats['premios_teoricos'] += premio_teorico_ticket
             
@@ -1631,7 +1567,22 @@ def reporte_agencias():
             
             for t in tickets:
                 if t['agencia_id'] == ag['id'] and not t['anulado']:
-                    premio_ticket = calcular_premio_ticket(t)
+                    jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
+                    premio_ticket = 0
+                    
+                    for j in jugadas:
+                        wa = resultados.get(j['hora'])
+                        if wa:
+                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                premio_ticket += calcular_premio_animal(j['monto'], wa)
+                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                sel = j['seleccion']
+                                num = int(wa)
+                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                   (sel == 'PAR' and num % 2 == 0) or \
+                                   (sel == 'IMPAR' and num % 2 != 0):
+                                    premio_ticket += j['monto'] * PAGO_ESPECIAL
                     
                     if t['pagado']:
                         premios_pagados += premio_ticket
@@ -1817,10 +1768,23 @@ def estadisticas_rango():
             
             premios_dia = 0
             for ticket_id in datos['ids_tickets'][:50]:
-                t = next((tk for tk in tickets_rango if tk['id'] == ticket_id), None)
-                if t:
-                    premio_ticket = calcular_premio_ticket(t)
-                    premios_dia += premio_ticket
+                jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id})
+                ticket_info = next((t for t in tickets_rango if t['id'] == ticket_id), None)
+                
+                if ticket_info:
+                    for j in jugadas:
+                        wa = resultados_dia.get(j['hora'])
+                        if wa:
+                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                                premios_dia += calcular_premio_animal(j['monto'], wa)
+                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                                num = int(wa)
+                                sel = j['seleccion']
+                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                                   (sel == 'PAR' and num % 2 == 0) or \
+                                   (sel == 'IMPAR' and num % 2 != 0):
+                                    premios_dia += j['monto'] * PAGO_ESPECIAL
             
             comision_dia = datos['ventas'] * COMISION_AGENCIA
             balance_dia = datos['ventas'] - premios_dia - comision_dia
@@ -1991,7 +1955,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v6.0<br>Tripleta + Nuevos Horarios Perú
+            Sistema ZOOLO CASINO v5.9<br>Zona Horaria Perú + Consultas Agencia
         </div>
     </div>
 </body>
@@ -2356,13 +2320,6 @@ POS_HTML = '''
             transform: scale(1.05);
             z-index: 10;
         }
-        .animal-card.tripleta-seleccionado {
-            box-shadow: 0 0 15px rgba(255,215,0,0.9); 
-            border-color: #ffd700 !important;
-            background: linear-gradient(135deg, #4a3c00, #2a2000);
-            transform: scale(1.08);
-            z-index: 15;
-        }
         .animal-card .num { font-size: 1.2rem; font-weight: bold; line-height: 1; }
         .animal-card .name { font-size: 0.7rem; color: #aaa; line-height: 1; margin-top: 4px; font-weight: 500; }
         .animal-card.lechuza::after {
@@ -2518,41 +2475,9 @@ POS_HTML = '''
         .btn-resultados { background: #f39c12; color: black; }
         .btn-caja { background: #16a085; color: white; }
         .btn-pagar { background: #8e44ad; color: white; }
-        .btn-tripleta { 
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            font-weight: bold;
-            border: 2px solid #FFD700;
-            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
-        }
-        .btn-tripleta.active {
-            background: linear-gradient(135deg, #FFA500, #FF8C00);
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
-            transform: scale(0.95);
-        }
         .btn-anular { background: #c0392b; color: white; }
         .btn-borrar { background: #555; color: white; }
         .btn-salir { background: #333; color: white; grid-column: span 3; }
-        
-        .tripleta-info {
-            background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.1));
-            border: 2px solid #FFD700;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 0 10px 10px;
-            text-align: center;
-            color: #FFD700;
-            font-weight: bold;
-            display: none;
-        }
-        .tripleta-info.active {
-            display: block;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
-            50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
-        }
         
         .modal {
             display: none; 
@@ -2916,10 +2841,6 @@ POS_HTML = '''
         </div>
     </div>
     
-    <div class="tripleta-info" id="tripleta-banner">
-        🎯 MODO TRIPLETA: Selecciona 3 animalitos (Paga x50 si salen hoy)
-    </div>
-    
     <div class="main-container">
         <div class="left-panel">
             <div class="special-btns">
@@ -2956,7 +2877,6 @@ POS_HTML = '''
                 <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
                 <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
                 <button class="btn-pagar" onclick="pagar()">PAGAR</button>
-                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
                 <button class="btn-anular" onclick="anular()">ANULAR</button>
                 <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
                 <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
@@ -3140,7 +3060,6 @@ POS_HTML = '''
                     <option value="35">Animal Normal (00-39) x35</option>
                     <option value="70">Lechuza (40) x70</option>
                     <option value="2">Especial (Rojo/Negro/Par/Impar) x2</option>
-                    <option value="50">TRIPLETA x50</option>
                 </select>
             </div>
             
@@ -3189,13 +3108,6 @@ POS_HTML = '''
                     <li>Ejemplo: S/10 → S/700</li>
                 </ul>
                 
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 TRIPLETA (Nuevo)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Selecciona <strong>3 animalitos</strong></li>
-                    <li>Si salen los 3 durante el día (cualquier hora, cualquier orden): <strong style="color: #ffd700;">x50</strong></li>
-                    <li>Ejemplo: S/10 → S/500</li>
-                </ul>
-                
                 <h4 style="color: #ffd700; margin: 15px 0;">🎲 Especiales</h4>
                 <ul style="margin-left: 20px; margin-bottom: 20px;">
                     <li>Rojo, Negro, Par, Impar</li>
@@ -3207,7 +3119,6 @@ POS_HTML = '''
                     <li>Anular: Solo dentro de 5 minutos</li>
                     <li>Bloqueo: 5 minutos antes del sorteo</li>
                     <li>Vencimiento: Tickets vencen a los 3 días</li>
-                    <li>Horarios: 8AM a 6PM hora Perú (11 sorteos)</li>
                 </ul>
             </div>
         </div>
@@ -3222,7 +3133,7 @@ POS_HTML = '''
             
             <div style="line-height: 1.8; color: #ddd;">
                 <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
-                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta Normal</h4>
+                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta</h4>
                     <ol style="margin-left: 20px; color: #aaa;">
                         <li>Selecciona el monto (arriba a la derecha)</li>
                         <li>Toca los animales que quieres jugar</li>
@@ -3233,23 +3144,22 @@ POS_HTML = '''
                     </ol>
                 </div>
                 
-                <div style="background: rgba(255,165,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #FFA500;">
-                    <h4 style="color: #FFA500; margin-bottom: 10px;">2. Hacer una Tripleta</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón 🎯 TRIPLETA (se pone dorado)</li>
-                        <li>Selecciona exactamente 3 animalitos</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>La tripleta gana si salen los 3 números en cualquier momento del día</li>
-                    </ol>
-                </div>
-                
                 <div style="background: rgba(39,174,96,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
-                    <h4 style="color: #27ae60; margin-bottom: 10px;">3. Pagar un Ticket Ganador</h4>
+                    <h4 style="color: #27ae60; margin-bottom: 10px;">2. Pagar un Ticket Ganador</h4>
                     <ol style="margin-left: 20px; color: #aaa;">
                         <li>Presiona el botón PAGAR</li>
                         <li>Ingresa el SERIAL del ticket</li>
                         <li>Verifica el monto ganado</li>
                         <li>Confirma el pago</li>
+                    </ol>
+                </div>
+                
+                <div style="background: rgba(192,57,43,0.1); padding: 15px; border-radius: 10px; border-left: 4px solid #c0392b;">
+                    <h4 style="color: #c0392b; margin-bottom: 10px;">3. Anular un Ticket</h4>
+                    <ol style="margin-left: 20px; color: #aaa;">
+                        <li>Solo puedes anular dentro de 5 minutos</li>
+                        <li>Presiona ANULAR e ingresa el serial</li>
+                        <li>No se pueden anular tickets pagados</li>
                     </ol>
                 </div>
             </div>
@@ -3266,17 +3176,16 @@ POS_HTML = '''
             <div style="padding: 20px;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
                 <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 6.0 - Tripleta</p>
+                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 5.9.1</p>
                 
                 <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
                     <p style="color: #ffd700; margin: 0; line-height: 1.8;">
                         Sistema de Lotería Animal<br>
-                        Zona Horaria: Perú (UTC-5)<br>
-                        Nuevos Horarios: 8AM - 6PM (11 sorteos)<br><br>
-                        <strong>Novedades v6.0:</strong><br>
-                        ✓ Apuesta Tripleta (x50)<br>
-                        ✓ Horarios actualizados<br>
-                        ✓ 11 sorteos diarios
+                        Zona Horaria: Perú (UTC-5)<br><br>
+                        <strong>Correcciones v5.9.1:</strong><br>
+                        ✓ Estabilidad de conexión<br>
+                        ✓ Historial funcional<br>
+                        ✓ Manejo de errores mejorado
                     </p>
                 </div>
                 
@@ -3289,9 +3198,8 @@ POS_HTML = '''
     </div>
 
     <script>
+        // CORRECCIÓN: Definir variables con valores por defecto seguros
         let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
-        let modoTripleta = false;
-        let seleccionTripleta = [];
         let horasPeru = JSON.parse('{{ horarios_peru | tojson | safe }}');
         let horasVen = JSON.parse('{{ horarios_venezuela | tojson | safe }}');
         
@@ -3330,31 +3238,10 @@ POS_HTML = '''
             }, 3000);
         }
         
-        function toggleModoTripleta() {
-            modoTripleta = !modoTripleta;
-            const btn = document.getElementById('btn-tripleta');
-            const banner = document.getElementById('tripleta-banner');
-            
-            if (modoTripleta) {
-                btn.classList.add('active');
-                banner.classList.add('active');
-                seleccionTripleta = [];
-                showToast('Modo Tripleta activado: Selecciona 3 animalitos', 'info');
-            } else {
-                btn.classList.remove('active');
-                banner.classList.remove('active');
-                seleccionTripleta = [];
-                // Limpiar selección visual
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
-                });
-            }
-            updateTicket();
-        }
-        
         function updateReloj() {
             try {
                 let now = new Date();
+                // Usar la hora de Perú directamente
                 let peruTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Lima"}));
                 document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {
                     hour: '2-digit', 
@@ -3365,6 +3252,7 @@ POS_HTML = '''
                 
                 let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
                 
+                // Verificar que horasPeru esté definido
                 if (typeof horasPeru === 'undefined' || !Array.isArray(horasPeru)) {
                     console.error('horasPeru no está definido correctamente');
                     return;
@@ -3396,44 +3284,20 @@ POS_HTML = '''
         setTimeout(updateReloj, 1000);
         
         function toggleAni(k, nombre) {
-            if (modoTripleta) {
-                // Lógica de tripleta: máximo 3, toggle individual
-                let idx = seleccionTripleta.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                
-                if (idx >= 0) {
-                    seleccionTripleta.splice(idx, 1);
-                    el.classList.remove('tripleta-seleccionado');
-                } else {
-                    if (seleccionTripleta.length >= 3) {
-                        showToast('Solo puedes seleccionar 3 animalitos para la tripleta', 'error');
-                        return;
-                    }
-                    seleccionTripleta.push({k, nombre});
-                    el.classList.add('tripleta-seleccionado');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }
+            let idx = seleccionados.findIndex(a => a.k === k);
+            let el = document.getElementById('ani-' + k);
+            if (idx >= 0) {
+                seleccionados.splice(idx, 1);
+                el.classList.remove('active');
             } else {
-                // Lógica normal
-                let idx = seleccionados.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                if (idx >= 0) {
-                    seleccionados.splice(idx, 1);
-                    el.classList.remove('active');
-                } else {
-                    seleccionados.push({k, nombre});
-                    el.classList.add('active');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }
+                seleccionados.push({k, nombre});
+                el.classList.add('active');
+                if (navigator.vibrate) navigator.vibrate(50);
             }
             updateTicket();
         }
         
         function toggleEsp(tipo) {
-            if (modoTripleta) {
-                showToast('No puedes jugar especiales en modo Tripleta', 'error');
-                return;
-            }
             let idx = especiales.indexOf(tipo);
             let el = document.querySelector('.btn-' + tipo.toLowerCase());
             if (idx >= 0) {
@@ -3447,10 +3311,6 @@ POS_HTML = '''
         }
         
         function toggleHora(hora, id) {
-            if (modoTripleta) {
-                showToast('Las tripletas no necesitan horario (válidas todo el día)', 'info');
-                return;
-            }
             let btn = document.getElementById('hora-' + id);
             if (btn.classList.contains('expired')) {
                 showToast('Este sorteo ya cerró', 'error');
@@ -3473,30 +3333,17 @@ POS_HTML = '''
             let html = '<table class="ticket-table"><thead><tr><th>Hora</th><th>Apuesta</th><th>S/</th></tr></thead><tbody>';
             
             for (let item of carrito) {
-                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : 
-                         item.tipo === 'tripleta' ? 'TRIP' : item.seleccion;
-                let color = item.tipo === 'animal' ? '#ffd700' : 
-                           item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
-                let horaTxt = item.tipo === 'tripleta' ? 'Todo el día' : item.hora;
+                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : item.seleccion;
+                let color = item.tipo === 'animal' ? '#ffd700' : '#3498db';
                 html += `<tr>
-                    <td style="color:#aaa; font-size:0.75rem">${horaTxt}</td>
+                    <td style="color:#aaa; font-size:0.75rem">${item.hora}</td>
                     <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
                     <td style="text-align:right; font-weight:bold">${item.monto}</td>
                 </tr>`;
                 total += item.monto;
             }
             
-            // Mostrar selección actual si hay algo pendiente
-            if (modoTripleta && seleccionTripleta.length > 0) {
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                html += `<tr style="opacity:0.8; background:rgba(255,165,0,0.2)">
-                    <td style="color:#FFA500; font-size:0.75rem">Todo el día</td>
-                    <td style="color:#FFA500; font-size:0.8rem">🎯 ${nums} (${nombres})</td>
-                    <td style="text-align:right; color:#FFA500; font-weight:bold">${monto}</td>
-                </tr>`;
-            } else if (!modoTripleta && horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
+            if (horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
                 for (let h of horariosSel) {
                     for (let a of seleccionados) {
@@ -3519,8 +3366,7 @@ POS_HTML = '''
             
             html += '</tbody></table>';
             
-            if (carrito.length === 0 && 
-                (seleccionados.length === 0 && especiales.length === 0 && seleccionTripleta.length === 0)) {
+            if (carrito.length === 0 && (seleccionados.length === 0 && especiales.length === 0)) {
                 html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
             } else if (carrito.length === 0) {
                 html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
@@ -3534,34 +3380,6 @@ POS_HTML = '''
         }
         
         function agregar() {
-            if (modoTripleta) {
-                if (seleccionTripleta.length !== 3) {
-                    showToast('Debes seleccionar exactamente 3 animalitos para la tripleta', 'error');
-                    return;
-                }
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                
-                carrito.push({
-                    hora: 'Todo el día', 
-                    seleccion: nums, 
-                    nombre: nombres, 
-                    monto: monto, 
-                    tipo: 'tripleta'
-                });
-                
-                // Limpiar selección
-                seleccionTripleta = [];
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
-                });
-                
-                showToast('Tripleta agregada al ticket', 'success');
-                updateTicket();
-                return;
-            }
-            
             if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
                 showToast('Selecciona horario y animal/especial', 'error'); 
                 return;
@@ -3889,7 +3707,7 @@ POS_HTML = '''
                 
                 d.jugadas.forEach(j => {
                     let ganoClass = j.gano ? 'jugada-ganadora' : '';
-                    let resultadoText = j.resultado ? `${j.resultado}` : 'Pendiente';
+                    let resultadoText = j.resultado ? `${j.resultado} (${j.nombre_seleccion})` : 'Pendiente';
                     
                     html += `
                         <div class="jugada-detail ${ganoClass}">
@@ -4051,6 +3869,12 @@ POS_HTML = '''
                 let msg = "=== RESULTADO ===\\n\\n";
                 let total = d.total_ganado;
                 
+                for (let det of d.detalles) {
+                    let premioTxt = det.gano ? ('S/' + det.premio.toFixed(2)) : 'No';
+                    let especial = det.es_lechuza ? ' 🦉x70!' : '';
+                    msg += det.hora + " | " + det.sel + " -> " + premioTxt + especial + "\\n";
+                }
+                
                 msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
                 
                 if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
@@ -4092,15 +3916,11 @@ POS_HTML = '''
         }
         
         function borrarTodo() {
-            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0 || seleccionTripleta.length > 0) {
+            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0) {
                 if (!confirm('¿Borrar todo?')) return;
             }
-            seleccionados = []; especiales = []; horariosSel = []; carrito = []; seleccionTripleta = [];
-            document.querySelectorAll('.active, .tripleta-seleccionado').forEach(el => {
-                el.classList.remove('active');
-                el.classList.remove('tripleta-seleccionado');
-            });
-            if (modoTripleta) toggleModoTripleta();
+            seleccionados = []; especiales = []; horariosSel = []; carrito = [];
+            document.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
             updateTicket();
             showToast('Ticket limpiado', 'info');
         }
@@ -4319,17 +4139,6 @@ ADMIN_HTML = '''
             cursor: pointer; 
             font-weight: bold; 
             font-size: 0.95rem;
-        }
-        .btn-tripleta {
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-            border: 2px solid #FFD700;
         }
         
         .table-container {
@@ -4568,82 +4377,6 @@ ADMIN_HTML = '''
         .premio-pagado { background: #27ae60; color: white; }
         .premio-pendiente { background: #f39c12; color: black; }
         .premio-total { background: #2980b9; color: white; }
-        
-        .tripleta-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            border: 2px solid #FFD700;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-            position: relative;
-        }
-        .tripleta-card.ganadora {
-            background: linear-gradient(135deg, rgba(39,174,96,0.2), #1a1a2e);
-            border-color: #27ae60;
-        }
-        .tripleta-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .tripleta-serial {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        .tripleta-agencia {
-            color: #888;
-            font-size: 0.85rem;
-        }
-        .tripleta-animales {
-            display: flex;
-            gap: 10px;
-            margin: 15px 0;
-            justify-content: center;
-        }
-        .tripleta-animal {
-            background: #000;
-            border: 2px solid #FFD700;
-            border-radius: 10px;
-            padding: 10px 15px;
-            text-align: center;
-            min-width: 80px;
-        }
-        .tripleta-animal .num {
-            color: #FFD700;
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-        .tripleta-animal .name {
-            color: #aaa;
-            font-size: 0.75rem;
-            margin-top: 4px;
-        }
-        .tripleta-monto {
-            text-align: center;
-            margin-top: 10px;
-            color: #aaa;
-        }
-        .tripleta-premio {
-            text-align: center;
-            color: #27ae60;
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .tripleta-estado {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-        .estado-ganadora { background: #27ae60; color: white; }
-        .estado-pendiente { background: #666; color: white; }
-        .estado-pagada { background: #2980b9; color: white; }
     </style>
 </head>
 <body>
@@ -4685,7 +4418,6 @@ ADMIN_HTML = '''
         <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
         <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
         <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
-        <button class="admin-tab" onclick="showTab('tripletas')">🎯 Tripletas</button>
         <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
         <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
         <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
@@ -4696,11 +4428,11 @@ ADMIN_HTML = '''
         <div id="mensaje" class="mensaje"></div>
         
         <div class="info-pago">
-            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x50
+            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2
         </div>
         
         <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 6PM hasta 8PM).
+            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 7PM hasta 9PM).
         </div>
         
         <div id="dashboard" class="tab-content active">
@@ -4716,7 +4448,6 @@ ADMIN_HTML = '''
                 <h3>⚡ ACCIONES RÁPIDAS</h3>
                 <div class="btn-group">
                     <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
-                    <button class="btn-tripleta" onclick="showTab('tripletas')">🎯 Ver Tripletas</button>
                     <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
                     <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
                 </div>
@@ -4750,32 +4481,6 @@ ADMIN_HTML = '''
                 <small style="color: #ff6b6b;">
                     ⚠️ El riesgo se resetea automáticamente cuando cambia el sorteo.
                 </small>
-            </div>
-        </div>
-
-        <div id="tripletas" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">🎯 TRIPLETAS DE HOY</h3>
-            <div class="form-box">
-                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn-tripleta" onclick="cargarTripletas()">🔄 Actualizar</button>
-                </div>
-                <div class="stats-grid" style="margin-bottom: 20px;">
-                    <div class="stat-card" style="border-color: #FFD700;">
-                        <h3>TOTAL TRIPLETAS</h3>
-                        <p id="trip-total" style="color: #FFD700;">0</p>
-                    </div>
-                    <div class="stat-card" style="border-color: #27ae60;">
-                        <h3>GANADORAS</h3>
-                        <p id="trip-ganadoras" style="color: #27ae60;">0</p>
-                    </div>
-                    <div class="stat-card" style="border-color: #c0392b;">
-                        <h3>PREMIOS</h3>
-                        <p id="trip-premios" style="color: #c0392b;">S/0</p>
-                    </div>
-                </div>
-                <div id="lista-tripletas" style="max-height: 600px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Cargando tripletas...</p>
-                </div>
             </div>
         </div>
 
@@ -4866,7 +4571,7 @@ ADMIN_HTML = '''
             <div class="form-box">
                 <h3>📋 RESULTADOS CARGADOS</h3>
                 <div class="timezone-info">
-                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 6PM hasta 8PM hora Perú).
+                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 7PM hasta 9PM hora Perú).
                 </div>
                 <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
                     <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
@@ -5008,9 +4713,6 @@ ADMIN_HTML = '''
                 cargarAgenciasSelect();
                 cargarRiesgo();
             }
-            if (tab === 'tripletas') {
-                cargarTripletas();
-            }
             if (tab === 'reporte') {
                 let hoy = new Date().toISOString().split('T')[0];
                 document.getElementById('reporte-fecha-inicio').value = hoy;
@@ -5122,72 +4824,6 @@ ADMIN_HTML = '''
 
         function cambiarAgenciaRiesgo() {
             cargarRiesgo();
-        }
-
-        function cargarTripletas() {
-            fetch('/admin/tripletas-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                document.getElementById('trip-total').textContent = d.total;
-                document.getElementById('trip-ganadoras').textContent = d.ganadoras;
-                document.getElementById('trip-premios').textContent = 'S/' + d.total_premios.toFixed(2);
-                
-                let container = document.getElementById('lista-tripletas');
-                
-                if (!d.tripletas || d.tripletas.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tripletas jugadas hoy</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tripletas.forEach(trip => {
-                    let claseGanadora = trip.gano ? 'ganadora' : '';
-                    let estadoClass = trip.pagado ? 'estado-pagada' : (trip.gano ? 'estado-ganadora' : 'estado-pendiente');
-                    let estadoText = trip.pagado ? 'PAGADA' : (trip.gano ? 'GANADORA' : 'EN JUEGO');
-                    
-                    html += `
-                        <div class="tripleta-card ${claseGanadora}">
-                            <div class="tripleta-estado ${estadoClass}">${estadoText}</div>
-                            <div class="tripleta-header">
-                                <div>
-                                    <div class="tripleta-serial">#${trip.serial}</div>
-                                    <div class="tripleta-agencia">${trip.agencia}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-animales">
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal1}</div>
-                                    <div class="name">${trip.nombres[0]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal2}</div>
-                                    <div class="name">${trip.nombres[1]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal3}</div>
-                                    <div class="name">${trip.nombres[2]}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-monto">
-                                Apostado: S/${trip.monto} | Paga x50
-                            </div>
-                            ${trip.gano ? `<div class="tripleta-premio">💰 Premio: S/${trip.premio}</div>` : ''}
-                            ${!trip.gano && trip.salieron.length > 0 ? `<div style="text-align: center; color: #f39c12; margin-top: 5px;">Han salido: ${trip.salieron.join(', ')}</div>` : ''}
-                        </div>
-                    `;
-                });
-                
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando tripletas', 'error');
-            });
         }
 
         function pagarTicketAdmin() {
@@ -5336,10 +4972,6 @@ ADMIN_HTML = '''
                         cargarResultadosAdminFecha();
                     } else {
                         cargarResultadosAdmin();
-                    }
-                    // Recargar tripletas si estamos en esa pestaña
-                    if (document.getElementById('tripletas').classList.contains('active')) {
-                        cargarTripletas();
                     }
                 } else {
                     showMensaje(d.error || 'Error al guardar', 'error');
@@ -5815,13 +5447,13 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v6.0 - CON TRIPLETAS")
-    print("  NUEVOS HORARIOS: 8AM-6PM (11 sorteos)")
+    print("  ZOOLO CASINO CLOUD v5.9.1 - CORREGIDO")
+    print("  CONSULTAS AGENCIA + ZONA HORARIA PERÚ")
     print("=" * 60)
-    print("  ✓ Botón Tripleta dorado en interfaz")
-    print("  ✓ Pago 1 por 50 si salen los 3 números")
-    print("  ✓ Panel de tripletas en administrador")
-    print("  ✓ Horarios actualizados Perú/Venezuela")
+    print("  ✓ Zona horaria Perú (UTC-5) corregida")
+    print("  ✓ Estabilidad de JavaScript mejorada")
+    print("  ✓ Manejo de errores robusto")
+    print("  ✓ Historial de resultados funcional")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
