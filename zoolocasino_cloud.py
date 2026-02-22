@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v7.0 - CORRECCIONES COMPLETAS
+ZOOLO CASINO CLOUD v7.1 - CORRECCIONES COMPLETAS
 ✓ Reportes históricos funcionando correctamente
 ✓ Límite aumentado a 5000 tickets
 ✓ Reimpresión de tickets funcional
@@ -8,7 +8,8 @@ ZOOLO CASINO CLOUD v7.0 - CORRECCIONES COMPLETAS
 ✓ Decimales funcionando en tickets (0.5, 1.5, etc.)
 ✓ Tickets vendidos aparecen inmediatamente
 ✓ Anulación funcional con validaciones correctas
-✓ Estados: todos, pagados, pendientes, anulados, por_pagar
+✓ Estados: todos, activos, pagados, pendientes, anulados, por_pagar
+✓ Resultados cargan y editan correctamente
 """
 
 import os
@@ -36,7 +37,7 @@ PAGO_LECHUZA = 70
 PAGO_ESPECIAL = 2           
 PAGO_TRIPLETA = 60          
 COMISION_AGENCIA = 0.15
-MINUTOS_BLOQUEO = 3
+MINUTOS_BLOQUEO = 5
 HORAS_EDICION_RESULTADO = 2
 
 # ==================== NUEVOS HORARIOS ACTUALIZADOS ====================
@@ -61,7 +62,7 @@ ANIMALES = {
     "23": "Cebra", "24": "Iguana", "25": "Gallina", "26": "Vaca",
     "27": "Perro", "28": "Zamuro", "29": "Elefante", "30": "Caiman",
     "31": "Lapa", "32": "Ardilla", "33": "Pescado", "34": "Venado",
-    "35": "Jirafa", "36": "Culebra", "37": "Avispa", "38": "Conejo",
+    "35": "Jirafa", "36": "Culebra", "37": "Aviapa", "38": "Conejo",
     "39": "Tortuga", "40": "Lechuza"
 }
 
@@ -127,6 +128,7 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
+# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
 def hora_a_minutos(hora_str):
     """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
@@ -147,6 +149,10 @@ def hora_a_minutos(hora_str):
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
     ahora = ahora_peru()
     hoy = ahora.strftime("%d/%m/%Y")
+    
+    # Si es fecha diferente a hoy, permitir edición siempre
+    if fecha_str and fecha_str != hoy:
+        return True
     
     minutos_sorteo = hora_a_minutos(hora_sorteo)
     minutos_actual = ahora.hour * 60 + ahora.minute
@@ -183,6 +189,7 @@ def obtener_proximo_sorteo():
     
     return HORARIOS_PERU[0]
 
+# ==================== FUNCION SUPABASE MEJORADA CON LIMITE 5000 ====================
 def supabase_request(table, method="GET", data=None, filters=None, timeout=30, limit=None):
     """Función mejorada para consultas a Supabase con soporte para límites"""
     url = f"{SUPABASE_URL}/rest/v1/{table}"
@@ -400,15 +407,17 @@ def resultados_fecha():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# CORREGIDO: Función para formatear montos con decimales
+# ==================== FUNCION PARA FORMATEAR MONTOS CON DECIMALES ====================
 def formatear_monto(monto):
-    """Formatea el monto mostrando enteros o decimales según corresponda"""
+    """Formatea el monto mostrando decimales correctamente (0.5, 1.5, etc.)"""
     try:
-        monto = float(monto)
-        if monto == int(monto):
-            return str(int(monto))
+        monto_float = float(monto)
+        # Si es entero, mostrar sin decimales
+        if monto_float == int(monto_float):
+            return str(int(monto_float))
         else:
-            return str(monto)
+            # Mostrar con 1 decimal si tiene decimales
+            return f"{monto_float:.1f}"
     except:
         return str(monto)
 
@@ -502,7 +511,7 @@ def procesar_venta():
             for j in jugadas_hora:
                 if j['tipo'] == 'animal':
                     nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
-                    # CORREGIDO: Usar formatear_monto para mostrar decimales
+                    # CORREGIDO: Usar formatear_monto para decimales
                     monto_str = formatear_monto(j['monto'])
                     texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{monto_str}")
                 else:
@@ -513,7 +522,7 @@ def procesar_venta():
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")
         
-        # Agregar tripletas al ticket de texto - CORREGIDO: Mostrar decimales
+        # Agregar tripletas al ticket de texto
         tripletas_en_ticket = [j for j in jugadas if j['tipo'] == 'tripleta']
         if tripletas_en_ticket:
             lineas.append("*TRIPLETAS (Paga x60)*")
@@ -525,7 +534,7 @@ def procesar_venta():
             lineas.append("")
         
         lineas.append("------------------------")
-        # CORREGIDO: Total también con decimales si aplica
+        # CORREGIDO: Mostrar total con decimales si aplica
         total_str = formatear_monto(total)
         lineas.append(f"*TOTAL: S/{total_str}*")
         lineas.append("")
@@ -546,7 +555,7 @@ def procesar_venta():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
+# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS - CORREGIDAS ====================
 
 @app.route('/api/mis-tickets', methods=['POST'])
 @agencia_required
@@ -557,7 +566,7 @@ def mis_tickets():
         fecha_fin = data.get('fecha_fin')
         estado = data.get('estado', 'todos')
         
-        # Consultar tickets con límite aumentado a 5000
+        # CORREGIDO: Usar límite 5000 en lugar de 500
         filters = {"agencia_id": session['user_id']}
         all_tickets = supabase_request("tickets", filters=filters, limit=5000)
         
@@ -578,7 +587,7 @@ def mis_tickets():
             if dt_fin and dt_ticket > dt_fin:
                 continue
             
-            # Filtrar por estado
+            # CORREGIDO: Filtros de estado mejorados
             if estado == 'pagados' and not t.get('pagado'):
                 continue
             if estado == 'pendientes' and t.get('pagado'):
@@ -587,6 +596,13 @@ def mis_tickets():
                 continue
             if estado == 'activos' and t.get('anulado'):
                 continue
+            # Para 'todos', mostrar todo incluyendo anulados
+            if estado == 'todos':
+                pass  # No filtrar nada
+            elif estado not in ['todos', 'pagados', 'pendientes', 'anulados', 'activos', 'por_pagar']:
+                # Si no es anulado y estado no reconocido, mostrar solo activos
+                if t.get('anulado'):
+                    continue
                 
             tickets_filtrados.append(t)
         
@@ -608,8 +624,8 @@ def mis_tickets():
         total_ventas = sum(t['total'] for t in tickets_filtrados)
         total_tickets = len(tickets_filtrados)
         
-        # Limitar a 100 para no sobrecargar la respuesta
-        tickets_respuesta = tickets_filtrados[:100]
+        # CORREGIDO: Aumentar a 200 tickets en respuesta
+        tickets_respuesta = tickets_filtrados[:200]
         
         return jsonify({
             'status': 'ok',
@@ -639,22 +655,21 @@ def calcular_premio_ticket(ticket):
         
         # Jugadas normales
         jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-        if jugadas:
-            for j in jugadas:
-                wa = resultados.get(j['hora'])
-                if wa:
-                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                        total_premio += calcular_premio_animal(j['monto'], wa)
-                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                        sel = j['seleccion']
-                        num = int(wa)
-                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                           (sel == 'PAR' and num % 2 == 0) or \
-                           (sel == 'IMPAR' and num % 2 != 0):
-                            total_premio += j['monto'] * PAGO_ESPECIAL
+        for j in jugadas:
+            wa = resultados.get(j['hora'])
+            if wa:
+                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                    total_premio += calcular_premio_animal(j['monto'], wa)
+                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                    sel = j['seleccion']
+                    num = int(wa)
+                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                       (sel == 'PAR' and num % 2 == 0) or \
+                       (sel == 'IMPAR' and num % 2 != 0):
+                        total_premio += j['monto'] * PAGO_ESPECIAL
         
-        # Tripletas - CORREGIDO: Usa PAGO_TRIPLETA (60)
+        # Tripletas
         tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
         if tripletas:
             for trip in tripletas:
@@ -699,39 +714,38 @@ def consultar_ticket_detalle():
         total_premio = 0
         
         # Procesar jugadas normales
-        if jugadas:
-            for j in jugadas:
-                wa = resultados.get(j['hora'])
-                premio = 0
-                gano = False
-                
-                if wa:
-                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                        premio = calcular_premio_animal(j['monto'], wa)
+        for j in jugadas:
+            wa = resultados.get(j['hora'])
+            premio = 0
+            gano = False
+            
+            if wa:
+                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                    premio = calcular_premio_animal(j['monto'], wa)
+                    gano = True
+                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                    sel = j['seleccion']
+                    num = int(wa)
+                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                       (sel == 'PAR' and num % 2 == 0) or \
+                       (sel == 'IMPAR' and num % 2 != 0):
+                        premio = j['monto'] * PAGO_ESPECIAL
                         gano = True
-                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                        sel = j['seleccion']
-                        num = int(wa)
-                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                           (sel == 'PAR' and num % 2 == 0) or \
-                           (sel == 'IMPAR' and num % 2 != 0):
-                            premio = j['monto'] * PAGO_ESPECIAL
-                            gano = True
-                
-                if gano:
-                    total_premio += premio
-                
-                jugadas_detalle.append({
-                    'hora': j['hora'],
-                    'tipo': j['tipo'],
-                    'seleccion': j['seleccion'],
-                    'nombre_seleccion': ANIMALES.get(j['seleccion'], j['seleccion']) if j['tipo'] == 'animal' else j['seleccion'],
-                    'monto': j['monto'],
-                    'resultado': wa,
-                    'gano': gano,
-                    'premio': round(premio, 2) if gano else 0
-                })
+            
+            if gano:
+                total_premio += premio
+            
+            jugadas_detalle.append({
+                'hora': j['hora'],
+                'tipo': j['tipo'],
+                'seleccion': j['seleccion'],
+                'nombre_seleccion': ANIMALES.get(j['seleccion'], j['seleccion']) if j['tipo'] == 'animal' else j['seleccion'],
+                'monto': j['monto'],
+                'resultado': wa,
+                'gano': gano,
+                'premio': round(premio, 2) if gano else 0
+            })
         
         # Procesar tripletas - CORREGIDO: Mostrar detalles completos
         tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
@@ -780,129 +794,11 @@ def consultar_ticket_detalle():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/verificar-ticket', methods=['POST'])
-@login_required
-def verificar_ticket():
-    try:
-        serial = request.json.get('serial')
-        
-        tickets = supabase_request("tickets", filters={"serial": serial})
-        if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no existe'})
-        
-        ticket = tickets[0]
-        
-        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
-            return jsonify({'error': 'No autorizado para ver este ticket'})
-        
-        if ticket['anulado']:
-            return jsonify({'error': 'TICKET ANULADO'})
-        if ticket['pagado']:
-            return jsonify({'error': 'YA FUE PAGADO'})
-        
-        total_ganado = calcular_premio_ticket(ticket)
-        
-        return jsonify({
-            'status': 'ok',
-            'ticket_id': ticket['id'],
-            'total_ganado': total_ganado,
-            'detalles': []
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/pagar-ticket', methods=['POST'])
-@agencia_required
-def pagar_ticket():
-    try:
-        ticket_id = request.json.get('ticket_id')
-        
-        # Marcar ticket como pagado
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = json.dumps({"pagado": True}).encode()
-        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-        urllib.request.urlopen(req, timeout=15)
-        
-        # Marcar tripletas como pagadas también
-        url_trip = f"{SUPABASE_URL}/rest/v1/tripletas?ticket_id=eq.{urllib.parse.quote(str(ticket_id))}"
-        data_trip = json.dumps({"pagado": True}).encode()
-        req_trip = urllib.request.Request(url_trip, data=data_trip, headers=headers, method="PATCH")
-        try:
-            urllib.request.urlopen(req_trip, timeout=15)
-        except:
-            pass
-        
-        return jsonify({'status': 'ok', 'mensaje': 'Ticket pagado'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# CORREGIDO: Lógica de anulación mejorada
-@app.route('/api/anular-ticket', methods=['POST'])
-@login_required
-def anular_ticket():
-    try:
-        serial = request.json.get('serial')
-        tickets = supabase_request("tickets", filters={"serial": serial})
-        if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no existe'})
-        
-        ticket = tickets[0]
-        
-        # Verificar permisos: Admin puede anular cualquiera, agencia solo la suya
-        if not session.get('es_admin'):
-            if ticket['agencia_id'] != session['user_id']:
-                return jsonify({'error': 'No autorizado. Solo puedes anular tickets de tu agencia'})
-        
-        if ticket['pagado']:
-            return jsonify({'error': 'Ya esta pagado, no se puede anular'})
-        
-        if ticket['anulado']:
-            return jsonify({'error': 'Este ticket ya fue anulado anteriormente'})
-        
-        # Validaciones de tiempo para agencias (admin puede anular sin límite de tiempo)
-        if not session.get('es_admin'):
-            fecha_ticket = parse_fecha_ticket(ticket['fecha'])
-            if not fecha_ticket:
-                return jsonify({'error': 'Error en fecha del ticket'})
-            
-            # Verificar que no hayan pasado más de 5 minutos desde la creación
-            minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
-            if minutos_transcurridos > 5:
-                return jsonify({'error': f'No puede anular después de 5 minutos. Han pasado {int(minutos_transcurridos)} minutos'})
-            
-            # Verificar que el sorteo no haya iniciado (para jugadas normales)
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-            if jugadas:
-                for j in jugadas:
-                    if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
-                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró o está por iniciar'})
-        
-        # Proceder a anular
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = json.dumps({"anulado": True}).encode()
-        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-        urllib.request.urlopen(req, timeout=15)
-        
-        return jsonify({'status': 'ok', 'mensaje': f'Ticket #{serial} anulado correctamente'})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# NUEVO: Endpoint para reimprimir ticket - CORREGIDO
+# ==================== NUEVO ENDPOINT: REIMPRIMIR TICKET ====================
 @app.route('/api/reimprimir-ticket', methods=['POST'])
 @login_required
 def reimprimir_ticket():
+    """Reimprime un ticket existente generando el texto para WhatsApp nuevamente"""
     try:
         data = request.get_json()
         serial = data.get('serial')
@@ -921,7 +817,7 @@ def reimprimir_ticket():
         if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
             return jsonify({'error': 'No autorizado para reimprimir este ticket'})
         
-        if ticket['anulado']:
+        if ticket.get('anulado'):
             return jsonify({'error': 'No se puede reimprimir: Ticket anulado'})
         
         # Obtener jugadas
@@ -998,13 +894,142 @@ def reimprimir_ticket():
         
         return jsonify({
             'status': 'ok',
-            'url_whatsapp': url_whatsapp,
+            'mensaje': 'Ticket listo para reimprimir',
             'ticket': {
-                'serial': serial,
+                'id': ticket['id'],
+                'serial': ticket['serial'],
+                'fecha': ticket['fecha'],
                 'total': ticket['total'],
-                'fecha': ticket['fecha']
-            }
+                'pagado': ticket.get('pagado', False),
+                'anulado': ticket.get('anulado', False)
+            },
+            'texto_ticket': texto_whatsapp,
+            'url_whatsapp': url_whatsapp
         })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/verificar-ticket', methods=['POST'])
+@login_required
+def verificar_ticket():
+    try:
+        serial = request.json.get('serial')
+        
+        tickets = supabase_request("tickets", filters={"serial": serial})
+        if not tickets or len(tickets) == 0:
+            return jsonify({'error': 'Ticket no existe'})
+        
+        ticket = tickets[0]
+        
+        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
+            return jsonify({'error': 'No autorizado para ver este ticket'})
+        
+        if ticket.get('anulado'):
+            return jsonify({'error': 'TICKET ANULADO'})
+        if ticket.get('pagado'):
+            return jsonify({'error': 'YA FUE PAGADO'})
+        
+        total_ganado = calcular_premio_ticket(ticket)
+        
+        return jsonify({
+            'status': 'ok',
+            'ticket_id': ticket['id'],
+            'total_ganado': total_ganado,
+            'detalles': []
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pagar-ticket', methods=['POST'])
+@agencia_required
+def pagar_ticket():
+    try:
+        ticket_id = request.json.get('ticket_id')
+        
+        # Marcar ticket como pagado
+        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = json.dumps({"pagado": True}).encode()
+        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
+        urllib.request.urlopen(req, timeout=15)
+        
+        # Marcar tripletas como pagadas también
+        url_trip = f"{SUPABASE_URL}/rest/v1/tripletas?ticket_id=eq.{urllib.parse.quote(str(ticket_id))}"
+        data_trip = json.dumps({"pagado": True}).encode()
+        req_trip = urllib.request.Request(url_trip, data=data_trip, headers=headers, method="PATCH")
+        try:
+            urllib.request.urlopen(req_trip, timeout=15)
+        except:
+            pass  # Si no hay tripletas, no importa el error
+        
+        return jsonify({'status': 'ok', 'mensaje': 'Ticket pagado'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/anular-ticket', methods=['POST'])
+@login_required
+def anular_ticket():
+    try:
+        serial = request.json.get('serial')
+        tickets = supabase_request("tickets", filters={"serial": serial})
+        if not tickets or len(tickets) == 0:
+            return jsonify({'error': 'Ticket no existe'})
+        
+        ticket = tickets[0]
+        
+        # CORREGIDO: Verificar si ya está anulado
+        if ticket.get('anulado'):
+            return jsonify({'error': 'Este ticket ya fue anulado anteriormente'})
+        
+        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
+            return jsonify({'error': 'No autorizado para anular este ticket'})
+        
+        if ticket.get('pagado'):
+            return jsonify({'error': 'Ya esta pagado, no se puede anular'})
+        
+        # Validaciones de tiempo para agencias (admin puede anular sin límite de tiempo)
+        if not session.get('es_admin'):
+            fecha_ticket = parse_fecha_ticket(ticket['fecha'])
+            if not fecha_ticket:
+                return jsonify({'error': 'Error en fecha del ticket'})
+            
+            # Verificar que no hayan pasado más de 5 minutos desde la creación
+            minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
+            if minutos_transcurridos > 5:
+                return jsonify({'error': f'No puede anular después de 5 minutos. Han pasado {int(minutos_transcurridos)} minutos'})
+            
+            # Verificar que el sorteo no haya iniciado (para jugadas normales)
+            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
+            if jugadas:
+                for j in jugadas:
+                    if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
+                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerro o esta por iniciar'})
+        else:
+            # Admin también verifica que el sorteo no haya cerrado
+            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
+            if jugadas:
+                for j in jugadas:
+                    if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
+                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya esta cerrado'})
+        
+        # Proceder a anular
+        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = json.dumps({"anulado": True}).encode()
+        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
+        urllib.request.urlopen(req, timeout=15)
+        
+        return jsonify({'status': 'ok', 'mensaje': f'Ticket #{serial} anulado correctamente'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1015,14 +1040,14 @@ def caja_agencia():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         
-        # Consultar tickets con límite aumentado
+        # CORREGIDO: Usar supabase_request con límite 5000
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&limit=5000"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
             tickets = json.loads(response.read().decode())
         
-        ventas = sum(t['total'] for t in tickets if t['agencia_id'] == session['user_id'] and not t['anulado'])
+        ventas = sum(t['total'] for t in tickets if t['agencia_id'] == session['user_id'] and not t.get('anulado'))
         
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
@@ -1032,10 +1057,10 @@ def caja_agencia():
         tickets_pendientes = 0
         
         for t in tickets:
-            if t['agencia_id'] == session['user_id'] and not t['anulado']:
+            if t['agencia_id'] == session['user_id'] and not t.get('anulado'):
                 premio_ticket = calcular_premio_ticket(t)
                 
-                if t['pagado']:
+                if t.get('pagado'):
                     premios += premio_ticket
                 elif premio_ticket > 0:
                     tickets_pendientes += 1
@@ -1070,12 +1095,13 @@ def caja_historico():
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
         
-        # Consultar tickets con límite aumentado a 5000
-        filters = {"agencia_id": session['user_id']}
-        all_tickets = supabase_request("tickets", filters=filters, limit=5000)
+        # CORREGIDO: Usar límite 5000
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=5000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
         
-        if all_tickets is None:
-            all_tickets = []
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
         tickets_pendientes_cobro = []
@@ -1093,8 +1119,8 @@ def caja_historico():
             
             if dia_key not in dias_data:
                 dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0, 
-                    'comisiones': 0, 'ids_tickets': []
+                    'ventas': 0, 'tickets': 0, 'premios': 0,
+                    'pendientes': 0
                 }
             
             dias_data[dia_key]['ventas'] += t['total']
@@ -1103,10 +1129,11 @@ def caja_historico():
             
             premio_ticket = calcular_premio_ticket(t)
             
-            if t['pagado']:
+            if t.get('pagado'):
                 dias_data[dia_key]['premios'] += premio_ticket
                 total_premios += premio_ticket
             elif premio_ticket > 0:
+                dias_data[dia_key]['pendientes'] += 1
                 tickets_pendientes_cobro.append({
                     'serial': t['serial'],
                     'fecha': t['fecha'],
@@ -1126,7 +1153,8 @@ def caja_historico():
                 'ventas': round(datos['ventas'], 2),
                 'premios': round(datos['premios'], 2),
                 'comision': round(comision_dia, 2),
-                'balance': round(balance_dia, 2)
+                'balance': round(balance_dia, 2),
+                'pendientes': datos['pendientes']
             })
         
         total_comision = total_ventas * comision_pct
@@ -1154,16 +1182,12 @@ def mis_tickets_pendientes():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         
-        # Consultar tickets con filtros correctos
-        filters = {
-            "agencia_id": session['user_id'],
-            "anulado": "false",
-            "pagado": "false"
-        }
-        tickets = supabase_request("tickets", filters=filters, limit=5000)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&anulado=eq.false&pagado=eq.false&limit=5000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
         
-        if tickets is None:
-            tickets = []
+        with urllib.request.urlopen(req, timeout=15) as response:
+            tickets = json.loads(response.read().decode())
         
         tickets_con_premio = []
         
@@ -1179,7 +1203,7 @@ def mis_tickets_pendientes():
                     'fecha': t['fecha'],
                     'total': t['total'],
                     'premio': round(premio_total, 2),
-                    'jugadas': len(jugadas) + len(tripletas) if jugadas else len(tripletas) if tripletas else 0
+                    'jugadas': len(jugadas) + len(tripletas)
                 })
         
         return jsonify({
@@ -1191,7 +1215,7 @@ def mis_tickets_pendientes():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== API ADMIN ====================
+# ==================== API ADMIN - CORREGIDO RESULTADOS ====================
 @app.route('/admin/lista-agencias')
 @admin_required
 def lista_agencias():
@@ -1234,6 +1258,7 @@ def crear_agencia():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== CORREGIDO: GUARDAR RESULTADO ====================
 @app.route('/admin/guardar-resultado', methods=['POST'])
 @admin_required
 def guardar_resultado():
@@ -1242,9 +1267,13 @@ def guardar_resultado():
         animal = request.form.get('animal')
         fecha_input = request.form.get('fecha')
         
+        if not hora or not animal:
+            return jsonify({'error': 'Hora y animal requeridos'}), 400
+        
         if animal not in ANIMALES:
             return jsonify({'error': f'Animal inválido: {animal}'}), 400
         
+        # Determinar la fecha
         if fecha_input:
             try:
                 fecha_obj = datetime.strptime(fecha_input, "%Y-%m-%d")
@@ -1255,20 +1284,26 @@ def guardar_resultado():
             fecha = ahora_peru().strftime("%d/%m/%Y")
         
         hoy = ahora_peru().strftime("%d/%m/%Y")
-        if fecha == hoy:
-            if not puede_editar_resultado(hora, fecha):
-                return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 6PM editable hasta 8PM).'
-                }), 403
         
+        # Verificar si existe el resultado
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
         
         if existentes and len(existentes) > 0:
+            # ACTUALIZAR resultado existente
+            # CORREGIDO: Verificar restricción de tiempo solo para hoy
+            if fecha == hoy:
+                if not puede_editar_resultado(hora, fecha):
+                    return jsonify({
+                        'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo.'
+                    }), 403
+            
+            # CORREGIDO: Usar PATCH correctamente
             url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{urllib.parse.quote(fecha)}&hora=eq.{urllib.parse.quote(hora)}"
             headers = {
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
             }
             data = json.dumps({"animal": animal}).encode()
             req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
@@ -1287,10 +1322,12 @@ def guardar_resultado():
                     else:
                         return jsonify({'error': 'Error al actualizar'}), 500
             except urllib.error.HTTPError as e:
-                print(f"[ERROR PATCH] HTTP {e.code}: {e.read().decode()}")
+                error_msg = e.read().decode()
+                print(f"[ERROR PATCH] HTTP {e.code}: {error_msg}")
                 return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
                 
         else:
+            # CREAR nuevo resultado
             data = {"fecha": fecha, "hora": hora, "animal": animal}
             result = supabase_request("resultados", method="POST", data=data)
             
@@ -1390,7 +1427,7 @@ def tripletas_hoy():
     try:
         hoy = ahora_peru().strftime("%d/%m/%Y")
         
-        # Obtener todas las tripletas de hoy con límite aumentado
+        # Obtener todas las tripletas de hoy
         url = f"{SUPABASE_URL}/rest/v1/tripletas?fecha=eq.{urllib.parse.quote(hoy)}&limit=5000"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -1488,16 +1525,15 @@ def reporte_agencias_rango():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        # Consultar tickets con límite aumentado a 5000
+        # CORREGIDO: Usar límite 5000
         if agencia_id:
-            filters = {"agencia_id": agencia_id}
+            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=5000"
         else:
-            filters = {}
-        
-        all_tickets = supabase_request("tickets", filters=filters, limit=5000)
-        
-        if all_tickets is None:
-            all_tickets = []
+            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
+            
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         tickets_validos = []
         for t in all_tickets:
@@ -1550,25 +1586,24 @@ def reporte_agencias_rango():
             
             # Jugadas normales
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-            if jugadas:
-                for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
-                    if wa:
-                        premio_jugada = 0
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            premio_jugada = calcular_premio_animal(j['monto'], wa)
+            for j in jugadas:
+                wa = resultados_dia.get(j['hora'])
+                if wa:
+                    premio_jugada = 0
+                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                        premio_jugada = calcular_premio_animal(j['monto'], wa)
+                        premio_teorico_ticket += premio_jugada
+                        tiene_premio = True
+                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                        sel = j['seleccion']
+                        num = int(wa)
+                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                           (sel == 'PAR' and num % 2 == 0) or \
+                           (sel == 'IMPAR' and num % 2 != 0):
+                            premio_jugada = j['monto'] * PAGO_ESPECIAL
                             premio_teorico_ticket += premio_jugada
                             tiene_premio = True
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            sel = j['seleccion']
-                            num = int(wa)
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                premio_jugada = j['monto'] * PAGO_ESPECIAL
-                                premio_teorico_ticket += premio_jugada
-                                tiene_premio = True
             
             # Tripletas
             tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
@@ -1587,7 +1622,7 @@ def reporte_agencias_rango():
             
             stats['premios_teoricos'] += premio_teorico_ticket
             
-            if t['pagado']:
+            if t.get('pagado'):
                 stats['tickets_pagados_count'] += 1
                 stats['premios_pagados'] += premio_teorico_ticket
             else:
@@ -1661,11 +1696,11 @@ def exportar_csv():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        # Consultar tickets con límite aumentado
-        all_tickets = supabase_request("tickets", limit=5000)
-        
-        if all_tickets is None:
-            all_tickets = []
+        # CORREGIDO: Usar límite 5000
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         tickets_validos = []
         for t in all_tickets:
@@ -1703,22 +1738,21 @@ def exportar_csv():
             fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
             resultados_dia = resultados_por_dia.get(fecha_ticket, {})
             
-            if t['pagado']:
+            if t.get('pagado'):
                 jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                if jugadas:
-                    for j in jugadas:
-                        wa = resultados_dia.get(j['hora'])
-                        if wa:
-                            if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                                stats['premios'] += calcular_premio_animal(j['monto'], wa)
-                            elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                                num = int(wa)
-                                sel = j['seleccion']
-                                if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                                   (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                                   (sel == 'PAR' and num % 2 == 0) or \
-                                   (sel == 'IMPAR' and num % 2 != 0):
-                                    stats['premios'] += j['monto'] * PAGO_ESPECIAL
+                for j in jugadas:
+                    wa = resultados_dia.get(j['hora'])
+                    if wa:
+                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
+                            stats['premios'] += calcular_premio_animal(j['monto'], wa)
+                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
+                            num = int(wa)
+                            sel = j['seleccion']
+                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
+                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
+                               (sel == 'PAR' and num % 2 == 0) or \
+                               (sel == 'IMPAR' and num % 2 != 0):
+                                stats['premios'] += j['monto'] * PAGO_ESPECIAL
         
         output = io.StringIO()
         writer = csv.writer(output)
@@ -1780,7 +1814,6 @@ def reporte_agencias():
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
         resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
         
-        # Consultar tickets con límite aumentado
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&limit=5000"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -1790,17 +1823,17 @@ def reporte_agencias():
         total_ventas = total_premios = total_comisiones = 0
         
         for ag in agencias:
-            ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t['anulado'])
+            ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t.get('anulado'))
             comision = ventas * ag['comision']
             
             premios_pagados = 0
             premios_pendientes = 0
             
             for t in tickets:
-                if t['agencia_id'] == ag['id'] and not t['anulado']:
+                if t['agencia_id'] == ag['id'] and not t.get('anulado'):
                     premio_ticket = calcular_premio_ticket(t)
                     
-                    if t['pagado']:
+                    if t.get('pagado'):
                         premios_pagados += premio_ticket
                     else:
                         premios_pendientes += premio_ticket
@@ -1851,7 +1884,6 @@ def riesgo():
                 'agencia_nombre': nombre_agencia
             })
         
-        # Consultar tickets con límite aumentado
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&anulado=eq.false&limit=5000"
         
         if agencia_id:
@@ -1886,17 +1918,16 @@ def riesgo():
         for t in tickets:
             jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
             
-            if jugadas:
-                for j in jugadas:
-                    if j.get('hora') == sorteo_objetivo:
-                        sel = j.get('seleccion')
-                        monto = j.get('monto', 0)
-                        if sel:
-                            if sel not in apuestas:
-                                apuestas[sel] = 0
-                            apuestas[sel] += monto
-                            total_apostado_sorteo += monto
-                            total_jugadas_contadas += 1
+            for j in jugadas:
+                if j.get('hora') == sorteo_objetivo:
+                    sel = j.get('seleccion')
+                    monto = j.get('monto', 0)
+                    if sel:
+                        if sel not in apuestas:
+                            apuestas[sel] = 0
+                        apuestas[sel] += monto
+                        total_apostado_sorteo += monto
+                        total_jugadas_contadas += 1
         
         apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
         
@@ -1938,11 +1969,13 @@ def estadisticas_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        # Consultar tickets con límite aumentado
-        all_tickets = supabase_request("tickets", limit=5000)
+        # CORREGIDO: Usar límite 5000
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
         
-        if all_tickets is None:
-            all_tickets = []
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
         tickets_rango = []
@@ -2034,11 +2067,13 @@ def top_animales_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        # Consultar tickets con límite aumentado
-        all_tickets = supabase_request("tickets", limit=5000)
+        # CORREGIDO: Usar límite 5000
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
         
-        if all_tickets is None:
-            all_tickets = []
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         ticket_ids = []
         for t in all_tickets:
@@ -2054,13 +2089,12 @@ def top_animales_rango():
         apuestas = {}
         for ticket_id in ticket_ids[:100]:
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
-            if jugadas:
-                for j in jugadas:
-                    sel = j['seleccion']
-                    if sel not in apuestas:
-                        apuestas[sel] = {'monto': 0, 'cantidad': 0}
-                    apuestas[sel]['monto'] += j['monto']
-                    apuestas[sel]['cantidad'] += 1
+            for j in jugadas:
+                sel = j['seleccion']
+                if sel not in apuestas:
+                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
+                apuestas[sel]['monto'] += j['monto']
+                apuestas[sel]['cantidad'] += 1
         
         top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
         resultado = []
@@ -2084,146 +2118,97 @@ def top_animales_rango():
 
 LOGIN_HTML = '''
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zoolo Casino Cloud v7.0 - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+    <title>Login - ZOOLO CASINO v7.1</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
-        .login-container {
-            background: rgba(255,255,255,0.95);
-            padding: 40px;
+        .login-box {
+            background: rgba(255,255,255,0.05);
+            padding: 40px 30px;
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 2px solid #ffd700;
             width: 100%;
             max-width: 400px;
             text-align: center;
+            backdrop-filter: blur(10px);
         }
-        .logo {
-            font-size: 3em;
-            margin-bottom: 10px;
+        .login-box h2 { color: #ffd700; margin-bottom: 30px; font-size: 1.8rem; }
+        .form-group { margin-bottom: 20px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.9rem; }
+        .form-group input {
+            width: 100%; padding: 15px;
+            border: 1px solid #444; border-radius: 10px;
+            background: rgba(0,0,0,0.5); color: white; font-size: 1rem;
+            -webkit-appearance: none;
         }
-        h1 {
-            color: #1a1a2e;
-            margin-bottom: 10px;
-            font-size: 1.8em;
-        }
-        .version {
-            color: #e74c3c;
-            font-weight: bold;
-            margin-bottom: 30px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-            text-align: left;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #333;
-            font-weight: 500;
-        }
-        input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #ddd;
-            border-radius: 10px;
-            font-size: 1em;
-            transition: border-color 0.3s;
-        }
-        input:focus {
+        .form-group input:focus {
             outline: none;
-            border-color: #0f3460;
+            border-color: #ffd700;
+            box-shadow: 0 0 10px rgba(255,215,0,0.3);
         }
-        button {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #0f3460, #533483);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+        .btn-login {
+            width: 100%; padding: 16px;
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: black; border: none; border-radius: 10px;
+            font-size: 1.1rem; font-weight: bold; cursor: pointer;
+            margin-top: 10px;
+            transition: transform 0.2s;
         }
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(15,52,96,0.4);
-        }
+        .btn-login:active { transform: scale(0.98); }
         .error {
-            background: #fee;
-            color: #c33;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: {% if error %}block{% else %}none{% endif %};
+            background: rgba(255,0,0,0.2); color: #ff6b6b;
+            padding: 12px; border-radius: 8px; margin-bottom: 20px;
+            font-size: 0.9rem;
         }
-        .features {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            text-align: left;
-        }
-        .features h3 {
-            color: #0f3460;
-            margin-bottom: 10px;
-            font-size: 0.9em;
-        }
-        .features ul {
-            list-style: none;
-            font-size: 0.85em;
-            color: #666;
-        }
-        .features li {
-            padding: 3px 0;
-            padding-left: 20px;
-            position: relative;
-        }
-        .features li:before {
-            content: "✓";
-            position: absolute;
-            left: 0;
-            color: #27ae60;
+        .info { margin-top: 25px; font-size: 0.8rem; color: #666; }
+        .version-badge {
+            background: linear-gradient(45deg, #27ae60, #229954);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.75rem;
             font-weight: bold;
+            display: inline-block;
+            margin-bottom: 15px;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="logo">🎰</div>
-        <h1>ZOOLO CASINO</h1>
-        <div class="version">CLOUD v7.0</div>
-        <div class="error">{{ error }}</div>
-        <form method="POST" action="/login">
+    <div class="login-box">
+        <div class="version-badge">v7.1 CORREGIDO</div>
+        <h2>🦁 ZOOLO CASINO</h2>
+        {% if error %}
+        <div class="error">{{error}}</div>
+        {% endif %}
+        <form method="POST">
             <div class="form-group">
                 <label>Usuario</label>
-                <input type="text" name="username" placeholder="Ingrese su usuario" required autofocus>
+                <input type="text" name="usuario" required autofocus autocomplete="off">
             </div>
             <div class="form-group">
                 <label>Contraseña</label>
-                <input type="password" name="password" placeholder="Ingrese su contraseña" required>
+                <input type="password" name="password" required>
             </div>
-            <button type="submit">INICIAR SESIÓN</button>
+            <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
-        <div class="features">
-            <h3>✨ Novedades v7.0:</h3>
-            <ul>
-                <li>Reportes históricos completos</li>
-                <li>Reimpresión de tickets</li>
-                <li>Decimales en tickets (0.5, 1.5)</li>
-                <li>Hasta 5000 tickets por consulta</li>
-                <li>Anulación mejorada</li>
-            </ul>
+        <div class="info">
+            Sistema ZOOLO CASINO v7.1<br>
+            ✓ Reportes históricos<br>
+            ✓ Reimpresión de tickets<br>
+            ✓ Decimales funcionando
         </div>
     </div>
 </body>
@@ -2232,430 +2217,2351 @@ LOGIN_HTML = '''
 
 POS_HTML = '''
 <!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+    <title>POS - {{agencia}}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        html { height: 100%; }
+        body { 
+            background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            min-height: 100vh; 
+            display: flex; 
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+        
+        .win-menu-bar {
+            background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
+            border-bottom: 2px solid #000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .win-menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 15px;
+            background: linear-gradient(90deg, #1a1a2e, #16213e);
+            border-bottom: 1px solid #000;
+        }
+        
+        .win-title {
+            color: #ffd700;
+            font-size: 1rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .win-menu-items {
+            display: flex;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            background: #2d2d2d;
+        }
+        
+        .win-menu-item {
+            position: relative;
+        }
+        
+        .win-menu-item > a {
+            display: block;
+            padding: 10px 20px;
+            color: #fff;
+            text-decoration: none;
+            font-size: 0.85rem;
+            border-right: 1px solid #444;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .win-menu-item:hover > a {
+            background: linear-gradient(180deg, #404040 0%, #333 100%);
+            color: #ffd700;
+        }
+        
+        .win-submenu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-top: none;
+            min-width: 220px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            z-index: 1001;
+        }
+        
+        .win-menu-item:hover .win-submenu {
+            display: block;
+        }
+        
+        .win-submenu-item {
+            border-bottom: 1px solid #444;
+        }
+        
+        .win-submenu-item:last-child {
+            border-bottom: none;
+        }
+        
+        .win-submenu-item a {
+            display: block;
+            padding: 12px 20px;
+            color: #ddd;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .win-submenu-item a:hover {
+            background: #ffd700;
+            color: #000;
+            padding-left: 25px;
+        }
+        
+        .mobile-header {
+            display: none;
+            background: linear-gradient(90deg, #1a1a2e, #16213e);
+            padding: 12px 15px;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #ffd700;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .mobile-title {
+            color: #ffd700;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+        
+        .hamburger-btn {
+            background: transparent;
+            border: none;
+            color: #ffd700;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 5px;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .mobile-menu {
+            display: none;
+            position: fixed;
+            top: 0;
+            right: -300px;
+            width: 280px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a1a2e 0%, #0a0a0a 100%);
+            border-left: 2px solid #ffd700;
+            z-index: 2000;
+            transition: right 0.3s ease;
+            overflow-y: auto;
+        }
+        
+        .mobile-menu.active {
+            right: 0;
+        }
+        
+        .mobile-menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid #333;
+        }
+        
+        .mobile-menu-title {
+            color: #ffd700;
+            font-size: 1.1rem;
+        }
+        
+        .close-menu-btn {
+            background: #c0392b;
+            border: none;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.1rem;
+        }
+        
+        .mobile-menu-section {
+            border-bottom: 1px solid #333;
+        }
+        
+        .mobile-menu-section-title {
+            background: rgba(255,215,0,0.1);
+            color: #ffd700;
+            padding: 12px 15px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .mobile-menu-item {
+            padding: 15px;
+            color: #fff;
+            cursor: pointer;
+            border-bottom: 1px solid #222;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+        }
+        
+        .mobile-menu-item:active {
+            background: rgba(255,215,0,0.1);
+        }
+        
+        .mobile-menu-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1999;
+        }
+        
+        .mobile-menu-overlay.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .win-menu-bar {
+                display: none;
+            }
+            .mobile-header {
+                display: flex;
+            }
+            .mobile-menu {
+                display: block;
+            }
+        }
+        
+        @media (min-width: 769px) {
+            .mobile-menu, .mobile-menu-overlay {
+                display: none !important;
+            }
+        }
+        
+        .header {
+            background: linear-gradient(90deg, #1a1a2e, #16213e);
+            padding: 10px 15px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            border-bottom: 2px solid #ffd700; 
+            flex-shrink: 0;
+        }
+        .header-info h3 { color: #ffd700; font-size: 1rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+        .header-info p { color: #888; font-size: 0.75rem; margin: 0; }
+        .monto-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 20px; }
+        .monto-box span { font-size: 0.8rem; font-weight: bold; color: #ffd700; }
+        .monto-box input {
+            width: 60px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
+            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
+            -webkit-appearance: none;
+        }
+        
+        .main-container { 
+            display: flex; 
+            flex-direction: column;
+            flex: 1;
+            height: calc(100vh - 110px);
+            overflow: hidden;
+        }
+        
+        @media (min-width: 1024px) {
+            .main-container { flex-direction: row; }
+        }
+        
+        .left-panel { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            min-height: 0;
+            overflow: hidden;
+        }
+        
+        .special-btns { 
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px; 
+            padding: 10px; 
+            background: #111; 
+            flex-shrink: 0;
+        }
+        .btn-esp { 
+            padding: 12px 4px; 
+            border: none; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            color: white; 
+            font-size: 0.8rem;
+            touch-action: manipulation;
+            min-height: 44px;
+            transition: all 0.1s;
+        }
+        .btn-esp:active { transform: scale(0.95); }
+        .btn-rojo { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+        .btn-negro { background: linear-gradient(135deg, #2c3e50, #34495e); border: 1px solid #555; }
+        .btn-par { background: linear-gradient(135deg, #2980b9, #3498db); }
+        .btn-impar { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
+        .btn-esp.active { 
+            box-shadow: 0 0 15px rgba(255,255,255,0.5); 
+            transform: scale(0.95);
+            border: 2px solid white;
+        }
+        
+        .animals-grid {
+            flex: 1; 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+            gap: 5px; 
+            padding: 10px; 
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        @media (min-width: 768px) {
+            .animals-grid { grid-template-columns: repeat(7, 1fr); }
+        }
+        
+        .animal-card {
+            background: linear-gradient(135deg, #1a1a2e, #16213e); 
+            border: 2px solid; 
+            border-radius: 10px;
+            padding: 8px 2px; 
+            text-align: center; 
+            cursor: pointer; 
+            transition: all 0.15s; 
+            min-height: 65px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center;
+            user-select: none;
+            position: relative;
+            touch-action: manipulation;
+        }
+        .animal-card:active { transform: scale(0.92); }
+        .animal-card.active { 
+            box-shadow: 0 0 15px rgba(255,215,0,0.6); 
+            border-color: #ffd700 !important; 
+            background: linear-gradient(135deg, #2a2a4e, #1a1a3e);
+            transform: scale(1.05);
+            z-index: 10;
+        }
+        .animal-card.tripleta-seleccionado {
+            box-shadow: 0 0 15px rgba(255,215,0,0.9); 
+            border-color: #ffd700 !important;
+            background: linear-gradient(135deg, #4a3c00, #2a2000);
+            transform: scale(1.08);
+            z-index: 15;
+        }
+        .animal-card .num { font-size: 1.2rem; font-weight: bold; line-height: 1; }
+        .animal-card .name { font-size: 0.7rem; color: #aaa; line-height: 1; margin-top: 4px; font-weight: 500; }
+        .animal-card.lechuza::after {
+            content: "x70";
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            background: #ffd700;
+            color: black;
+            font-size: 0.6rem;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .right-panel {
+            background: #111; 
+            border-top: 2px solid #333;
+            display: flex; 
+            flex-direction: column;
+            height: 40vh;
+            flex-shrink: 0;
+        }
+        @media (min-width: 1024px) { 
+            .right-panel { 
+                width: 350px; 
+                height: auto;
+                border-top: none;
+                border-left: 2px solid #333;
+            }
+        }
+        
+        .horarios {
+            display: flex;
+            gap: 6px;
+            padding: 10px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            background: #0a0a0a;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: #ffd700 #222;
+        }
+        .horarios::-webkit-scrollbar { height: 8px; }
+        .horarios::-webkit-scrollbar-track { background: #222; border-radius: 4px; }
+        .horarios::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 4px; }
+        
+        .btn-hora {
+            flex: 0 0 auto;
+            min-width: 85px;
+            padding: 10px 6px; 
+            background: #222; 
+            border: 1px solid #444;
+            border-radius: 8px; 
+            color: #ccc; 
+            cursor: pointer; 
+            font-size: 0.75rem; 
+            text-align: center; 
+            line-height: 1.3;
+            touch-action: manipulation;
+            transition: all 0.2s;
+        }
+        .btn-hora:hover { background: #333; border-color: #555; }
+        .btn-hora.active { 
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            font-weight: bold; 
+            border-color: #27ae60;
+            box-shadow: 0 0 10px rgba(39, 174, 96, 0.4);
+        }
+        .btn-hora.expired { 
+            background: #300; 
+            color: #666; 
+            text-decoration: line-through; 
+            pointer-events: none;
+            opacity: 0.5;
+        }
+        
+        .ticket-display {
+            flex: 1; 
+            background: #000; 
+            margin: 0 10px 10px; 
+            border-radius: 10px;
+            padding: 12px; 
+            border: 1px solid #333;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .ticket-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+        .ticket-table th {
+            background: #1a1a2e;
+            color: #ffd700;
+            padding: 8px 6px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            font-size: 0.75rem;
+        }
+        .ticket-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #222;
+            vertical-align: middle;
+        }
+        .ticket-table tr:last-child td { border-bottom: none; }
+        .ticket-total {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 2px solid #ffd700;
+            text-align: right;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        
+        .action-btns { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 6px; 
+            padding: 10px;
+            background: #0a0a0a;
+            flex-shrink: 0;
+        }
+        .action-btns button {
+            padding: 14px 5px; 
+            border: none; 
+            border-radius: 8px;
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 0.8rem;
+            touch-action: manipulation;
+            min-height: 48px;
+            transition: all 0.1s;
+        }
+        .action-btns button:active { transform: scale(0.95); }
+        .btn-agregar { 
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            grid-column: span 3; 
+            font-size: 1.1rem;
+        }
+        .btn-vender { 
+            background: linear-gradient(135deg, #2980b9, #2573a7); 
+            color: white; 
+            grid-column: span 3;
+            font-size: 1rem;
+        }
+        .btn-resultados { background: #f39c12; color: black; }
+        .btn-caja { background: #16a085; color: white; }
+        .btn-pagar { background: #8e44ad; color: white; }
+        .btn-tripleta { 
+            background: linear-gradient(135deg, #FFD700, #FFA500); 
+            color: black; 
+            font-weight: bold;
+            border: 2px solid #FFD700;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+        }
+        .btn-tripleta.active {
+            background: linear-gradient(135deg, #FFA500, #FF8C00);
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
+            transform: scale(0.95);
+        }
+        .btn-anular { background: #c0392b; color: white; }
+        .btn-borrar { background: #555; color: white; }
+        .btn-salir { background: #333; color: white; grid-column: span 3; }
+        
+        .tripleta-info {
+            background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.1));
+            border: 2px solid #FFD700;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 0 10px 10px;
+            text-align: center;
+            color: #FFD700;
+            font-weight: bold;
+            display: none;
+        }
+        .tripleta-info.active {
+            display: block;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
+            50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
+        }
+        
+        .modal {
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0;
+            width: 100%; 
+            height: 100%; 
+            background: rgba(0,0,0,0.95);
+            z-index: 1000; 
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .modal-content {
+            background: #1a1a2e; 
+            margin: 10px; 
+            padding: 20px; 
+            border-radius: 15px; 
+            border: 2px solid #ffd700; 
+            max-width: 100%;
+            min-height: calc(100vh - 20px);
+        }
+        @media (min-width: 768px) {
+            .modal-content {
+                margin: 40px auto; 
+                max-width: 700px;
+                min-height: auto;
+            }
+        }
+        .modal-header {
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            margin-bottom: 20px; 
+            padding-bottom: 15px; 
+            border-bottom: 1px solid #333;
+        }
+        .modal h3 { color: #ffd700; font-size: 1.3rem; }
+        .btn-close {
+            background: #c0392b; 
+            color: white; 
+            border: none; 
+            padding: 8px 16px; 
+            border-radius: 6px; 
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .tabs { 
+            display: flex; 
+            gap: 2px; 
+            margin-bottom: 20px; 
+            border-bottom: 2px solid #333;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .tabs::-webkit-scrollbar { display: none; }
+        .tab-btn { 
+            flex: 1;
+            background: transparent; 
+            border: none; 
+            color: #888; 
+            padding: 14px 10px; 
+            cursor: pointer; 
+            font-size: 0.85rem; 
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            min-width: 80px;
+        }
+        .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .stats-box {
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e); 
+            padding: 20px; 
+            border-radius: 12px; 
+            margin: 15px 0;
+            border: 1px solid #333;
+        }
+        .stat-row {
+            display: flex; 
+            justify-content: space-between; 
+            padding: 12px 0;
+            border-bottom: 1px solid #222; 
+            font-size: 1rem;
+            align-items: center;
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #aaa; }
+        .stat-value { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
+        .stat-value.negative { color: #e74c3c; }
+        .stat-value.positive { color: #27ae60; }
+        
+        .table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 0.85rem; 
+            min-width: 300px;
+        }
+        th, td { 
+            padding: 12px 8px; 
+            text-align: left; 
+            border-bottom: 1px solid #333; 
+            white-space: nowrap;
+        }
+        th { 
+            background: linear-gradient(135deg, #ffd700, #ffed4e); 
+            color: black; 
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover { background: rgba(255,215,0,0.05); }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; color: #888; font-size: 0.9rem; margin-bottom: 6px; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 12px; background: #000; border: 1px solid #444;
+            color: white; border-radius: 8px; font-size: 1rem;
+            -webkit-appearance: none;
+        }
+        .btn-consultar {
+            background: linear-gradient(135deg, #27ae60, #229954); 
+            color: white; 
+            border: none; 
+            padding: 14px;
+            width: 100%; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 1rem;
+        }
+        
+        .alert-box {
+            background: rgba(243, 156, 18, 0.15); 
+            border: 1px solid #f39c12;
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 15px 0; 
+            font-size: 0.9rem;
+        }
+        .alert-box strong { color: #f39c12; }
+
+        .resultado-item {
+            background: #0a0a0a;
+            padding: 15px;
+            margin: 8px 0;
+            border-radius: 10px;
+            border-left: 4px solid #27ae60;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .resultado-item.pendiente {
+            border-left-color: #666;
+            opacity: 0.7;
+        }
+        .resultado-numero {
+            color: #ffd700;
+            font-weight: bold;
+            font-size: 1.4rem;
+        }
+        .resultado-nombre {
+            color: #aaa;
+            font-size: 1rem;
+        }
+        
+        .toast-notification {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 14px 24px;
+            border-radius: 30px;
+            font-size: 0.95rem;
+            z-index: 10000;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+            max-width: 90%;
+            text-align: center;
+            font-weight: bold;
+            animation: slideDown 0.3s ease;
+        }
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+        @keyframes slideUp {
+            from { transform: translateX(-50%) translateY(0); opacity: 1; }
+            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+        }
+        
+        .ticket-item {
+            background: #0a0a0a;
+            padding: 15px;
+            margin: 8px 0;
+            border-radius: 10px;
+            border-left: 4px solid #2980b9;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ticket-item:active {
+            background: #1a1a2e;
+        }
+        .ticket-item.ganador {
+            border-left-color: #27ae60;
+            background: rgba(39,174,96,0.1);
+        }
+        .ticket-item.pendiente-pago {
+            border-left-color: #f39c12;
+            background: rgba(243,156,18,0.1);
+        }
+        .ticket-item.anulado {
+            border-left-color: #c0392b;
+            background: rgba(192,57,43,0.1);
+            opacity: 0.7;
+        }
+        .ticket-serial {
+            color: #ffd700;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .ticket-info {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        .ticket-premio {
+            color: #27ae60;
+            font-weight: bold;
+            font-size: 1.2rem;
+            margin-top: 5px;
+        }
+        .ticket-estado {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .estado-pagado { background: #27ae60; color: white; }
+        .estado-pendiente { background: #f39c12; color: black; }
+        .estado-anulado { background: #c0392b; color: white; }
+        
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-row select, .filter-row input {
+            flex: 1;
+            min-width: 120px;
+            padding: 10px;
+            background: #000;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 6px;
+        }
+        
+        .jugada-detail {
+            background: #111;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .jugada-ganadora {
+            background: rgba(39,174,96,0.2);
+            border: 1px solid #27ae60;
+        }
+        
+        .btn-reimprimir {
+            background: linear-gradient(135deg, #2980b9, #3498db);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        
+        .btn-anular-ticket {
+            background: #c0392b;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-top: 10px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="win-menu-bar">
+        <div class="win-menu-header">
+            <div class="win-title">🦁 {{agencia}}</div>
+            <button onclick="location.href='/logout'" style="background: #c0392b; color: white; border: none; padding: 6px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.8rem;">SALIR</button>
+        </div>
+        <ul class="win-menu-items">
+            <li class="win-menu-item">
+                <a>📁 Archivo</a>
+                <ul class="win-submenu">
+                    <li class="win-submenu-item"><a onclick="abrirCaja()">💰 Caja del Día</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirCajaHistorico()">📊 Historial de Caja</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirCalculadora()">🧮 Calculadora de Premios</a></li>
+                </ul>
+            </li>
+            <li class="win-menu-item">
+                <a>🔍 Consultas</a>
+                <ul class="win-submenu">
+                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">🎫 Mis Tickets Vendidos</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirBuscarTicket()">🔎 Buscar Ticket por Serial</a></li>
+                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">💰 Tickets por Cobrar</a></li>
+                    <li class="win-submenu-item"><a onclick="verResultados()">📋 Resultados de Hoy</a></li>
+                </ul>
+            </li>
+            <li class="win-menu-item">
+                <a>❓ Ayuda</a>
+                <ul class="win-submenu">
+                    <li class="win-submenu-item"><a onclick="mostrarReglas()">📖 Reglas de Pago</a></li>
+                    <li class="win-submenu-item"><a onclick="mostrarComoUsar()">❓ Cómo Usar</a></li>
+                    <li class="win-submenu-item"><a onclick="mostrarAcerca()">ℹ️ Acerca del Sistema</a></li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+
+    <div class="mobile-header">
+        <div class="mobile-title">🦁 {{agencia}}</div>
+        <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
+    </div>
+    
+    <div class="mobile-menu-overlay" onclick="toggleMobileMenu()"></div>
+    <div class="mobile-menu" id="mobileMenu">
+        <div class="mobile-menu-header">
+            <div class="mobile-menu-title">MENÚ</div>
+            <button class="close-menu-btn" onclick="toggleMobileMenu()">×</button>
+        </div>
+        
+        <div class="mobile-menu-section">
+            <div class="mobile-menu-section-title">📁 Archivo</div>
+            <div class="mobile-menu-item" onclick="abrirCajaMobile()">💰 Caja del Día</div>
+            <div class="mobile-menu-item" onclick="abrirCajaHistoricoMobile()">📊 Historial de Caja</div>
+            <div class="mobile-menu-item" onclick="abrirCalculadoraMobile()">🧮 Calculadora</div>
+        </div>
+        
+        <div class="mobile-menu-section">
+            <div class="mobile-menu-section-title">🔍 Consultas</div>
+            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">🎫 Mis Tickets Vendidos</div>
+            <div class="mobile-menu-item" onclick="abrirBuscarTicketMobile()">🔎 Buscar Ticket</div>
+            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">💰 Tickets por Cobrar</div>
+            <div class="mobile-menu-item" onclick="verResultadosMobile()">📋 Resultados</div>
+        </div>
+        
+        <div class="mobile-menu-section">
+            <div class="mobile-menu-section-title">❓ Ayuda</div>
+            <div class="mobile-menu-item" onclick="mostrarReglasMobile()">📖 Reglas</div>
+            <div class="mobile-menu-item" onclick="mostrarComoUsarMobile()">❓ Cómo Usar</div>
+            <div class="mobile-menu-item" onclick="mostrarAcercaMobile()">ℹ️ Acerca de</div>
+        </div>
+        
+        <div class="mobile-menu-section">
+            <div class="mobile-menu-item" onclick="location.href='/logout'" style="color: #e74c3c; font-weight: bold;">🚪 Cerrar Sesión</div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-info">
+            <h3>{{agencia}}</h3>
+            <p id="reloj">--</p>
+        </div>
+        <div class="monto-box">
+            <span>S/:</span>
+            <input type="number" id="monto" value="5" min="0.5" step="0.5">
+        </div>
+    </div>
+    
+    <div class="tripleta-info" id="tripleta-banner">
+        🎯 MODO TRIPLETA: Selecciona 3 animalitos (Paga x60 si salen hoy)
+    </div>
+    
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="special-btns">
+                <button class="btn-esp btn-rojo" onclick="toggleEsp('ROJO')">ROJO</button>
+                <button class="btn-esp btn-negro" onclick="toggleEsp('NEGRO')">NEGRO</button>
+                <button class="btn-esp btn-par" onclick="toggleEsp('PAR')">PAR</button>
+                <button class="btn-esp btn-impar" onclick="toggleEsp('IMPAR')">IMPAR</button>
+            </div>
+            <div class="animals-grid" id="animals-grid">
+                {% for k, v in animales.items() %}
+                <div class="animal-card {{ 'lechuza' if k == '40' else '' }}" id="ani-{{k}}" style="border-color: {{get_color(k)}}" onclick="toggleAni('{{k}}', '{{v}}')">
+                    <div class="num">{{k}}</div>
+                    <div class="name">{{v}}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="right-panel">
+            <div class="horarios" id="horarios">
+                {% for h in horarios_peru %}
+                <div class="btn-hora" id="hora-{{loop.index}}" onclick="toggleHora('{{h}}', '{{loop.index}}')">
+                    {{h}}<br><small>{{horarios_venezuela[loop.index0]}}</small>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="ticket-display" id="ticket-display">
+                <div style="text-align:center; color:#666; padding:20px; font-style:italic;">
+                    Selecciona animales y horarios...
+                </div>
+            </div>
+            <div class="action-btns">
+                <button class="btn-agregar" onclick="agregar()">AGREGAR AL TICKET</button>
+                <button class="btn-vender" onclick="vender()">ENVIAR POR WHATSAPP</button>
+                <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
+                <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
+                <button class="btn-pagar" onclick="pagar()">PAGAR</button>
+                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
+                <button class="btn-anular" onclick="anular()">ANULAR</button>
+                <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
+                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-caja">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>ESTADO DE CAJA</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-caja')">X</button>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('hoy')">Hoy</button>
+                <button class="tab-btn" onclick="switchTab('historico')">Histórico</button>
+            </div>
+
+            <div id="tab-hoy" class="tab-content active">
+                <div class="stats-box">
+                    <div class="stat-row">
+                        <span class="stat-label">Ventas:</span>
+                        <span class="stat-value" id="caja-ventas">S/0.00</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Premios Pagados:</span>
+                        <span class="stat-value negative" id="caja-premios">S/0.00</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Tu Comisión:</span>
+                        <span class="stat-value" id="caja-comision">S/0.00</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Balance:</span>
+                        <span class="stat-value" id="caja-balance">S/0.00</span>
+                    </div>
+                </div>
+                
+                <div id="alerta-pendientes" class="alert-box" style="display:none;">
+                    <strong>⚠️ Tickets por Cobrar:</strong>
+                    <div id="info-pendientes"></div>
+                </div>
+            </div>
+
+            <div id="tab-historico" class="tab-content">
+                <div class="form-group">
+                    <label>Desde:</label>
+                    <input type="date" id="hist-fecha-inicio">
+                </div>
+                <div class="form-group">
+                    <label>Hasta:</label>
+                    <input type="date" id="hist-fecha-fin">
+                </div>
+                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR HISTORIAL</button>
+                
+                <div id="resultado-historico" style="display:none; margin-top: 20px;">
+                    <div class="stats-box">
+                        <div class="stat-row">
+                            <span class="stat-label">Total Ventas:</span>
+                            <span class="stat-value" id="hist-ventas">S/0.00</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Total Premios:</span>
+                            <span class="stat-value negative" id="hist-premios">S/0.00</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Balance:</span>
+                            <span class="stat-value" id="hist-balance">S/0.00</span>
+                        </div>
+                    </div>
+
+                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin-top: 15px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Tickets</th>
+                                    <th>Ventas</th>
+                                    <th>Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-historico-caja"></tbody>
+                        </table>
+                    </div>
+
+                    <div id="hist-alerta-pendientes" class="alert-box" style="display:none;">
+                        <strong>💰 Pendiente por Cobrar:</strong>
+                        <div id="hist-info-pendientes"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-resultados">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>RESULTADOS DE SORTEOS</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-resultados')">X</button>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label>Seleccionar Fecha:</label>
+                <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
+                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR FECHA</button>
+            </div>
+
+            <div style="margin-bottom: 15px; text-align: center; color: #ffd700; font-size: 1.1rem; font-weight: bold;" id="resultados-fecha-titulo">
+                Hoy
+            </div>
+
+            <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
+                <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-mis-tickets">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🎫 MIS TICKETS VENDIDOS</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
+            </div>
+            
+            <div class="filter-row">
+                <input type="date" id="mis-tickets-fecha-inicio" placeholder="Desde">
+                <input type="date" id="mis-tickets-fecha-fin" placeholder="Hasta">
+                <select id="mis-tickets-estado">
+                    <option value="todos">Todos</option>
+                    <option value="activos">Activos (no anulados)</option>
+                    <option value="pagados">Pagados</option>
+                    <option value="pendientes">Pendientes</option>
+                    <option value="anulados">Anulados</option>
+                    <option value="por_pagar">Con Premio (por cobrar)</option>
+                </select>
+            </div>
+            <button class="btn-consultar" onclick="consultarMisTickets()">BUSCAR</button>
+            
+            <div id="mis-tickets-resumen" style="margin: 15px 0; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 8px; display: none;">
+                <strong style="color: #ffd700;">Resumen:</strong> <span id="mis-tickets-info"></span>
+            </div>
+            
+            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
+                <p style="color: #888; text-align: center; padding: 20px;">Use los filtros y presione BUSCAR</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-buscar-ticket">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔎 BUSCAR TICKET POR SERIAL</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Ingrese el número de serial:</label>
+                <input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center; letter-spacing: 2px;">
+            </div>
+            <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
+            
+            <div id="resultado-busqueda-ticket" style="margin-top: 20px;">
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-calculadora">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🧮 CALCULADORA DE PREMIOS</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Monto Apostado (S/):</label>
+                <input type="number" id="calc-monto" value="10" min="0.5" step="0.5">
+            </div>
+            
+            <div class="form-group">
+                <label>Tipo de Apuesta:</label>
+                <select id="calc-tipo" onchange="calcularPremio()">
+                    <option value="35">Animal Normal (00-39) x35</option>
+                    <option value="70">Lechuza (40) x70</option>
+                    <option value="2">Especial (Rojo/Negro/Par/Impar) x2</option>
+                    <option value="60">TRIPLETA x60</option>
+                </select>
+            </div>
+            
+            <button class="btn-consultar" onclick="calcularPremio()">CALCULAR</button>
+            
+            <div class="stats-box" id="calc-resultado" style="display: none; margin-top: 20px; text-align: center;">
+                <div style="color: #888; margin-bottom: 5px;">Premio a Pagar:</div>
+                <div style="color: #ffd700; font-size: 2rem; font-weight: bold;" id="calc-total">S/0.00</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-pendientes">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💰 MIS TICKETS POR COBRAR</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button>
+            </div>
+            
+            <div id="pendientes-info" style="margin-bottom: 15px; color: #ffd700; font-weight: bold; text-align: center;">
+                Cargando...
+            </div>
+            
+            <div id="lista-pendientes" style="max-height: 400px; overflow-y: auto;">
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-reglas">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📖 REGLAS DE PAGO</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-reglas')">X</button>
+            </div>
+            
+            <div style="line-height: 2; color: #ddd;">
+                <h4 style="color: #ffd700; margin: 15px 0;">🎯 Animales (00-39)</h4>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
+                    <li>Ejemplo: S/10 → S/350</li>
+                </ul>
+                
+                <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Pago: <strong style="color: #e74c3c;">x70</strong> veces el monto apostado</li>
+                    <li>Ejemplo: S/10 → S/700</li>
+                </ul>
+                
+                <h4 style="color: #ffd700; margin: 15px 0;">🎯 TRIPLETA</h4>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Selecciona <strong>3 animalitos</strong></li>
+                    <li>Si salen los 3 durante el día: <strong style="color: #ffd700;">x60</strong></li>
+                    <li>Ejemplo: S/10 → S/600</li>
+                </ul>
+                
+                <h4 style="color: #ffd700; margin: 15px 0;">🎲 Especiales</h4>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Rojo, Negro, Par, Impar</li>
+                    <li>Pago: <strong style="color: #2980b9;">x2</strong> veces el monto</li>
+                </ul>
+                
+                <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Importante</h4>
+                <ul style="margin-left: 20px;">
+                    <li>Anular: Solo dentro de 5 minutos</li>
+                    <li>Bloqueo: 5 minutos antes del sorteo</li>
+                    <li>Vencimiento: Tickets vencen a los 3 días</li>
+                    <li>Horarios: 8AM a 6PM hora Perú</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-como-usar">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>❓ CÓMO USAR EL SISTEMA</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-como-usar')">X</button>
+            </div>
+            
+            <div style="line-height: 1.8; color: #ddd;">
+                <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
+                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta Normal</h4>
+                    <ol style="margin-left: 20px; color: #aaa;">
+                        <li>Selecciona el monto (puede ser 0.5, 1, 1.5, etc.)</li>
+                        <li>Toca los animales que quieres jugar</li>
+                        <li>Selecciona los horarios</li>
+                        <li>Presiona "AGREGAR AL TICKET"</li>
+                        <li>Presiona "ENVIAR POR WHATSAPP"</li>
+                    </ol>
+                </div>
+                
+                <div style="background: rgba(255,165,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #FFA500;">
+                    <h4 style="color: #FFA500; margin-bottom: 10px;">2. Hacer una Tripleta</h4>
+                    <ol style="margin-left: 20px; color: #aaa;">
+                        <li>Presiona el botón 🎯 TRIPLETA</li>
+                        <li>Selecciona exactamente 3 animalitos</li>
+                        <li>Presiona "AGREGAR AL TICKET"</li>
+                        <li>Paga <strong>x60</strong> veces el monto apostado</li>
+                    </ol>
+                </div>
+                
+                <div style="background: rgba(39,174,96,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
+                    <h4 style="color: #27ae60; margin-bottom: 10px;">3. Reimprimir un Ticket</h4>
+                    <ol style="margin-left: 20px; color: #aaa;">
+                        <li>Ve a "Mis Tickets Vendidos"</li>
+                        <li>Busca el ticket</li>
+                        <li>Presiona "🖨️ Reimprimir"</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal-acerca">
+        <div class="modal-content" style="text-align: center;">
+            <div class="modal-header">
+                <h3>ℹ️ ACERCA DEL SISTEMA</h3>
+                <button class="btn-close" onclick="cerrarModal('modal-acerca')">X</button>
+            </div>
+            
+            <div style="padding: 20px;">
+                <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
+                <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
+                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 7.1 - Corregida</p>
+                
+                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
+                    <p style="color: #ffd700; margin: 0; line-height: 1.8;">
+                        <strong>Novedades v7.1:</strong><br>
+                        ✓ Reportes históricos funcionando<br>
+                        ✓ Reimpresión de tickets<br>
+                        ✓ Decimales (0.5, 1.5, etc.)<br>
+                        ✓ Hasta 5000 tickets por consulta<br>
+                        ✓ Tickets anulados visibles<br>
+                        ✓ Resultados cargan y editan correctamente
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
+        let modoTripleta = false;
+        let seleccionTripleta = [];
+        let horasPeru = JSON.parse('{{ horarios_peru | tojson | safe }}');
+        let horasVen = JSON.parse('{{ horarios_venezuela | tojson | safe }}');
+        
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobileMenu');
+            const overlay = document.querySelector('.mobile-menu-overlay');
+            menu.classList.toggle('active');
+            overlay.classList.toggle('active');
+        }
+        
+        function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
+        function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
+        function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
+        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
+        function abrirBuscarTicketMobile() { toggleMobileMenu(); abrirBuscarTicket(); }
+        function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
+        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
+        function mostrarReglasMobile() { toggleMobileMenu(); mostrarReglas(); }
+        function mostrarComoUsarMobile() { toggleMobileMenu(); mostrarComoUsar(); }
+        function mostrarAcercaMobile() { toggleMobileMenu(); mostrarAcerca(); }
+        
+        function showToast(message, type = 'info') {
+            const existing = document.querySelector('.toast-notification');
+            if (existing) existing.remove();
+            
+            const toast = document.createElement('div');
+            toast.className = 'toast-notification';
+            toast.style.background = type === 'error' ? '#c0392b' : type === 'success' ? '#27ae60' : '#2980b9';
+            toast.style.color = 'white';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideUp 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+        
+        function toggleModoTripleta() {
+            modoTripleta = !modoTripleta;
+            const btn = document.getElementById('btn-tripleta');
+            const banner = document.getElementById('tripleta-banner');
+            
+            if (modoTripleta) {
+                btn.classList.add('active');
+                banner.classList.add('active');
+                seleccionTripleta = [];
+                showToast('Modo Tripleta activado: Selecciona 3 animalitos (Paga x60)', 'info');
+            } else {
+                btn.classList.remove('active');
+                banner.classList.remove('active');
+                seleccionTripleta = [];
+                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
+                    el.classList.remove('tripleta-seleccionado');
+                });
+            }
+            updateTicket();
+        }
+        
+        function updateReloj() {
+            try {
+                let now = new Date();
+                let peruTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Lima"}));
+                document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {
+                    hour: '2-digit', 
+                    minute:'2-digit', 
+                    hour12: true,
+                    timeZone: 'America/Lima'
+                });
+                
+                let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
+                
+                if (typeof horasPeru === 'undefined' || !Array.isArray(horasPeru)) {
+                    console.error('horasPeru no está definido correctamente');
+                    return;
+                }
+                
+                horasPeru.forEach((h, idx) => {
+                    try {
+                        let partes = h.split(/[: ]/);
+                        let hora = parseInt(partes[0]);
+                        let minuto = parseInt(partes[1]);
+                        let ampm = partes[2];
+                        if (ampm === 'PM' && hora !== 12) hora += 12;
+                        if (ampm === 'AM' && hora === 12) hora = 0;
+                        let sorteoMinutos = hora * 60 + minuto;
+                        let btn = document.getElementById('hora-' + (idx + 1));
+                        if (btn && horaActual > sorteoMinutos - 5) {
+                            btn.classList.add('expired');
+                        }
+                    } catch(e) {
+                        console.error('Error procesando hora:', h, e);
+                    }
+                });
+            } catch(e) {
+                console.error('Error en updateReloj:', e);
+            }
+        }
+        
+        setInterval(updateReloj, 30000);
+        setTimeout(updateReloj, 1000);
+        
+        function toggleAni(k, nombre) {
+            if (modoTripleta) {
+                let idx = seleccionTripleta.findIndex(a => a.k === k);
+                let el = document.getElementById('ani-' + k);
+                
+                if (idx >= 0) {
+                    seleccionTripleta.splice(idx, 1);
+                    el.classList.remove('tripleta-seleccionado');
+                } else {
+                    if (seleccionTripleta.length >= 3) {
+                        showToast('Solo puedes seleccionar 3 animalitos para la tripleta', 'error');
+                        return;
+                    }
+                    seleccionTripleta.push({k, nombre});
+                    el.classList.add('tripleta-seleccionado');
+                    if (navigator.vibrate) navigator.vibrate(50);
+                }
+            } else {
+                let idx = seleccionados.findIndex(a => a.k === k);
+                let el = document.getElementById('ani-' + k);
+                if (idx >= 0) {
+                    seleccionados.splice(idx, 1);
+                    el.classList.remove('active');
+                } else {
+                    seleccionados.push({k, nombre});
+                    el.classList.add('active');
+                    if (navigator.vibrate) navigator.vibrate(50);
+                }
+            }
+            updateTicket();
+        }
+        
+        function toggleEsp(tipo) {
+            if (modoTripleta) {
+                showToast('No puedes jugar especiales en modo Tripleta', 'error');
+                return;
+            }
+            let idx = especiales.indexOf(tipo);
+            let el = document.querySelector('.btn-' + tipo.toLowerCase());
+            if (idx >= 0) {
+                especiales.splice(idx, 1);
+                el.classList.remove('active');
+            } else {
+                especiales.push(tipo);
+                el.classList.add('active');
+            }
+            updateTicket();
+        }
+        
+        function toggleHora(hora, id) {
+            if (modoTripleta) {
+                showToast('Las tripletas no necesitan horario (validas todo el dia)', 'info');
+                return;
+            }
+            let btn = document.getElementById('hora-' + id);
+            if (btn.classList.contains('expired')) {
+                showToast('Este sorteo ya cerro', 'error');
+                return;
+            }
+            let idx = horariosSel.indexOf(hora);
+            if (idx >= 0) {
+                horariosSel.splice(idx, 1);
+                btn.classList.remove('active');
+            } else {
+                horariosSel.push(hora);
+                btn.classList.add('active');
+            }
+            updateTicket();
+        }
+        
+        function updateTicket() {
+            const display = document.getElementById('ticket-display');
+            let total = 0;
+            let html = '<table class="ticket-table"><thead><tr><th>Hora</th><th>Apuesta</th><th>S/</th></tr></thead><tbody>';
+            
+            for (let item of carrito) {
+                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : 
+                         item.tipo === 'tripleta' ? 'TRIP' : item.seleccion;
+                let color = item.tipo === 'animal' ? '#ffd700' : 
+                           item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
+                let horaTxt = item.tipo === 'tripleta' ? 'Todo el dia' : item.hora;
+                // CORREGIDO: Mostrar decimales correctamente
+                let montoStr = item.monto % 1 === 0 ? item.monto : item.monto.toFixed(1);
+                html += `<tr>
+                    <td style="color:#aaa; font-size:0.75rem">${horaTxt}</td>
+                    <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
+                    <td style="text-align:right; font-weight:bold">${montoStr}</td>
+                </tr>`;
+                total += item.monto;
+            }
+            
+            if (modoTripleta && seleccionTripleta.length > 0) {
+                let monto = parseFloat(document.getElementById('monto').value) || 5;
+                let nums = seleccionTripleta.map(a => a.k).join(',');
+                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
+                let montoStr = monto % 1 === 0 ? monto : monto.toFixed(1);
+                html += `<tr style="opacity:0.8; background:rgba(255,165,0,0.2)">
+                    <td style="color:#FFA500; font-size:0.75rem">Todo el dia</td>
+                    <td style="color:#FFA500; font-size:0.8rem">🎯 ${nums} (${nombres})</td>
+                    <td style="text-align:right; color:#FFA500; font-weight:bold">${montoStr}</td>
+                </tr>`;
+            } else if (!modoTripleta && horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
+                let monto = parseFloat(document.getElementById('monto').value) || 5;
+                let montoStr = monto % 1 === 0 ? monto : monto.toFixed(1);
+                for (let h of horariosSel) {
+                    for (let a of seleccionados) {
+                        let indicador = a.k === "40" ? " 🦉x70" : "";
+                        html += `<tr style="opacity:0.7; background:rgba(255,215,0,0.1)">
+                            <td style="color:#ffd700; font-size:0.75rem">${h}</td>
+                            <td style="color:#ffd700; font-size:0.8rem">${a.k} ${a.nombre}${indicador}</td>
+                            <td style="text-align:right; color:#ffd700; font-weight:bold">${montoStr}</td>
+                        </tr>`;
+                    }
+                    for (let e of especiales) {
+                        html += `<tr style="opacity:0.7; background:rgba(52,152,219,0.1)">
+                            <td style="color:#3498db; font-size:0.75rem">${h}</td>
+                            <td style="color:#3498db; font-size:0.8rem">${e}</td>
+                            <td style="text-align:right; color:#3498db; font-weight:bold">${montoStr}</td>
+                        </tr>`;
+                    }
+                }
+            }
+            
+            html += '</tbody></table>';
+            
+            if (carrito.length === 0 && 
+                (seleccionados.length === 0 && especiales.length === 0 && seleccionTripleta.length === 0)) {
+                html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
+            } else if (carrito.length === 0) {
+                html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
+            }
+            
+            if (total > 0) {
+                let totalStr = total % 1 === 0 ? total : total.toFixed(1);
+                html += `<div class="ticket-total">TOTAL: S/${totalStr}</div>`;
+            }
+            
+            display.innerHTML = html;
+        }
+        
+        function agregar() {
+            if (modoTripleta) {
+                if (seleccionTripleta.length !== 3) {
+                    showToast('Debes seleccionar exactamente 3 animalitos para la tripleta', 'error');
+                    return;
+                }
+                let monto = parseFloat(document.getElementById('monto').value) || 5;
+                let nums = seleccionTripleta.map(a => a.k).join(',');
+                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
+                
+                carrito.push({
+                    hora: 'Todo el dia', 
+                    seleccion: nums, 
+                    nombre: nombres, 
+                    monto: monto, 
+                    tipo: 'tripleta'
+                });
+                
+                seleccionTripleta = [];
+                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
+                    el.classList.remove('tripleta-seleccionado');
+                });
+                
+                showToast('Tripleta agregada al ticket (Paga x60)', 'success');
+                updateTicket();
+                return;
+            }
+            
+            if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
+                showToast('Selecciona horario y animal/especial', 'error'); 
+                return;
+            }
+            let monto = parseFloat(document.getElementById('monto').value) || 5;
+            let count = 0;
+            for (let h of horariosSel) {
+                for (let a of seleccionados) {
+                    carrito.push({hora: h, seleccion: a.k, nombre: a.nombre, monto: monto, tipo: 'animal'});
+                    count++;
+                }
+                for (let e of especiales) {
+                    carrito.push({hora: h, seleccion: e, nombre: e, monto: monto, tipo: 'especial'});
+                    count++;
+                }
+            }
+            seleccionados = []; especiales = []; horariosSel = [];
+            document.querySelectorAll('.animal-card.active, .btn-esp.active, .btn-hora.active').forEach(el => el.classList.remove('active'));
+            updateTicket();
+            showToast(`${count} jugada(s) agregada(s)`, 'success');
+        }
+        
+        async function vender() {
+            if (carrito.length === 0) { 
+                showToast('Carrito vacio', 'error'); 
+                return; 
+            }
+            
+            const btn = document.querySelector('.btn-vender');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Procesando...';
+            btn.disabled = true;
+            
+            try {
+                let jugadas = carrito.map(c => ({
+                    hora: c.hora, 
+                    seleccion: c.seleccion, 
+                    monto: c.monto, 
+                    tipo: c.tipo
+                }));
+                
+                const response = await fetch('/api/procesar-venta', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({jugadas: jugadas})
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                        window.location.href = data.url_whatsapp;
+                    } else {
+                        window.open(data.url_whatsapp, '_blank');
+                    }
+                    carrito = []; 
+                    updateTicket();
+                    showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
+                }
+            } catch (e) {
+                showToast('Error de conexion. Intenta de nuevo.', 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function verResultados() {
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('resultados-fecha').value = hoy;
+            cargarResultadosFecha();
+            document.getElementById('modal-resultados').style.display = 'block';
+        }
+
+        function cargarResultadosFecha() {
+            let fecha = document.getElementById('resultados-fecha').value;
+            if (!fecha) return;
+            
+            let container = document.getElementById('lista-resultados');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
+            
+            let fechaObj = new Date(fecha + 'T00:00:00');
+            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('resultados-fecha-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
+            
+            fetch('/api/resultados-fecha', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha: fecha})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
+                    return;
+                }
+                
+                let html = '';
+                if (d.resultados && Object.keys(d.resultados).length > 0) {
+                    for (let hora of horasPeru) {
+                        let resultado = d.resultados[hora];
+                        let clase = resultado ? '' : 'pendiente';
+                        let contenido;
+                        
+                        if (resultado) {
+                            contenido = `
+                                <span class="resultado-numero">${resultado.animal}</span>
+                                <span class="resultado-nombre">${resultado.nombre}</span>
+                            `;
+                        } else {
+                            contenido = `
+                                <span style="color: #666; font-size:1.1rem">Pendiente</span>
+                                <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
+                            `;
+                        }
+                        
+                        let horaVenIdx = horasPeru.indexOf(hora);
+                        let horaVen = horaVenIdx >= 0 ? horasVen[horaVenIdx] : '';
+                        
+                        html += `
+                            <div class="resultado-item ${clase}">
+                                <div style="display: flex; flex-direction: column;">
+                                    <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
+                                    <small style="color: #666; font-size: 0.75rem;">Venezuela: ${horaVen}</small>
+                                </div>
+                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
+                                    ${contenido}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles para esta fecha</p>';
+                }
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>';
+            });
+        }
+
+        function cerrarModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+        
+        function abrirCaja() {
+            fetch('/api/caja')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) { 
+                    showToast(d.error, 'error'); 
+                    return; 
+                }
+                document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
+                document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
+                document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
+                
+                let balanceEl = document.getElementById('caja-balance');
+                balanceEl.textContent = 'S/' + d.balance.toFixed(2);
+                balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
+                
+                let alertaDiv = document.getElementById('alerta-pendientes');
+                let infoDiv = document.getElementById('info-pendientes');
+                if (d.tickets_pendientes > 0) {
+                    alertaDiv.style.display = 'block';
+                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.<br>¡Pasa a pagar!`;
+                } else {
+                    alertaDiv.style.display = 'none';
+                }
+                
+                document.getElementById('modal-caja').style.display = 'block';
+            })
+            .catch(e => showToast('Error de conexion', 'error'));
+            
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('hist-fecha-inicio').value = hoy;
+            document.getElementById('hist-fecha-fin').value = hoy;
+        }
+        
+        function abrirCajaHistorico() {
+            abrirCaja();
+            setTimeout(() => switchTab('historico'), 100);
+        }
+        
+        function abrirCalculadora() {
+            document.getElementById('modal-calculadora').style.display = 'block';
+            calcularPremio();
+        }
+        
+        function abrirMisTickets() {
+            document.getElementById('modal-mis-tickets').style.display = 'block';
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
+            document.getElementById('mis-tickets-fecha-fin').value = hoy;
+        }
+        
+        function abrirBuscarTicket() {
+            document.getElementById('modal-buscar-ticket').style.display = 'block';
+            document.getElementById('buscar-serial-input').value = '';
+            document.getElementById('resultado-busqueda-ticket').innerHTML = '';
+            document.getElementById('buscar-serial-input').focus();
+        }
+        
+        function consultarMisTickets() {
+            let inicio = document.getElementById('mis-tickets-fecha-inicio').value;
+            let fin = document.getElementById('mis-tickets-fecha-fin').value;
+            let estado = document.getElementById('mis-tickets-estado').value;
+            
+            if (!inicio || !fin) {
+                showToast('Seleccione fechas', 'error');
+                return;
+            }
+            
+            let container = document.getElementById('lista-mis-tickets');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
+            
+            fetch('/api/mis-tickets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    fecha_inicio: inicio,
+                    fecha_fin: fin,
+                    estado: estado
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
+                    return;
+                }
+                
+                document.getElementById('mis-tickets-resumen').style.display = 'block';
+                document.getElementById('mis-tickets-info').textContent = 
+                    `${d.totales.cantidad} tickets - Total ventas: S/${d.totales.ventas.toFixed(2)}`;
+                
+                if (d.tickets.length === 0) {
+                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No se encontraron tickets con esos filtros</p>';
+                    return;
+                }
+                
+                let html = '';
+                d.tickets.forEach(t => {
+                    let estadoClass = t.pagado ? 'ganador' : (t.premio_calculado ? 'pendiente-pago' : (t.anulado ? 'anulado' : ''));
+                    let estadoText = t.pagado ? 'PAGADO' : (t.anulado ? 'ANULADO' : (t.premio_calculado ? 'GANADOR (sin cobrar)' : 'PENDIENTE'));
+                    let estadoBadgeClass = t.pagado ? 'estado-pagado' : (t.anulado ? 'estado-anulado' : 'estado-pendiente');
+                    
+                    html += `
+                        <div class="ticket-item ${estadoClass}" onclick="verDetalleTicket('${t.serial}')">
+                            <div class="ticket-serial">#${t.serial}</div>
+                            <div class="ticket-info">${t.fecha} - Total: S/${t.total}</div>
+                            ${t.premio_calculado ? `<div class="ticket-premio">Premio: S/${t.premio_calculado}</div>` : ''}
+                            <span class="ticket-estado ${estadoBadgeClass}">${estadoText}</span>
+                            ${!t.pagado && !t.anulado ? `<button class="btn-reimprimir" onclick="event.stopPropagation(); reimprimirTicket('${t.serial}')">🖨️ Reimprimir</button>` : ''}
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>';
+            });
+        }
+        
+        // NUEVA FUNCION: Reimprimir ticket
+        function reimprimirTicket(serial) {
+            fetch('/api/reimprimir-ticket', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    showToast(d.error, 'error');
+                    return;
+                }
+                
+                if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                    window.location.href = d.url_whatsapp;
+                } else {
+                    window.open(d.url_whatsapp, '_blank');
+                }
+                showToast('Ticket listo para reimprimir', 'success');
+            })
+            .catch(e => showToast('Error de conexion', 'error'));
+        }
+        
+        function buscarTicketEspecifico() {
+            let serial = document.getElementById('buscar-serial-input').value.trim();
+            if (!serial) {
+                showToast('Ingrese un serial', 'error');
+                return;
+            }
+            
+            let container = document.getElementById('resultado-busqueda-ticket');
+            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Buscando...</p>';
+            
+            fetch('/api/consultar-ticket-detalle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">' + d.error + '</p>';
+                    return;
+                }
+                
+                let t = d.ticket;
+                let estadoColor = t.pagado ? '#27ae60' : (t.anulado ? '#c0392b' : (t.premio_total > 0 ? '#f39c12' : '#888'));
+                let estadoText = t.pagado ? 'PAGADO' : (t.anulado ? 'ANULADO' : (t.premio_total > 0 ? 'GANADOR - PENDIENTE DE COBRO' : 'NO GANADOR'));
+                
+                let html = `
+                    <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; border: 2px solid ${estadoColor};">
+                        <h3 style="color: #ffd700; margin-bottom: 15px; text-align: center;">TICKET #${t.serial}</h3>
+                        <div class="stats-box" style="margin-bottom: 15px;">
+                            <div class="stat-row">
+                                <span class="stat-label">Fecha:</span>
+                                <span class="stat-value" style="font-size: 1rem;">${t.fecha}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Apostado:</span>
+                                <span class="stat-value" style="font-size: 1rem;">S/${t.total_apostado}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Estado:</span>
+                                <span class="stat-value" style="color: ${estadoColor}; font-size: 1rem;">${estadoText}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Premio Total:</span>
+                                <span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">
+                                    S/${t.premio_total.toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+                        <h4 style="color: #ffd700; margin-bottom: 10px;">Detalle de Jugadas:</h4>
+                `;
+                
+                d.jugadas.forEach(j => {
+                    let ganoClass = j.gano ? 'jugada-ganadora' : '';
+                    let resultadoText = j.resultado ? `${j.resultado}` : 'Pendiente';
+                    
+                    html += `
+                        <div class="jugada-detail ${ganoClass}">
+                            <div>
+                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
+                                <small style="color: #888;">Resultado: ${resultadoText}</small>
+                            </div>
+                            <div style="text-align: right;">
+                                <div>S/${j.monto}</div>
+                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                // Botones de acción
+                if (!t.pagado && !t.anulado) {
+                    html += `
+                        <div style="margin-top: 15px; text-align: center;">
+                            <button class="btn-reimprimir" onclick="reimprimirTicket('${t.serial}')">🖨️ Reimprimir Ticket</button>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>';
+            });
+        }
+        
+        function verDetalleTicket(serial) {
+            document.getElementById('modal-mis-tickets').style.display = 'none';
+            abrirBuscarTicket();
+            document.getElementById('buscar-serial-input').value = serial;
+            buscarTicketEspecifico();
+        }
+        
+        function abrirMisTicketsPendientes() {
+            document.getElementById('modal-pendientes').style.display = 'block';
+            document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
+            
+            fetch('/api/mis-tickets-pendientes')
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
+                    return;
+                }
+                
+                document.getElementById('pendientes-info').innerHTML = 
+                    `Total Pendiente: <span style="color: #27ae60; font-size: 1.3rem;">S/${d.total_pendiente.toFixed(2)}</span> (${d.tickets.length} tickets)`;
+                
+                if (d.tickets.length === 0) {
+                    document.getElementById('lista-pendientes').innerHTML = 
+                        '<p style="color: #888; text-align: center; padding: 20px;">No tienes tickets pendientes por cobrar</p>';
+                    return;
+                }
+                
+                let html = '';
+                d.tickets.forEach(t => {
+                    html += `
+                        <div class="ticket-item ganador">
+                            <div class="ticket-serial">#${t.serial}</div>
+                            <div class="ticket-info">Fecha: ${t.fecha} • Jugadas: ${t.jugadas} • Apostado: S/${t.total}</div>
+                            <div class="ticket-premio">💰 Ganancia: S/${t.premio.toFixed(2)}</div>
+                        </div>
+                    `;
+                });
+                document.getElementById('lista-pendientes').innerHTML = html;
+            })
+            .catch(e => {
+                document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexion</p>';
+            });
+        }
+        
+        function mostrarReglas() {
+            document.getElementById('modal-reglas').style.display = 'block';
+        }
+        
+        function mostrarComoUsar() {
+            document.getElementById('modal-como-usar').style.display = 'block';
+        }
+        
+        function mostrarAcerca() {
+            document.getElementById('modal-acerca').style.display = 'block';
+        }
+        
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+        
+        function consultarHistoricoCaja() {
+            let inicio = document.getElementById('hist-fecha-inicio').value;
+            let fin = document.getElementById('hist-fecha-fin').value;
+            
+            if (!inicio || !fin) {
+                showToast('Seleccione ambas fechas', 'error');
+                return;
+            }
+            
+            fetch('/api/caja-historico', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    showToast(d.error, 'error');
+                    return;
+                }
+                
+                document.getElementById('resultado-historico').style.display = 'block';
+                document.getElementById('hist-ventas').textContent = 'S/' + d.totales.ventas.toFixed(2);
+                document.getElementById('hist-premios').textContent = 'S/' + d.totales.premios.toFixed(2);
+                
+                let balanceEl = document.getElementById('hist-balance');
+                balanceEl.textContent = 'S/' + d.totales.balance.toFixed(2);
+                balanceEl.className = 'stat-value ' + (d.totales.balance >= 0 ? 'positive' : 'negative');
+                
+                let tbody = document.getElementById('tabla-historico-caja');
+                let html = '';
+                d.resumen_por_dia.forEach(dia => {
+                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
+                    html += `<tr>
+                        <td>${dia.fecha}</td>
+                        <td>${dia.tickets}</td>
+                        <td>S/${dia.ventas.toFixed(0)}</td>
+                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+
+                let alertaDiv = document.getElementById('hist-alerta-pendientes');
+                let infoDiv = document.getElementById('hist-info-pendientes');
+                if (d.totales.tickets_pendientes_cobro > 0) {
+                    alertaDiv.style.display = 'block';
+                    infoDiv.innerHTML = `${d.totales.tickets_pendientes_cobro} ticket(s) sin cobrar por <strong>S/${d.totales.total_pendiente_cobro.toFixed(2)}</strong>`;
+                } else {
+                    alertaDiv.style.display = 'none';
+                }
+            })
+            .catch(e => showToast('Error de conexion', 'error'));
+        }
+        
+        async function pagar() {
+            let serial = prompt('Ingrese SERIAL del ticket:'); 
+            if (!serial) return;
+            
+            try {
+                const response = await fetch('/api/verificar-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({serial: serial})
+                });
+                const d = await response.json();
+                
+                if (d.error) { 
+                    showToast(d.error, 'error'); 
+                    return; 
+                }
+                
+                let msg = "=== RESULTADO ===\\n\\n";
+                let total = d.total_ganado;
+                
+                msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
+                
+                if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
+                    await fetch('/api/pagar-ticket', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ticket_id: d.ticket_id})
+                    });
+                    showToast('✅ Ticket pagado correctamente', 'success');
+                } else if (total === 0) {
+                    showToast('Ticket no ganador', 'info');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        }
+        
+        async function anular() {
+            let serial = prompt('SERIAL a anular:'); 
+            if (!serial) return;
+            if (!confirm('¿ANULAR ' + serial + '?')) return;
+            
+            try {
+                const response = await fetch('/api/anular-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({serial: serial})
+                });
+                const d = await response.json();
+                
+                if (d.error) {
+                    showToast(d.error, 'error');
+                } else {
+                    showToast('✅ ' + d.mensaje, 'success');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        }
+        
+        function borrarTodo() {
+            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0 || seleccionTripleta.length > 0) {
+                if (!confirm('¿Borrar todo?')) return;
+            }
+            seleccionados = []; especiales = []; horariosSel = []; carrito = []; seleccionTripleta = [];
+            document.querySelectorAll('.active, .tripleta-seleccionado').forEach(el => {
+                el.classList.remove('active');
+                el.classList.remove('tripleta-seleccionado');
+            });
+            if (modoTripleta) toggleModoTripleta();
+            updateTicket();
+            showToast('Ticket limpiado', 'info');
+        }
+        
+        function calcularPremio() {
+            const monto = parseFloat(document.getElementById('calc-monto').value) || 0;
+            const multiplicador = parseInt(document.getElementById('calc-tipo').value);
+            const total = monto * multiplicador;
+            
+            document.getElementById('calc-total').textContent = 'S/' + total.toFixed(2);
+            document.getElementById('calc-resultado').style.display = 'block';
+        }
+        
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) this.style.display = 'none';
+            });
+        });
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('hist-fecha-inicio').value = hoy;
+            document.getElementById('hist-fecha-fin').value = hoy;
+            document.getElementById('resultados-fecha').value = hoy;
+            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
+            document.getElementById('mis-tickets-fecha-fin').value = hoy;
+        });
+    </script>
+</body>
+</html>
+'''
+
+ADMIN_HTML = '''
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zoolo Casino - Terminal de Venta</title>
+    <title>Admin - Zoolo Casino</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f5f5;
-            min-height: 100vh;
-        }
-        .header {
-            background: linear-gradient(135deg, #1a1a2e, #0f3460);
-            color: white;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .header h1 { font-size: 1.3em; }
-        .header-info {
-            display: flex;
-            gap: 20px;
-            font-size: 0.9em;
-        }
-        .header-info span {
-            background: rgba(255,255,255,0.1);
-            padding: 5px 12px;
-            border-radius: 20px;
-        }
-        .nav-tabs {
-            display: flex;
-            background: white;
-            border-bottom: 2px solid #ddd;
-        }
-        .nav-tab {
-            flex: 1;
-            padding: 15px;
-            text-align: center;
-            cursor: pointer;
-            border: none;
-            background: white;
-            font-size: 1em;
-            transition: all 0.3s;
-        }
-        .nav-tab:hover { background: #f0f0f0; }
-        .nav-tab.active {
-            background: #0f3460;
-            color: white;
-        }
-        .content { padding: 20px; max-width: 1400px; margin: 0 auto; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.3rem; }
+        .nav { display: flex; gap: 10px; }
+        .nav button { background: rgba(255,255,255,0.2); border: none; color: #fff; padding: 8px 15px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
+        .nav button:hover { background: rgba(255,255,255,0.3); }
+        .container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: #252542; border-radius: 12px; padding: 20px; }
+        .card h3 { color: #a0a0c0; font-size: 0.9rem; margin-bottom: 10px; text-transform: uppercase; }
+        .card .valor { font-size: 2rem; font-weight: bold; color: #fff; }
+        .card .valor.success { color: #2ecc71; }
+        .card .valor.danger { color: #e74c3c; }
+        .card .valor.warning { color: #f39c12; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #a0a0c0; font-size: 0.9rem; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid #3a3a5c; border-radius: 8px; background: #1a1a2e; color: #fff; font-size: 1rem; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; transition: all 0.3s; }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; }
+        .btn-success { background: #27ae60; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-warning { background: #f39c12; color: #fff; }
+        .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.85rem; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #3a3a5c; }
+        th { background: #1a1a2e; color: #a0a0c0; font-weight: 600; }
+        tr:hover { background: rgba(102, 126, 234, 0.1); }
+        .tabs { display: flex; gap: 5px; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab { padding: 10px 20px; background: #252542; border: none; color: #a0a0c0; cursor: pointer; border-radius: 8px 8px 0 0; }
+        .tab.active { background: #667eea; color: #fff; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        
-        /* Panel de Venta */
-        .venta-panel {
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            gap: 20px;
-        }
-        .animales-grid {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            gap: 8px;
-        }
-        .animal-btn {
-            aspect-ratio: 1;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.75em;
-            transition: all 0.2s;
-            position: relative;
-        }
-        .animal-btn:hover { transform: scale(1.05); }
-        .animal-btn .num { font-size: 1.4em; font-weight: bold; }
-        .animal-btn .name { font-size: 0.8em; margin-top: 2px; }
-        .animal-btn.rojo { background: #c0392b; color: white; }
-        .animal-btn.negro { background: #2c3e50; color: white; }
-        .animal-btn.verde { background: #27ae60; color: white; }
-        .animal-btn.selected { box-shadow: 0 0 0 4px #f39c12; }
-        
-        .ticket-panel {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        }
-        .ticket-panel h3 {
-            color: #0f3460;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #eee;
-        }
-        .jugadas-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin-bottom: 15px;
-        }
-        .jugada-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            margin-bottom: 8px;
-        }
-        .jugada-info { flex: 1; }
-        .jugada-tipo {
-            font-size: 0.75em;
-            padding: 2px 8px;
-            border-radius: 10px;
-            margin-right: 5px;
-        }
-        .tipo-animal { background: #e3f2fd; color: #1565c0; }
-        .tipo-posicion { background: #f3e5f5; color: #7b1fa2; }
-        .tipo-tripleta { background: #fff3e0; color: #e65100; }
-        .jugada-monto {
-            font-weight: bold;
-            color: #27ae60;
-        }
-        .jugada-delete {
-            background: #e74c3c;
-            color: white;
-            border: none;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            cursor: pointer;
-            margin-left: 10px;
-        }
-        .total-section {
-            border-top: 2px solid #eee;
-            padding-top: 15px;
-            margin-bottom: 15px;
-        }
-        .total-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        .total-row.grand-total {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #0f3460;
-            border-top: 1px solid #ddd;
-            padding-top: 10px;
-            margin-top: 10px;
-        }
-        .monto-input-group {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        .monto-input {
-            flex: 1;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 10px;
-            font-size: 1.2em;
-            text-align: center;
-        }
-        .btn-agregar {
-            background: #27ae60;
-            color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 1em;
-        }
-        .btn-vender {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #0f3460, #533483);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 1.3em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .btn-vender:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(15,52,96,0.4);
-        }
-        .btn-vender:disabled {
-            background: #95a5a6;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .modal.active { display: flex; }
-        .modal-content {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            max-width: 500px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .modal-header h2 { color: #0f3460; }
-        .modal-close {
-            background: none;
-            border: none;
-            font-size: 1.5em;
-            cursor: pointer;
-            color: #666;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #333;
-            font-weight: 500;
-        }
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 10px;
-            font-size: 1em;
-        }
-        
-        /* Tickets Tabla */
-        .filters-row {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        .filter-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .filter-group label { font-weight: 500; }
-        .filter-group select, .filter-group input {
-            padding: 10px 15px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-        }
-        .btn-filtrar {
-            background: #0f3460;
-            color: white;
-            border: none;
-            padding: 10px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        .btn-reimprimir {
-            background: #27ae60;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-        .btn-anular {
-            background: #e74c3c;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-        .tickets-table {
-            width: 100%;
-            background: white;
-            border-radius: 15px;
-            overflow: hidden;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        }
-        .tickets-table th, .tickets-table td {
-            padding: 15px;
-            text-align: left;
-        }
-        .tickets-table th {
-            background: #0f3460;
-            color: white;
-        }
-        .tickets-table tr:nth-child(even) { background: #f8f9fa; }
-        .tickets-table tr:hover { background: #e3f2fd; }
-        .estado-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.8em;
-            font-weight: 500;
-        }
-        .estado-activo { background: #d4edda; color: #155724; }
-        .estado-pagado { background: #cce5ff; color: #004085; }
-        .estado-pendiente { background: #fff3cd; color: #856404; }
-        .estado-anulado { background: #f8d7da; color: #721c24; }
-        .estado-por_pagar { background: #e2e3e5; color: #383d41; }
-        
-        /* Reportes */
-        .reportes-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .reporte-card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .reporte-card h4 {
-            color: #666;
-            font-size: 0.9em;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-        }
-        .reporte-value {
-            font-size: 2em;
-            font-weight: bold;
-            color: #0f3460;
-        }
-        .reporte-card.ventas .reporte-value { color: #27ae60; }
-        .reporte-card.premios .reporte-value { color: #e74c3c; }
-        .reporte-card.balance .reporte-value { color: #f39c12; }
-        
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .venta-panel { grid-template-columns: 1fr; }
-            .animales-grid { grid-template-columns: repeat(5, 1fr); }
-        }
+        .filtros { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .filtros input, .filtros select { padding: 10px; border: 1px solid #3a3a5c; border-radius: 8px; background: #1a1a2e; color: #fff; }
+        .estado-badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        .estado-activo { background: #27ae60; }
+        .estado-pagado { background: #3498db; }
+        .estado-pendiente { background: #f39c12; }
+        .estado-anulado { background: #e74c3c; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 15px 25px; border-radius: 8px; color: #fff; font-weight: 500; z-index: 10000; animation: slideIn 0.3s ease; }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #e74c3c; }
+        @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #252542; padding: 30px; border-radius: 12px; max-width: 500px; width: 90%; }
+        .detalle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 15px 0; }
+        .detalle-item { background: #1a1a2e; padding: 10px; border-radius: 8px; text-align: center; }
+        .detalle-item .num { font-size: 1.2rem; font-weight: bold; color: #667eea; }
+        .detalle-item .tipo { font-size: 0.75rem; color: #a0a0c0; }
         @media (max-width: 768px) {
-            .animales-grid { grid-template-columns: repeat(4, 1fr); }
-            .header-info { display: none; }
+            .header { flex-direction: column; gap: 10px; }
+            .nav { flex-wrap: wrap; justify-content: center; }
+            .grid { grid-template-columns: 1fr; }
+            .filtros { flex-direction: column; }
+            table { font-size: 0.75rem; }
+            th, td { padding: 6px; }
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🎰 ZOOLO CASINO - Terminal POS</h1>
-        <div class="header-info">
-            <span>👤 {{ session.usuario }}</span>
-            <span>🏢 {{ session.agencia_nombre }}</span>
-            <span id="hora-actual">--:--</span>
+        <h1>Panel de Administracion</h1>
+        <div class="nav">
+            <button onclick="mostrarSeccion('dashboard')">Dashboard</button>
+            <button onclick="mostrarSeccion('resultados')">Resultados</button>
+            <button onclick="mostrarSeccion('tickets')">Tickets</button>
+            <button onclick="mostrarSeccion('usuarios')">Usuarios</button>
+            <button onclick="mostrarSeccion('reportes')">Reportes</button>
+            <button onclick="window.location.href='/pos'">Ir a POS</button>
+            <button onclick="cerrarSesion()">Cerrar Sesion</button>
         </div>
     </div>
-    
-    <div class="nav-tabs">
-        <button class="nav-tab active" onclick="showTab('venta')">🎫 VENTA</button>
-        <button class="nav-tab" onclick="showTab('tickets')">📋 MIS TICKETS</button>
-        <button class="nav-tab" onclick="showTab('reportes')">📊 REPORTES</button>
-        <button class="nav-tab" onclick="location.href='/logout'">🚪 SALIR</button>
-    </div>
-    
-    <div class="content">
-        <!-- TAB VENTA -->
-        <div id="tab-venta" class="tab-content active">
-            <div class="venta-panel">
-                <div class="animales-section">
-                    <div class="animales-grid" id="animales-grid"></div>
+
+    <div class="container">
+        <!-- DASHBOARD -->
+        <div id="dashboard" class="seccion">
+            <div class="grid">
+                <div class="card">
+                    <h3>Ventas Hoy</h3>
+                    <div class="valor" id="dash-ventas">S/ 0.00</div>
                 </div>
-                <div class="ticket-panel">
-                    <h3>🎫 Ticket Actual</h3>
-                    <div class="form-group">
-                        <label>Sorteo / Horario</label>
-                        <select id="horario-select">
-                            <option value="">Seleccione horario...</option>
-                        </select>
-                    </div>
-                    <div class="monto-input-group">
-                        <input type="number" id="monto-input" class="monto-input" 
-                               placeholder="Monto" step="0.5" min="0.5">
-                        <button class="btn-agregar" onclick="agregarJugada()">+</button>
-                    </div>
-                    <div class="jugadas-list" id="jugadas-list"></div>
-                    <div class="total-section">
-                        <div class="total-row">
-                            <span>Subtotal:</span>
-                            <span id="subtotal">$0.00</span>
-                        </div>
-                        <div class="total-row grand-total">
-                            <span>TOTAL:</span>
-                            <span id="total-ticket">$0.00</span>
-                        </div>
-                    </div>
-                    <button class="btn-vender" id="btn-vender" onclick="venderTicket()" disabled>
-                        VENDER TICKET
-                    </button>
+                <div class="card">
+                    <h3>Tickets Hoy</h3>
+                    <div class="valor success" id="dash-tickets">0</div>
+                </div>
+                <div class="card">
+                    <h3>Tickets Pendientes</h3>
+                    <div class="valor warning" id="dash-pendientes">0</div>
+                </div>
+                <div class="card">
+                    <h3>Comisiones</h3>
+                    <div class="valor danger" id="dash-comisiones">S/ 0.00</div>
                 </div>
             </div>
+            <div class="card">
+                <h3>Ultimos Tickets</h3>
+                <div id="dash-ultimos"></div>
+            </div>
         </div>
-        
-        <!-- TAB TICKETS -->
-        <div id="tab-tickets" class="tab-content">
-            <div class="filters-row">
-                <div class="filter-group">
-                    <label>Estado:</label>
-                    <select id="filtro-estado">
+
+        <!-- RESULTADOS -->
+        <div id="resultados" class="seccion" style="display:none;">
+            <div class="card">
+                <h3>Gestionar Resultados</h3>
+                <div class="filtros">
+                    <input type="date" id="resultados-fecha">
+                    <select id="resultados-sorteo">
+                        <option value="">Todos los sorteos</option>
+                        <option value="peru">Peru</option>
+                        <option value="venezuela">Venezuela</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="cargarResultados()">Cargar</button>
+                </div>
+                <div id="tabla-resultados"></div>
+            </div>
+            <div class="card" style="margin-top: 20px;">
+                <h3>Agregar/Editar Resultado</h3>
+                <form id="form-resultado">
+                    <input type="hidden" id="res-id">
+                    <div class="form-group">
+                        <label>Fecha</label>
+                        <input type="date" id="res-fecha" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Sorteo</label>
+                        <select id="res-sorteo" required>
+                            <option value="peru">Peru</option>
+                            <option value="venezuela">Venezuela</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Horario</label>
+                        <select id="res-horario" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Animal Ganador (0-40)</label>
+                        <input type="number" id="res-animal" min="0" max="40" required>
+                    </div>
+                    <button type="submit" class="btn btn-success">Guardar Resultado</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- TICKETS -->
+        <div id="tickets" class="seccion" style="display:none;">
+            <div class="card">
+                <h3>Todos los Tickets</h3>
+                <div class="filtros">
+                    <input type="date" id="tickets-fecha-inicio">
+                    <input type="date" id="tickets-fecha-fin">
+                    <select id="tickets-estado">
                         <option value="todos">Todos</option>
                         <option value="activos">Activos</option>
                         <option value="pagados">Pagados</option>
@@ -2663,415 +4569,459 @@ POS_HTML = '''
                         <option value="anulados">Anulados</option>
                         <option value="por_pagar">Por Pagar</option>
                     </select>
+                    <input type="text" id="tickets-buscar" placeholder="Buscar ticket...">
+                    <button class="btn btn-primary" onclick="cargarTicketsAdmin()">Buscar</button>
                 </div>
-                <div class="filter-group">
-                    <label>Desde:</label>
-                    <input type="date" id="filtro-desde">
-                </div>
-                <div class="filter-group">
-                    <label>Hasta:</label>
-                    <input type="date" id="filtro-hasta">
-                </div>
-                <button class="btn-filtrar" onclick="cargarTickets()">🔍 Filtrar</button>
-            </div>
-            <div style="overflow-x: auto;">
-                <table class="tickets-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Fecha</th>
-                            <th>Horario</th>
-                            <th>Jugadas</th>
-                            <th>Total</th>
-                            <th>Estado</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tickets-tbody"></tbody>
-                </table>
+                <div id="tabla-tickets-admin"></div>
             </div>
         </div>
-        
-        <!-- TAB REPORTES -->
-        <div id="tab-reportes" class="tab-content">
-            <div class="filters-row">
-                <div class="filter-group">
-                    <label>Período:</label>
-                    <select id="reporte-periodo" onchange="cambiarPeriodo()">
-                        <option value="hoy">Hoy</option>
-                        <option value="ayer">Ayer</option>
-                        <option value="7dias">Últimos 7 días</option>
-                        <option value="mes">Este mes</option>
-                        <option value="personalizado">Personalizado</option>
-                    </select>
-                </div>
-                <div class="filter-group" id="fechas-personalizado" style="display:none;">
-                    <label>Desde:</label>
-                    <input type="date" id="reporte-desde">
-                    <label>Hasta:</label>
-                    <input type="date" id="reporte-hasta">
-                    <button class="btn-filtrar" onclick="cargarReportes()">📊 Generar</button>
-                </div>
+
+        <!-- USUARIOS -->
+        <div id="usuarios" class="seccion" style="display:none;">
+            <div class="card">
+                <h3>Crear Nuevo Usuario</h3>
+                <form id="form-usuario">
+                    <div class="form-group">
+                        <label>Usuario</label>
+                        <input type="text" id="user-usuario" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Contraseña</label>
+                        <input type="password" id="user-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Rol</label>
+                        <select id="user-rol" required>
+                            <option value="vendedor">Vendedor</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Comision % (0-100)</label>
+                        <input type="number" id="user-comision" min="0" max="100" value="15">
+                    </div>
+                    <button type="submit" class="btn btn-success">Crear Usuario</button>
+                </form>
             </div>
-            <div class="reportes-grid">
-                <div class="reporte-card ventas">
-                    <h4>💰 Total Ventas</h4>
-                    <div class="reporte-value" id="rep-ventas">$0.00</div>
+            <div class="card" style="margin-top: 20px;">
+                <h3>Usuarios Existentes</h3>
+                <div id="tabla-usuarios"></div>
+            </div>
+        </div>
+
+        <!-- REPORTES -->
+        <div id="reportes" class="seccion" style="display:none;">
+            <div class="card">
+                <h3>Reporte de Ventas</h3>
+                <div class="filtros">
+                    <input type="date" id="reporte-fecha-inicio">
+                    <input type="date" id="reporte-fecha-fin">
+                    <select id="reporte-vendedor">
+                        <option value="">Todos los vendedores</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="generarReporte()">Generar</button>
+                    <button class="btn btn-success" onclick="exportarCSV()">Exportar CSV</button>
                 </div>
-                <div class="reporte-card">
-                    <h4>🎫 Tickets Vendidos</h4>
-                    <div class="reporte-value" id="rep-tickets">0</div>
-                </div>
-                <div class="reporte-card premios">
-                    <h4>🏆 Premios Pagados</h4>
-                    <div class="reporte-value" id="rep-premios">$0.00</div>
-                </div>
-                <div class="reporte-card balance">
-                    <h4>📈 Balance</h4>
-                    <div class="reporte-value" id="rep-balance">$0.00</div>
-                </div>
+                <div id="reporte-resultado"></div>
             </div>
         </div>
     </div>
-    
+
     <!-- Modal Detalle Ticket -->
-    <div class="modal" id="modal-detalle">
+    <div id="modal-detalle" class="modal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2>🎫 Detalle del Ticket</h2>
-                <button class="modal-close" onclick="cerrarModal()">&times;</button>
-            </div>
-            <div id="detalle-content"></div>
+            <h3>Detalle del Ticket</h3>
+            <div id="detalle-contenido"></div>
+            <button class="btn btn-primary" onclick="cerrarModal()" style="margin-top: 15px; width: 100%;">Cerrar</button>
         </div>
     </div>
 
     <script>
-        // Variables globales
-        let jugadas = [];
-        let animalesSeleccionados = [];
-        let tipoJugada = 'animal';
-        let horarios = [];
+        let datosReporte = [];
         
-        // Inicializar
-        document.addEventListener('DOMContentLoaded', function() {
-            cargarHorarios();
-            renderizarAnimales();
-            actualizarReloj();
-            setInterval(actualizarReloj, 1000);
-            
-            // Set fechas por defecto
-            const hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('filtro-desde').value = hoy;
-            document.getElementById('filtro-hasta').value = hoy;
-            document.getElementById('reporte-desde').value = hoy;
-            document.getElementById('reporte-hasta').value = hoy;
-        });
-        
-        function actualizarReloj() {
-            const ahora = new Date();
-            document.getElementById('hora-actual').textContent = 
-                ahora.toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'});
+        function mostrarSeccion(seccion) {
+            document.querySelectorAll('.seccion').forEach(s => s.style.display = 'none');
+            document.getElementById(seccion).style.display = 'block';
+            if (seccion === 'dashboard') cargarDashboard();
+            if (seccion === 'usuarios') cargarUsuarios();
         }
         
-        function showTab(tab) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-' + tab).classList.add('active');
-            event.target.classList.add('active');
-            
-            if (tab === 'tickets') cargarTickets();
-            if (tab === 'reportes') cargarReportes();
-        }
-        
-        // Cargar horarios desde el servidor
-        function cargarHorarios() {
-            fetch('/api/horarios')
-                .then(r => r.json())
-                .then(data => {
-                    horarios = data.horarios || [];
-                    const select = document.getElementById('horario-select');
-                    select.innerHTML = '<option value="">Seleccione horario...</option>';
-                    horarios.forEach(h => {
-                        select.innerHTML += `<option value="${h}">${h}</option>`;
-                    });
-                });
-        }
-        
-        // Renderizar grid de animales
-        function renderizarAnimales() {
-            const animales = {
-                "00": "Ballena", "0": "Delfin", "1": "Carnero", "2": "Toro",
-                "3": "Ciempies", "4": "Alacran", "5": "Leon", "6": "Rana",
-                "7": "Perico", "8": "Raton", "9": "Aguila", "10": "Tigre",
-                "11": "Gato", "12": "Caballo", "13": "Mono", "14": "Paloma",
-                "15": "Zorro", "16": "Oso", "17": "Pavo", "18": "Burro",
-                "19": "Chivo", "20": "Cochino", "21": "Gallo", "22": "Camello",
-                "23": "Cebra", "24": "Iguana", "25": "Gallina", "26": "Vaca",
-                "27": "Perro", "28": "Zamuro", "29": "Elefante", "30": "Caiman",
-                "31": "Lapa", "32": "Ardilla", "33": "Pescado", "34": "Venado",
-                "35": "Jirafa", "36": "Culebra", "37": "Avispa", "38": "Conejo",
-                "39": "Tortuga", "40": "Lechuza"
-            };
-            const rojos = ["1","3","5","7","9","12","14","16","18","19","21","23","25","27","30","32","34","36","37","39"];
-            
-            const grid = document.getElementById('animales-grid');
-            grid.innerHTML = '';
-            
-            Object.entries(animales).forEach(([num, nombre]) => {
-                let clase = 'negro';
-                if (num === "0" || num === "00") clase = 'verde';
-                else if (rojos.includes(num)) clase = 'rojo';
-                
-                const btn = document.createElement('button');
-                btn.className = `animal-btn ${clase}`;
-                btn.dataset.numero = num;
-                btn.innerHTML = `<span class="num">${num}</span><span class="name">${nombre}</span>`;
-                btn.onclick = () => seleccionarAnimal(num);
-                grid.appendChild(btn);
-            });
-        }
-        
-        function seleccionarAnimal(num) {
-            const btn = document.querySelector(`.animal-btn[data-numero="${num}"]`);
-            const index = animalesSeleccionados.indexOf(num);
-            
-            if (index > -1) {
-                animalesSeleccionados.splice(index, 1);
-                btn.classList.remove('selected');
-            } else {
-                if (animalesSeleccionados.length < 3) {
-                    animalesSeleccionados.push(num);
-                    btn.classList.add('selected');
-                }
-            }
-            
-            tipoJugada = animalesSeleccionados.length === 3 ? 'tripleta' : 'animal';
-        }
-        
-        function agregarJugada() {
-            const monto = parseFloat(document.getElementById('monto-input').value);
-            const horario = document.getElementById('horario-select').value;
-            
-            if (!horario) { alert('Seleccione un horario'); return; }
-            if (animalesSeleccionados.length === 0) { alert('Seleccione al menos un animal'); return; }
-            if (!monto || monto <= 0) { alert('Ingrese un monto válido'); return; }
-            
-            const jugada = {
-                tipo: tipoJugada,
-                seleccion: [...animalesSeleccionados],
-                monto: monto,
-                horario: horario
-            };
-            
-            jugadas.push(jugada);
-            
-            // Limpiar selección
-            animalesSeleccionados = [];
-            document.querySelectorAll('.animal-btn.selected').forEach(b => b.classList.remove('selected'));
-            document.getElementById('monto-input').value = '';
-            
-            renderizarJugadas();
-        }
-        
-        function renderizarJugadas() {
-            const list = document.getElementById('jugadas-list');
-            list.innerHTML = '';
-            let subtotal = 0;
-            
-            jugadas.forEach((j, i) => {
-                subtotal += j.monto;
-                const tipoClass = j.tipo === 'animal' ? 'tipo-animal' : 
-                                  j.tipo === 'tripleta' ? 'tipo-tripleta' : 'tipo-posicion';
-                
-                list.innerHTML += `
-                    <div class="jugada-item">
-                        <div class="jugada-info">
-                            <span class="jugada-tipo ${tipoClass}">${j.tipo.toUpperCase()}</span>
-                            <strong>${j.seleccion.join('-')}</strong> - ${j.horario}
-                        </div>
-                        <span class="jugada-monto">$${j.monto.toFixed(2)}</span>
-                        <button class="jugada-delete" onclick="eliminarJugada(${i})">×</button>
-                    </div>
-                `;
-            });
-            
-            document.getElementById('subtotal').textContent = '$' + subtotal.toFixed(2);
-            document.getElementById('total-ticket').textContent = '$' + subtotal.toFixed(2);
-            document.getElementById('btn-vender').disabled = jugadas.length === 0;
-        }
-        
-        function eliminarJugada(index) {
-            jugadas.splice(index, 1);
-            renderizarJugadas();
-        }
-        
-        function venderTicket() {
-            if (jugadas.length === 0) return;
-            
-            fetch('/api/vender-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({jugadas: jugadas})
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('✅ Ticket vendido: ' + data.ticket_id);
-                    jugadas = [];
-                    renderizarJugadas();
-                    // Opcional: imprimir ticket
-                } else {
-                    alert('❌ Error: ' + data.error);
-                }
-            })
-            .catch(e => alert('❌ Error de conexión'));
-        }
-        
-        // Cargar tickets con filtros
-        function cargarTickets() {
-            const estado = document.getElementById('filtro-estado').value;
-            const desde = document.getElementById('filtro-desde').value;
-            const hasta = document.getElementById('filtro-hasta').value;
-            
-            let url = `/api/mis-tickets?estado=${estado}`;
-            if (desde) url += `&desde=${desde}`;
-            if (hasta) url += `&hasta=${hasta}`;
-            
-            fetch(url)
-                .then(r => r.json())
-                .then(data => {
-                    const tbody = document.getElementById('tickets-tbody');
-                    tbody.innerHTML = '';
-                    
-                    if (!data.tickets || data.tickets.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;">No hay tickets</td></tr>';
-                        return;
-                    }
-                    
-                    data.tickets.forEach(t => {
-                        const estadoClass = {
-                            'activo': 'estado-activo',
-                            'pagado': 'estado-pagado',
-                            'pendiente': 'estado-pendiente',
-                            'anulado': 'estado-anulado',
-                            'por_pagar': 'estado-por_pagar'
-                        }[t.estado] || 'estado-activo';
-                        
-                        tbody.innerHTML += `
-                            <tr>
-                                <td>${t.id}</td>
-                                <td>${t.fecha}</td>
-                                <td>${t.horario || '-'}</td>
-                                <td>${t.cantidad_jugadas || 0}</td>
-                                <td>$${parseFloat(t.total).toFixed(2)}</td>
-                                <td><span class="estado-badge ${estadoClass}">${t.estado.toUpperCase()}</span></td>
-                                <td>
-                                    <button class="btn-reimprimir" onclick="reimprimirTicket('${t.id}')">🖨️ Reimprimir</button>
-                                    ${t.estado === 'activo' ? `<button class="btn-anular" onclick="anularTicket('${t.id}')">🗑️ Anular</button>` : ''}
-                                </td>
-                            </tr>
-                        `;
-                    });
-                });
-        }
-        
-        function reimprimirTicket(ticketId) {
-            fetch('/api/reimprimir-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ticket_id: ticketId})
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('✅ ' + data.mensaje);
-                    // Mostrar detalle para impresión
-                    mostrarDetalleTicket(data.ticket);
-                } else {
-                    alert('❌ Error: ' + data.error);
-                }
-            });
-        }
-        
-        function anularTicket(ticketId) {
-            if (!confirm('¿Está seguro de anular este ticket?')) return;
-            
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ticket_id: ticketId})
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('✅ Ticket anulado correctamente');
-                    cargarTickets();
-                } else {
-                    alert('❌ Error: ' + data.error);
-                }
-            });
-        }
-        
-        function mostrarDetalleTicket(ticket) {
-            const modal = document.getElementById('modal-detalle');
-            const content = document.getElementById('detalle-content');
-            
-            let jugadasHtml = '';
-            if (ticket.jugadas) {
-                jugadasHtml = '<h4>Jugadas:</h4><ul>';
-                ticket.jugadas.forEach(j => {
-                    jugadasHtml += `<li>${j.tipo}: ${j.seleccion} - $${parseFloat(j.monto).toFixed(2)}</li>`;
-                });
-                jugadasHtml += '</ul>';
-            }
-            
-            content.innerHTML = `
-                <p><strong>Ticket #:</strong> ${ticket.id}</p>
-                <p><strong>Fecha:</strong> ${ticket.fecha}</p>
-                <p><strong>Total:</strong> $${parseFloat(ticket.total).toFixed(2)}</p>
-                <p><strong>Estado:</strong> ${ticket.estado}</p>
-                ${jugadasHtml}
-                <hr>
-                <button onclick="window.print()" style="width:100%;padding:15px;background:#0f3460;color:white;border:none;border-radius:10px;">
-                    🖨️ IMPRIMIR
-                </button>
-            `;
-            
-            modal.classList.add('active');
+        function showToast(mensaje, tipo) {
+            const t = document.createElement('div');
+            t.className = 'toast ' + tipo;
+            t.textContent = mensaje;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
         }
         
         function cerrarModal() {
-            document.getElementById('modal-detalle').classList.remove('active');
+            document.getElementById('modal-detalle').style.display = 'none';
         }
         
-        // Reportes
-        function cambiarPeriodo() {
-            const periodo = document.getElementById('reporte-periodo').value;
-            document.getElementById('fechas-personalizado').style.display = 
-                periodo === 'personalizado' ? 'flex' : 'none';
-            if (periodo !== 'personalizado') cargarReportes();
+        function cerrarSesion() {
+            fetch('/logout', {method: 'POST'}).then(() => window.location.href = '/');
         }
         
-        function cargarReportes() {
-            const periodo = document.getElementById('reporte-periodo').value;
-            let url = `/api/reportes?periodo=${periodo}`;
-            
-            if (periodo === 'personalizado') {
-                const desde = document.getElementById('reporte-desde').value;
-                const hasta = document.getElementById('reporte-hasta').value;
-                if (desde) url += `&desde=${desde}`;
-                if (hasta) url += `&hasta=${hasta}`;
-            }
-            
-            fetch(url)
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('rep-ventas').textContent = '$' + (data.ventas || 0).toFixed(2);
-                    document.getElementById('rep-tickets').textContent = data.tickets_vendidos || 0;
-                    document.getElementById('rep-premios').textContent = '$' + (data.premios || 0).toFixed(2);
-                    document.getElementById('rep-balance').textContent = '$' + (data.balance || 0).toFixed(2);
+        // DASHBOARD
+        async function cargarDashboard() {
+            try {
+                const r = await fetch('/admin/dashboard-data');
+                const d = await r.json();
+                document.getElementById('dash-ventas').textContent = 'S/ ' + parseFloat(d.ventas_hoy || 0).toFixed(2);
+                document.getElementById('dash-tickets').textContent = d.total_tickets_hoy || 0;
+                document.getElementById('dash-pendientes').textContent = d.pendientes_hoy || 0;
+                document.getElementById('dash-comisiones').textContent = 'S/ ' + parseFloat(d.comisiones_hoy || 0).toFixed(2);
+                
+                let html = '<table><tr><th>Ticket</th><th>Vendedor</th><th>Monto</th><th>Estado</th></tr>';
+                (d.ultimos_tickets || []).forEach(t => {
+                    html += `<tr><td>${t.codigo}</td><td>${t.vendedor}</td><td>S/ ${parseFloat(t.total).toFixed(2)}</td><td><span class="estado-badge estado-${t.estado}">${t.estado}</span></td></tr>`;
                 });
+                html += '</table>';
+                document.getElementById('dash-ultimos').innerHTML = html;
+            } catch (e) {
+                showToast('Error cargando dashboard', 'error');
+            }
         }
+        
+        // RESULTADOS
+        document.getElementById('res-sorteo').addEventListener('change', actualizarHorariosAdmin);
+        
+        function actualizarHorariosAdmin() {
+            const sorteo = document.getElementById('res-sorteo').value;
+            const horarios = sorteo === 'peru' ? 
+                ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM"] :
+                ["09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"];
+            const sel = document.getElementById('res-horario');
+            sel.innerHTML = horarios.map(h => `<option value="${h}">${h}</option>`).join('');
+        }
+        
+        async function cargarResultados() {
+            const fecha = document.getElementById('resultados-fecha').value;
+            const sorteo = document.getElementById('resultados-sorteo').value;
+            if (!fecha) return showToast('Seleccione fecha', 'error');
+            
+            try {
+                let url = '/admin/resultados?fecha=' + fecha;
+                if (sorteo) url += '&sorteo=' + sorteo;
+                const r = await fetch(url);
+                const d = await r.json();
+                
+                let html = '<table><tr><th>Fecha</th><th>Sorteo</th><th>Horario</th><th>Animal</th><th>Acciones</th></tr>';
+                d.forEach(res => {
+                    html += `<tr>
+                        <td>${res.fecha}</td>
+                        <td>${res.sorteo}</td>
+                        <td>${res.horario}</td>
+                        <td><strong>${res.animal}</strong> - ${res.nombre_animal || ''}</td>
+                        <td><button class="btn btn-primary" onclick="editarResultado('${res.id}', '${res.fecha}', '${res.sorteo}', '${res.horario}', '${res.animal}')">Editar</button></td>
+                    </tr>`;
+                });
+                html += '</table>';
+                document.getElementById('tabla-resultados').innerHTML = html;
+            } catch (e) {
+                showToast('Error cargando resultados', 'error');
+            }
+        }
+        
+        function editarResultado(id, fecha, sorteo, horario, animal) {
+            document.getElementById('res-id').value = id;
+            document.getElementById('res-fecha').value = fecha;
+            document.getElementById('res-sorteo').value = sorteo;
+            actualizarHorariosAdmin();
+            document.getElementById('res-horario').value = horario;
+            document.getElementById('res-animal').value = animal;
+        }
+        
+        document.getElementById('form-resultado').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const datos = {
+                id: document.getElementById('res-id').value,
+                fecha: document.getElementById('res-fecha').value,
+                sorteo: document.getElementById('res-sorteo').value,
+                horario: document.getElementById('res-horario').value,
+                animal: document.getElementById('res-animal').value
+            };
+            
+            try {
+                const r = await fetch('/admin/guardar-resultado', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(datos)
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Resultado guardado correctamente', 'success');
+                    document.getElementById('res-id').value = '';
+                    document.getElementById('form-resultado').reset();
+                    cargarResultados();
+                } else {
+                    showToast(d.error || 'Error al guardar', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        });
+        
+        // TICKETS ADMIN
+        async function cargarTicketsAdmin() {
+            const inicio = document.getElementById('tickets-fecha-inicio').value;
+            const fin = document.getElementById('tickets-fecha-fin').value;
+            const estado = document.getElementById('tickets-estado').value;
+            const buscar = document.getElementById('tickets-buscar').value;
+            
+            try {
+                let url = '/admin/tickets?estado=' + estado;
+                if (inicio) url += '&fecha_inicio=' + inicio;
+                if (fin) url += '&fecha_fin=' + fin;
+                if (buscar) url += '&buscar=' + encodeURIComponent(buscar);
+                
+                const r = await fetch(url);
+                const d = await r.json();
+                
+                let html = '<table><tr><th>Codigo</th><th>Fecha</th><th>Vendedor</th><th>Total</th><th>Estado</th><th>Acciones</th></tr>';
+                (d.tickets || []).forEach(t => {
+                    html += `<tr>
+                        <td>${t.codigo}</td>
+                        <td>${t.fecha_venta}</td>
+                        <td>${t.vendedor}</td>
+                        <td>S/ ${parseFloat(t.total).toFixed(2)}</td>
+                        <td><span class="estado-badge estado-${t.estado}">${t.estado}</span></td>
+                        <td>
+                            <button class="btn btn-primary" onclick="verDetalle('${t.codigo}')">Ver</button>
+                            ${t.estado === 'activo' ? `<button class="btn btn-danger" onclick="anularTicket('${t.codigo}')">Anular</button>` : ''}
+                            ${t.estado === 'por_pagar' ? `<button class="btn btn-success" onclick="marcarPagado('${t.codigo}')">Pagar</button>` : ''}
+                        </td>
+                    </tr>`;
+                });
+                html += '</table>';
+                document.getElementById('tabla-tickets-admin').innerHTML = html;
+            } catch (e) {
+                showToast('Error cargando tickets', 'error');
+            }
+        }
+        
+        async function verDetalle(codigo) {
+            try {
+                const r = await fetch('/admin/ticket-detalle?codigo=' + codigo);
+                const t = await r.json();
+                
+                let detallesHtml = '<div class="detalle-grid">';
+                (t.detalles || []).forEach(d => {
+                    detallesHtml += `<div class="detalle-item">
+                        <div class="num">${d.animal}</div>
+                        <div class="tipo">${d.tipo} - S/ ${parseFloat(d.monto).toFixed(2)}</div>
+                    </div>`;
+                });
+                detallesHtml += '</div>';
+                
+                document.getElementById('detalle-contenido').innerHTML = `
+                    <p><strong>Codigo:</strong> ${t.codigo}</p>
+                    <p><strong>Vendedor:</strong> ${t.vendedor}</p>
+                    <p><strong>Fecha:</strong> ${t.fecha_venta}</p>
+                    <p><strong>Total:</strong> S/ ${parseFloat(t.total).toFixed(2)}</p>
+                    <p><strong>Estado:</strong> ${t.estado}</p>
+                    <h4 style="margin: 15px 0 10px;">Detalles:</h4>
+                    ${detallesHtml}
+                `;
+                document.getElementById('modal-detalle').style.display = 'flex';
+            } catch (e) {
+                showToast('Error cargando detalle', 'error');
+            }
+        }
+        
+        async function anularTicket(codigo) {
+            if (!confirm('¿Anular ticket ' + codigo + '?')) return;
+            try {
+                const r = await fetch('/admin/anular-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({codigo: codigo})
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Ticket anulado', 'success');
+                    cargarTicketsAdmin();
+                } else {
+                    showToast(d.error || 'Error al anular', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        }
+        
+        async function marcarPagado(codigo) {
+            try {
+                const r = await fetch('/admin/marcar-pagado', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({codigo: codigo})
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Ticket marcado como pagado', 'success');
+                    cargarTicketsAdmin();
+                } else {
+                    showToast(d.error || 'Error', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        }
+        
+        // USUARIOS
+        document.getElementById('form-usuario').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const datos = {
+                usuario: document.getElementById('user-usuario').value,
+                password: document.getElementById('user-password').value,
+                rol: document.getElementById('user-rol').value,
+                comision: parseInt(document.getElementById('user-comision').value)
+            };
+            
+            try {
+                const r = await fetch('/admin/crear-usuario', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(datos)
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Usuario creado correctamente', 'success');
+                    document.getElementById('form-usuario').reset();
+                    cargarUsuarios();
+                } else {
+                    showToast(d.error || 'Error al crear usuario', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        });
+        
+        async function cargarUsuarios() {
+            try {
+                const r = await fetch('/admin/usuarios');
+                const d = await r.json();
+                
+                let html = '<table><tr><th>Usuario</th><th>Rol</th><th>Comision</th><th>Acciones</th></tr>';
+                (d.usuarios || []).forEach(u => {
+                    html += `<tr>
+                        <td>${u.usuario}</td>
+                        <td>${u.rol}</td>
+                        <td>${u.comision}%</td>
+                        <td><button class="btn btn-danger" onclick="eliminarUsuario('${u.usuario}')">Eliminar</button></td>
+                    </tr>`;
+                });
+                html += '</table>';
+                document.getElementById('tabla-usuarios').innerHTML = html;
+                
+                // Actualizar select de reportes
+                const select = document.getElementById('reporte-vendedor');
+                select.innerHTML = '<option value="">Todos los vendedores</option>';
+                (d.usuarios || []).forEach(u => {
+                    select.innerHTML += `<option value="${u.usuario}">${u.usuario}</option>`;
+                });
+            } catch (e) {
+                showToast('Error cargando usuarios', 'error');
+            }
+        }
+        
+        async function eliminarUsuario(usuario) {
+            if (!confirm('¿Eliminar usuario ' + usuario + '?')) return;
+            try {
+                const r = await fetch('/admin/eliminar-usuario', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({usuario: usuario})
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Usuario eliminado', 'success');
+                    cargarUsuarios();
+                } else {
+                    showToast(d.error || 'Error al eliminar', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexion', 'error');
+            }
+        }
+        
+        // REPORTES
+        async function generarReporte() {
+            const inicio = document.getElementById('reporte-fecha-inicio').value;
+            const fin = document.getElementById('reporte-fecha-fin').value;
+            const vendedor = document.getElementById('reporte-vendedor').value;
+            
+            if (!inicio || !fin) return showToast('Seleccione fechas', 'error');
+            
+            try {
+                let url = '/admin/reporte?fecha_inicio=' + inicio + '&fecha_fin=' + fin;
+                if (vendedor) url += '&vendedor=' + vendedor;
+                
+                const r = await fetch(url);
+                const d = await r.json();
+                datosReporte = d.tickets || [];
+                
+                let total = 0, comisiones = 0;
+                datosReporte.forEach(t => {
+                    total += parseFloat(t.total || 0);
+                    comisiones += parseFloat(t.comision || 0);
+                });
+                
+                let html = `<div class="grid">
+                    <div class="card"><h3>Total Ventas</h3><div class="valor">S/ ${total.toFixed(2)}</div></div>
+                    <div class="card"><h3>Total Tickets</h3><div class="valor success">${datosReporte.length}</div></div>
+                    <div class="card"><h3>Comisiones</h3><div class="valor danger">S/ ${comisiones.toFixed(2)}</div></div>
+                    <div class="card"><h3>Neto</h3><div class="valor warning">S/ ${(total - comisiones).toFixed(2)}</div></div>
+                </div>`;
+                
+                html += '<table><tr><th>Fecha</th><th>Ticket</th><th>Vendedor</th><th>Total</th><th>Comision</th><th>Estado</th></tr>';
+                datosReporte.forEach(t => {
+                    html += `<tr>
+                        <td>${t.fecha_venta}</td>
+                        <td>${t.codigo}</td>
+                        <td>${t.vendedor}</td>
+                        <td>S/ ${parseFloat(t.total).toFixed(2)}</td>
+                        <td>S/ ${parseFloat(t.comision).toFixed(2)}</td>
+                        <td><span class="estado-badge estado-${t.estado}">${t.estado}</span></td>
+                    </tr>`;
+                });
+                html += '</table>';
+                
+                document.getElementById('reporte-resultado').innerHTML = html;
+            } catch (e) {
+                showToast('Error generando reporte', 'error');
+            }
+        }
+        
+        function exportarCSV() {
+            if (datosReporte.length === 0) return showToast('Genere un reporte primero', 'error');
+            
+            let csv = 'Fecha,Ticket,Vendedor,Total,Comision,Estado\\n';
+            datosReporte.forEach(t => {
+                csv += `${t.fecha_venta},${t.codigo},${t.vendedor},${t.total},${t.comision},${t.estado}\\n`;
+            });
+            
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'reporte_' + new Date().toISOString().split('T')[0] + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('CSV descargado', 'success');
+        }
+        
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', function() {
+            let hoy = new Date().toISOString().split('T')[0];
+            document.getElementById('resultados-fecha').value = hoy;
+            document.getElementById('tickets-fecha-inicio').value = hoy;
+            document.getElementById('tickets-fecha-fin').value = hoy;
+            document.getElementById('reporte-fecha-inicio').value = hoy;
+            document.getElementById('reporte-fecha-fin').value = hoy;
+            actualizarHorariosAdmin();
+            cargarDashboard();
+        });
     </script>
 </body>
 </html>
@@ -3079,15 +5029,5 @@ POS_HTML = '''
 
 # ==================== MAIN ====================
 if __name__ == '__main__':
-    print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v7.0 - CORRECCIONES COMPLETAS")
-    print("=" * 60)
-    print("  ✓ Reportes históricos funcionando (hasta 5000 tickets)")
-    print("  ✓ Reimpresión de tickets habilitada")
-    print("  ✓ Tripletas con detalles completos")
-    print("  ✓ Decimales funcionando (0.5, 1.5, etc.)")
-    print("  ✓ Tickets vendidos aparecen inmediatamente")
-    print("  ✓ Anulación funcional con validaciones")
-    print("=" * 60)
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
