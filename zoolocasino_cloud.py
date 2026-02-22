@@ -93,17 +93,6 @@ def get_color(num):
 def generar_serial():
     return str(int(ahora_peru().timestamp() * 1000))
 
-def formatear_monto(monto):
-    """Formatea montos manteniendo decimales cuando es necesario"""
-    try:
-        monto_float = float(monto)
-        if monto_float == int(monto_float):
-            return str(int(monto_float))
-        else:
-            return str(monto_float)
-    except:
-        return str(monto)
-
 def verificar_horario_bloqueo(hora_sorteo):
     ahora = ahora_peru()
     try:
@@ -149,8 +138,15 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
-    # SIN RESTRICCIÓN - Se puede editar cuando se quiera
-    return True
+    ahora = ahora_peru()
+    hoy = ahora.strftime("%d/%m/%Y")
+    
+    minutos_sorteo = hora_a_minutos(hora_sorteo)
+    minutos_actual = ahora.hour * 60 + ahora.minute
+    
+    minutos_limite = minutos_sorteo + (HORAS_EDICION_RESULTADO * 60)
+    
+    return minutos_actual <= minutos_limite
 
 def obtener_sorteo_en_curso():
     ahora = ahora_peru()
@@ -196,19 +192,7 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
     
-    # Agregar límite para evitar que Supabase limite a 1000 registros
-    if "?" in url:
-        url += "&limit=5000"
-    else:
-        url += "?limit=5000"
-    
-    # Headers base (sin Prefer, que solo se usa para POST/PATCH)
-    headers_get = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
-    }
-    
-    headers_write = {
+    headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
@@ -217,17 +201,17 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     
     try:
         if method == "GET":
-            req = urllib.request.Request(url, headers=headers_get)
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "POST":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers_write, method="POST")
+            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "PATCH":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers_write, method="PATCH")
+            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="PATCH")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as response:
                     if response.status in [200, 201, 204]:
@@ -488,10 +472,10 @@ def procesar_venta():
             for j in jugadas_hora:
                 if j['tipo'] == 'animal':
                     nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
-                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{formatear_monto(j['monto'])}")
+                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
                 else:
                     tipo_corto = j['seleccion'][0:3]
-                    texto_jugadas.append(f"{tipo_corto}x{formatear_monto(j['monto'])}")
+                    texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
             
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")
@@ -503,11 +487,11 @@ def procesar_venta():
             for t in tripletas_en_ticket:
                 nums = t['seleccion'].split(',')
                 nombres = [ANIMALES.get(n, '')[0:3].upper() for n in nums]
-                lineas.append(f"{'-'.join(nombres)} (x60) S/{formatear_monto(t['monto'])}")
+                lineas.append(f"{'-'.join(nombres)} (x60) S/{int(t['monto'])}")
             lineas.append("")
         
         lineas.append("------------------------")
-        lineas.append(f"*TOTAL: S/{formatear_monto(total)}*")
+        lineas.append(f"*TOTAL: S/{int(total)}*")
         lineas.append("")
         lineas.append("Buena Suerte! 🍀")
         lineas.append("El ticket vence a los 3 dias")
@@ -537,7 +521,7 @@ def mis_tickets():
         fecha_fin = data.get('fecha_fin')
         estado = data.get('estado', 'todos')
         
-        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=5000"
+        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         
         req = urllib.request.Request(base_url, headers=headers)
@@ -927,7 +911,7 @@ def caja_historico():
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=5000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
@@ -1123,8 +1107,7 @@ def guardar_resultado():
             headers = {
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json",
-                "Prefer": "return=representation"
+                "Content-Type": "application/json"
             }
             data = json.dumps({"animal": animal}).encode()
             req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
@@ -1345,9 +1328,9 @@ def reporte_agencias_rango():
         dict_agencias = {a['id']: a for a in agencias}
         
         if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=50000"
+            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=2000"
         else:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=50000"
+            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
             
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
@@ -1514,7 +1497,7 @@ def exportar_csv():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=50000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             all_tickets = json.loads(response.read().decode())
@@ -1883,7 +1866,7 @@ def top_animales_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         req = urllib.request.Request(url, headers=headers)
         
