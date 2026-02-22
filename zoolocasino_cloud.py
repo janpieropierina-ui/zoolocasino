@@ -203,6 +203,12 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
     
+    # Agregar límite para evitar que Supabase limite a 1000 registros
+    if "?" in url:
+        url += "&limit=5000"
+    else:
+        url += "?limit=5000"
+    
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
