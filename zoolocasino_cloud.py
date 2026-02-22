@@ -149,15 +149,8 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
-    ahora = ahora_peru()
-    hoy = ahora.strftime("%d/%m/%Y")
-    
-    minutos_sorteo = hora_a_minutos(hora_sorteo)
-    minutos_actual = ahora.hour * 60 + ahora.minute
-    
-    minutos_limite = minutos_sorteo + (HORAS_EDICION_RESULTADO * 60)
-    
-    return minutos_actual <= minutos_limite
+    # SIN RESTRICCIÓN - Se puede editar cuando se quiera
+    return True
 
 def obtener_sorteo_en_curso():
     ahora = ahora_peru()
@@ -209,7 +202,13 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     else:
         url += "?limit=5000"
     
-    headers = {
+    # Headers base (sin Prefer, que solo se usa para POST/PATCH)
+    headers_get = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    
+    headers_write = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
@@ -218,17 +217,17 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     
     try:
         if method == "GET":
-            req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(url, headers=headers_get)
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "POST":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="POST")
+            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers_write, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "PATCH":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="PATCH")
+            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers_write, method="PATCH")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as response:
                     if response.status in [200, 201, 204]:
