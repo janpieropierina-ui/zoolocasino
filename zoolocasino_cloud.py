@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v6.3 - CORRECCIONES COMPLETAS
-✓ Reportes históricos ilimitados con paginación
-✓ Reimpresión de tickets funcional
-✓ Detalles de tripletas visibles en consulta de tickets
-✓ Decimales correctos en tickets (0.5, 1.5, etc.)
-✓ Código optimizado y limpio
+ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60 CORREGIDA
 """
 
 import os
@@ -27,16 +22,16 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
 
-# Configuracion de negocio
+# Configuracion de negocio - CORREGIDO: Tripleta paga x60
 PAGO_ANIMAL_NORMAL = 35      
 PAGO_LECHUZA = 70           
 PAGO_ESPECIAL = 2           
-PAGO_TRIPLETA = 60          
+PAGO_TRIPLETA = 60          # CORREGIDO: Era 50, ahora 60
 COMISION_AGENCIA = 0.15
-MINUTOS_BLOQUEO = 3
+MINUTOS_BLOQUEO = 5
 HORAS_EDICION_RESULTADO = 2
 
-# ==================== HORARIOS ====================
+# ==================== NUEVOS HORARIOS ACTUALIZADOS ====================
 HORARIOS_PERU = [
     "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
     "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM"
@@ -124,6 +119,7 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
+# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
 def hora_a_minutos(hora_str):
     """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
@@ -180,42 +176,21 @@ def obtener_proximo_sorteo():
     
     return HORARIOS_PERU[0]
 
-# CORREGIDO: Función para formatear montos con decimales correctamente
-def formatear_monto(monto):
-    """Formatea el monto mostrando enteros o decimales según corresponda"""
-    try:
-        monto_float = float(monto)
-        if monto_float == int(monto_float):
-            return str(int(monto_float))
-        else:
-            # Asegurar que se muestre con un decimal si es necesario
-            return "{:.1f}".format(monto_float).rstrip('0').rstrip('.') if '.' in "{:.1f}".format(monto_float) else str(monto_float)
-    except:
-        return str(monto)
-
-# ==================== FUNCIONES SUPABASE MEJORADAS ====================
-def supabase_request(table, method="GET", data=None, filters=None, timeout=30, limit=None, offset=None):
+def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
-    params = []
     if filters:
+        filter_params = []
         for k, v in filters.items():
             if k.endswith('__like'):
-                params.append(f"{k.replace('__like', '')}=like.{urllib.parse.quote(str(v))}")
+                filter_params.append(f"{k.replace('__like', '')}=like.{urllib.parse.quote(str(v))}")
             elif k.endswith('__gte'):
-                params.append(f"{k.replace('__gte', '')}=gte.{urllib.parse.quote(str(v))}")
+                filter_params.append(f"{k.replace('__gte', '')}=gte.{urllib.parse.quote(str(v))}")
             elif k.endswith('__lte'):
-                params.append(f"{k.replace('__lte', '')}=lte.{urllib.parse.quote(str(v))}")
+                filter_params.append(f"{k.replace('__lte', '')}=lte.{urllib.parse.quote(str(v))}")
             else:
-                params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
-    
-    if limit:
-        params.append(f"limit={limit}")
-    if offset:
-        params.append(f"offset={offset}")
-    
-    if params:
-        url += "?" + "&".join(params)
+                filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
+        url += "?" + "&".join(filter_params)
     
     headers = {
         "apikey": SUPABASE_KEY,
@@ -254,31 +229,6 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30, l
     except Exception as e:
         print(f"[ERROR] Supabase: {e}")
         return None
-
-# NUEVO: Función para obtener todos los tickets con paginación (sin límite de 1000)
-def supabase_get_all_tickets(filters=None, max_records=5000):
-    """Obtiene todos los tickets usando paginación para evitar límites de Supabase"""
-    all_records = []
-    offset = 0
-    batch_size = 1000  # Tamaño máximo por consulta en Supabase
-    
-    while len(all_records) < max_records:
-        batch = supabase_request("tickets", filters=filters, limit=batch_size, offset=offset)
-        if not batch:
-            break
-        
-        all_records.extend(batch)
-        
-        if len(batch) < batch_size:
-            break
-            
-        offset += batch_size
-        
-        # Pequeña pausa para no sobrecargar la API
-        import time
-        time.sleep(0.1)
-    
-    return all_records[:max_records]
 
 # ==================== DECORADORES ====================
 def login_required(f):
@@ -522,32 +472,26 @@ def procesar_venta():
             for j in jugadas_hora:
                 if j['tipo'] == 'animal':
                     nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
-                    # CORREGIDO: Usar formatear_monto para mostrar decimales
-                    monto_str = formatear_monto(j['monto'])
-                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{monto_str}")
+                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
                 else:
                     tipo_corto = j['seleccion'][0:3]
-                    monto_str = formatear_monto(j['monto'])
-                    texto_jugadas.append(f"{tipo_corto}x{monto_str}")
+                    texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
             
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")
         
-        # Agregar tripletas al ticket de texto - CORREGIDO: Mostrar decimales
+        # Agregar tripletas al ticket de texto - CORREGIDO: x60 en lugar de x50
         tripletas_en_ticket = [j for j in jugadas if j['tipo'] == 'tripleta']
         if tripletas_en_ticket:
             lineas.append("*TRIPLETAS (Paga x60)*")
             for t in tripletas_en_ticket:
                 nums = t['seleccion'].split(',')
                 nombres = [ANIMALES.get(n, '')[0:3].upper() for n in nums]
-                monto_str = formatear_monto(t['monto'])
-                lineas.append(f"{'-'.join(nombres)} (x60) S/{monto_str}")
+                lineas.append(f"{'-'.join(nombres)} (x60) S/{int(t['monto'])}")
             lineas.append("")
         
         lineas.append("------------------------")
-        # CORREGIDO: Total también con decimales si aplica
-        total_str = formatear_monto(total)
-        lineas.append(f"*TOTAL: S/{total_str}*")
+        lineas.append(f"*TOTAL: S/{int(total)}*")
         lineas.append("")
         lineas.append("Buena Suerte! 🍀")
         lineas.append("El ticket vence a los 3 dias")
@@ -566,7 +510,7 @@ def procesar_venta():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== APIS DE CONSULTA PARA AGENCIAS ====================
+# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
 
 @app.route('/api/mis-tickets', methods=['POST'])
 @agencia_required
@@ -577,9 +521,12 @@ def mis_tickets():
         fecha_fin = data.get('fecha_fin')
         estado = data.get('estado', 'todos')
         
-        # CORREGIDO: Usar función de paginación para obtener hasta 5000 registros
-        filters = {"agencia_id": f"eq.{session['user_id']}"}
-        all_tickets = supabase_get_all_tickets(filters=filters, max_records=5000)
+        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        
+        req = urllib.request.Request(base_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         tickets_filtrados = []
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d") if fecha_inicio else None
@@ -623,8 +570,7 @@ def mis_tickets():
         total_ventas = sum(t['total'] for t in tickets_filtrados)
         total_tickets = len(tickets_filtrados)
         
-        # CORREGIDO: Aumentado límite a 500 para reportes largos
-        tickets_respuesta = tickets_filtrados[:500]
+        tickets_respuesta = tickets_filtrados[:50]
         
         return jsonify({
             'status': 'ok',
@@ -687,7 +633,6 @@ def calcular_premio_ticket(ticket):
     except:
         return 0
 
-# CORREGIDO: Función mejorada para incluir detalles completos de tripletas
 @app.route('/api/consultar-ticket-detalle', methods=['POST'])
 @agencia_required
 def consultar_ticket_detalle():
@@ -747,7 +692,7 @@ def consultar_ticket_detalle():
                 'premio': round(premio, 2) if gano else 0
             })
         
-        # CORREGIDO: Procesar tripletas con más detalle
+        # Procesar tripletas - CORREGIDO: x60
         tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
         if tripletas:
             for trip in tripletas:
@@ -765,7 +710,6 @@ def consultar_ticket_detalle():
                 if gano:
                     total_premio += premio
                 
-                # CORREGIDO: Agregar detalle completo de la tripleta
                 jugadas_detalle.append({
                     'hora': 'Todo el día',
                     'tipo': 'tripleta',
@@ -774,15 +718,7 @@ def consultar_ticket_detalle():
                     'monto': trip['monto'],
                     'resultado': f"Salieron: {', '.join(nums_encontrados)}" if nums_encontrados else "Pendiente",
                     'gano': gano,
-                    'premio': round(premio, 2),
-                    'detalle_tripleta': {
-                        'animal1': trip['animal1'],
-                        'animal2': trip['animal2'],
-                        'animal3': trip['animal3'],
-                        'nombres': nombres,
-                        'salieron': nums_encontrados,
-                        'pagado': trip.get('pagado', False)
-                    }
+                    'premio': round(premio, 2)
                 })
         
         return jsonify({
@@ -876,35 +812,31 @@ def anular_ticket():
         
         ticket = tickets[0]
         
-        # Verificar permisos: Admin puede anular cualquiera, agencia solo la suya
-        if not session.get('es_admin'):
-            if ticket['agencia_id'] != session['user_id']:
-                return jsonify({'error': 'No autorizado. Solo puedes anular tickets de tu agencia'})
+        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
+            return jsonify({'error': 'No autorizado para anular este ticket'})
         
         if ticket['pagado']:
             return jsonify({'error': 'Ya esta pagado, no se puede anular'})
         
-        if ticket['anulado']:
-            return jsonify({'error': 'Este ticket ya fue anulado anteriormente'})
-        
-        # Validaciones de tiempo para agencias (admin puede anular sin límite de tiempo)
         if not session.get('es_admin'):
             fecha_ticket = parse_fecha_ticket(ticket['fecha'])
             if not fecha_ticket:
                 return jsonify({'error': 'Error en fecha del ticket'})
             
-            # Verificar que no hayan pasado más de 5 minutos desde la creación
             minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
             if minutos_transcurridos > 5:
-                return jsonify({'error': f'No puede anular después de 5 minutos. Han pasado {int(minutos_transcurridos)} minutos'})
+                return jsonify({'error': f'No puede anular después de 5 minutos'})
             
-            # Verificar que el sorteo no haya iniciado (para jugadas normales)
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             for j in jugadas:
-                if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró o está por iniciar'})
+                if not verificar_horario_bloqueo(j['hora']):
+                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
+        else:
+            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
+            for j in jugadas:
+                if not verificar_horario_bloqueo(j['hora']):
+                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
         
-        # Proceder a anular
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -914,118 +846,7 @@ def anular_ticket():
         data = json.dumps({"anulado": True}).encode()
         req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
         urllib.request.urlopen(req, timeout=15)
-        
-        return jsonify({'status': 'ok', 'mensaje': f'Ticket #{serial} anulado correctamente'})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# CORREGIDO: Endpoint para reimprimir ticket - MEJORADO
-@app.route('/api/reimprimir-ticket', methods=['POST'])
-@login_required
-def reimprimir_ticket():
-    try:
-        data = request.get_json()
-        serial = data.get('serial')
-        
-        if not serial:
-            return jsonify({'error': 'Serial requerido'}), 400
-        
-        # Buscar ticket
-        tickets = supabase_request("tickets", filters={"serial": serial})
-        if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no encontrado'})
-        
-        ticket = tickets[0]
-        
-        # Verificar permisos
-        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
-            return jsonify({'error': 'No autorizado para reimprimir este ticket'})
-        
-        if ticket['anulado']:
-            return jsonify({'error': 'No se puede reimprimir: Ticket anulado'})
-        
-        # Obtener jugadas
-        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-        tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
-        
-        # Obtener info de agencia
-        agencias = supabase_request("agencias", filters={"id": ticket['agencia_id']})
-        nombre_agencia = agencias[0]['nombre_agencia'] if agencias else 'Agencia'
-        
-        # Generar texto del ticket nuevamente
-        jugadas_por_hora = defaultdict(list)
-        for j in jugadas:
-            jugadas_por_hora[j['hora']].append(j)
-        
-        lineas = [
-            f"*{nombre_agencia}*",
-            f"*TICKET:* #{ticket['id']}",
-            f"*SERIAL:* {serial}",
-            f"*REIMPRESION*",
-            ticket['fecha'],
-            "------------------------",
-            ""
-        ]
-        
-        # Procesar jugadas normales
-        for hora_peru in HORARIOS_PERU:
-            if hora_peru not in jugadas_por_hora:
-                continue
-                
-            idx = HORARIOS_PERU.index(hora_peru)
-            hora_ven = HORARIOS_VENEZUELA[idx]
-            
-            hora_peru_corta = hora_peru.replace(' ', '').replace('00', '').lower()
-            hora_ven_corta = hora_ven.replace(' ', '').replace('00', '').lower()
-            lineas.append(f"*ZOOLO.PERU/{hora_peru_corta}...VZLA/{hora_ven_corta}*")
-            
-            jugadas_hora = jugadas_por_hora[hora_peru]
-            texto_jugadas = []
-            
-            for j in jugadas_hora:
-                if j['tipo'] == 'animal':
-                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
-                    # CORREGIDO: Formatear monto con decimales
-                    monto_str = formatear_monto(j['monto'])
-                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{monto_str}")
-                else:
-                    tipo_corto = j['seleccion'][0:3]
-                    monto_str = formatear_monto(j['monto'])
-                    texto_jugadas.append(f"{tipo_corto}x{monto_str}")
-            
-            lineas.append(" ".join(texto_jugadas))
-            lineas.append("")
-        
-        # Procesar tripletas - CORREGIDO: Mostrar decimales
-        if tripletas:
-            lineas.append("*TRIPLETAS (Paga x60)*")
-            for trip in tripletas:
-                nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                nombres = [ANIMALES.get(n, '')[0:3].upper() for n in nums]
-                monto_str = formatear_monto(trip['monto'])
-                lineas.append(f"{'-'.join(nombres)} (x60) S/{monto_str}")
-            lineas.append("")
-        
-        lineas.append("------------------------")
-        total_str = formatear_monto(ticket['total'])
-        lineas.append(f"*TOTAL: S/{total_str}*")
-        lineas.append("")
-        lineas.append("Buena Suerte! 🍀")
-        lineas.append("El ticket vence a los 3 dias")
-        
-        texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
-        
-        return jsonify({
-            'status': 'ok',
-            'url_whatsapp': url_whatsapp,
-            'ticket': {
-                'serial': serial,
-                'total': ticket['total'],
-                'fecha': ticket['fecha']
-            }
-        })
+        return jsonify({'status': 'ok', 'mensaje': 'Ticket anulado correctamente'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1090,9 +911,12 @@ def caja_historico():
         agencias = supabase_request("agencias", filters={"id": session['user_id']})
         comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
         
-        # CORREGIDO: Usar función de paginación para obtener hasta 5000 registros
-        filters = {"agencia_id": f"eq.{session['user_id']}"}
-        all_tickets = supabase_get_all_tickets(filters=filters, max_records=5000)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
         tickets_pendientes_cobro = []
@@ -1503,8 +1327,14 @@ def reporte_agencias_rango():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        # CORREGIDO: Usar función de paginación para obtener hasta 5000 registros
-        all_tickets = supabase_get_all_tickets(max_records=5000)
+        if agencia_id:
+            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=2000"
+        else:
+            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+            
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         tickets_validos = []
         for t in all_tickets:
@@ -1512,8 +1342,7 @@ def reporte_agencias_rango():
                 continue
             dt_ticket = parse_fecha_ticket(t['fecha'])
             if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                if not agencia_id or t['agencia_id'] == agencia_id:
-                    tickets_validos.append(t)
+                tickets_validos.append(t)
         
         resultados_por_dia = {}
         delta = dt_fin - dt_inicio
@@ -1668,8 +1497,10 @@ def exportar_csv():
         
         dict_agencias = {a['id']: a for a in agencias}
         
-        # CORREGIDO: Usar función de paginación
-        all_tickets = supabase_get_all_tickets(max_records=5000)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         tickets_validos = []
         for t in all_tickets:
@@ -1938,8 +1769,12 @@ def estadisticas_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        # CORREGIDO: Usar función de paginación
-        all_tickets = supabase_get_all_tickets(max_records=5000)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         dias_data = {}
         tickets_rango = []
@@ -2031,8 +1866,12 @@ def top_animales_rango():
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
         
-        # CORREGIDO: Usar función de paginación
-        all_tickets = supabase_get_all_tickets(max_records=5000)
+        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        req = urllib.request.Request(url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_tickets = json.loads(response.read().decode())
         
         ticket_ids = []
         for t in all_tickets:
@@ -2046,7 +1885,7 @@ def top_animales_rango():
             return jsonify({'top_animales': []})
         
         apuestas = {}
-        for ticket_id in ticket_ids[:200]:  # Limitar para rendimiento
+        for ticket_id in ticket_ids[:100]:
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
             for j in jugadas:
                 sel = j['seleccion']
@@ -2152,10 +1991,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v6.3<br>
-            ✓ Reportes históricos ilimitados<br>
-            ✓ Reimpresión de tickets<br>
-            ✓ Decimales en tickets (0.5, 1.5, etc.)
+            Sistema ZOOLO CASINO v6.1<br>Tripleta x60 + Nuevos Horarios Perú
         </div>
     </div>
 </body>
@@ -2427,7 +2263,7 @@ POS_HTML = '''
         .monto-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 20px; }
         .monto-box span { font-size: 0.8rem; font-weight: bold; color: #ffd700; }
         .monto-box input {
-            width: 70px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
+            width: 60px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
             background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
             -webkit-appearance: none;
         }
@@ -2695,7 +2531,6 @@ POS_HTML = '''
             transform: scale(0.95);
         }
         .btn-anular { background: #c0392b; color: white; }
-        .btn-reimprimir { background: #3498db; color: white; }
         .btn-borrar { background: #555; color: white; }
         .btn-salir { background: #333; color: white; grid-column: span 3; }
         
@@ -2994,36 +2829,6 @@ POS_HTML = '''
             background: rgba(39,174,96,0.2);
             border: 1px solid #27ae60;
         }
-        
-        .tripleta-detail {
-            background: rgba(255,215,0,0.1);
-            border: 1px solid #FFD700;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 5px 0;
-        }
-        .tripleta-animales-row {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin: 10px 0;
-        }
-        .tripleta-animal-box {
-            background: #000;
-            border: 2px solid #FFD700;
-            border-radius: 8px;
-            padding: 8px 12px;
-            text-align: center;
-        }
-        .tripleta-animal-box .num {
-            color: #FFD700;
-            font-size: 1.3rem;
-            font-weight: bold;
-        }
-        .tripleta-animal-box .name {
-            color: #aaa;
-            font-size: 0.7rem;
-        }
     </style>
 </head>
 <body>
@@ -3107,7 +2912,7 @@ POS_HTML = '''
         </div>
         <div class="monto-box">
             <span>S/:</span>
-            <input type="number" id="monto" value="5" min="0.5" step="0.5">
+            <input type="number" id="monto" value="5" min="1">
         </div>
     </div>
     
@@ -3153,7 +2958,6 @@ POS_HTML = '''
                 <button class="btn-pagar" onclick="pagar()">PAGAR</button>
                 <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
                 <button class="btn-anular" onclick="anular()">ANULAR</button>
-                <button class="btn-reimprimir" onclick="reimprimir()">🖨️ REIMPRIMIR</button>
                 <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
                 <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
             </div>
@@ -3327,7 +3131,7 @@ POS_HTML = '''
             
             <div class="form-group">
                 <label>Monto Apostado (S/):</label>
-                <input type="number" id="calc-monto" value="10" min="0.5" step="0.5">
+                <input type="number" id="calc-monto" value="10" min="1">
             </div>
             
             <div class="form-group">
@@ -3377,7 +3181,6 @@ POS_HTML = '''
                 <ul style="margin-left: 20px; margin-bottom: 20px;">
                     <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
                     <li>Ejemplo: S/10 → S/350</li>
-                    <li>Se permiten montos con decimales (0.5, 1.5, 2.5, etc.)</li>
                 </ul>
                 
                 <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
@@ -3401,8 +3204,8 @@ POS_HTML = '''
                 
                 <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Importante</h4>
                 <ul style="margin-left: 20px;">
-                    <li>Anular: Solo dentro de 5 minutos y si el sorteo no inició</li>
-                    <li>Bloqueo: 3 minutos antes del sorteo</li>
+                    <li>Anular: Solo dentro de 5 minutos</li>
+                    <li>Bloqueo: 5 minutos antes del sorteo</li>
                     <li>Vencimiento: Tickets vencen a los 3 días</li>
                     <li>Horarios: 8AM a 6PM hora Perú (11 sorteos)</li>
                 </ul>
@@ -3421,7 +3224,7 @@ POS_HTML = '''
                 <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
                     <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta Normal</h4>
                     <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Selecciona el monto (arriba a la derecha) - puede ser con decimales (0.5, 1.5, 2.5)</li>
+                        <li>Selecciona el monto (arriba a la derecha)</li>
                         <li>Toca los animales que quieres jugar</li>
                         <li>Selecciona los horarios (puedes varios)</li>
                         <li>Presiona "AGREGAR AL TICKET"</li>
@@ -3450,27 +3253,6 @@ POS_HTML = '''
                         <li>Confirma el pago</li>
                     </ol>
                 </div>
-                
-                <div style="background: rgba(192,57,43,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #c0392b;">
-                    <h4 style="color: #c0392b; margin-bottom: 10px;">4. Anular un Ticket</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón ANULAR</li>
-                        <li>Ingresa el SERIAL del ticket</li>
-                        <li>Solo puedes anular tickets de TU agencia</li>
-                        <li>Solo dentro de los primeros 5 minutos</li>
-                        <li>Solo si el sorteo no ha iniciado</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(52,152,219,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #3498db;">
-                    <h4 style="color: #3498db; margin-bottom: 10px;">5. Reimprimir un Ticket</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón REIMPRIMIR</li>
-                        <li>Ingresa el SERIAL del ticket</li>
-                        <li>Se generará nuevamente el enlace para WhatsApp</li>
-                        <li>Funciona con tickets de cualquier fecha</li>
-                    </ol>
-                </div>
             </div>
         </div>
     </div>
@@ -3485,19 +3267,17 @@ POS_HTML = '''
             <div style="padding: 20px;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
                 <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 6.3 - Reportes Ilimitados</p>
+                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 6.1 - Tripleta x60</p>
                 
                 <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
                     <p style="color: #ffd700; margin: 0; line-height: 1.8;">
                         Sistema de Lotería Animal<br>
                         Zona Horaria: Perú (UTC-5)<br>
                         Nuevos Horarios: 8AM - 6PM (11 sorteos)<br><br>
-                        <strong>Novedades v6.3:</strong><br>
-                        ✓ Reportes históricos ilimitados (hasta 5000 tickets)<br>
-                        ✓ Reimpresión de tickets mejorada<br>
-                        ✓ Detalles de tripletas visibles en consultas<br>
-                        ✓ Decimales correctos en tickets (0.5, 1.5, etc.)<br>
-                        ✓ Código optimizado y estable
+                        <strong>Novedades v6.1:</strong><br>
+                        ✓ Apuesta Tripleta (x60)<br>
+                        ✓ Horarios actualizados<br>
+                        ✓ 11 sorteos diarios
                     </p>
                 </div>
                 
@@ -3601,7 +3381,7 @@ POS_HTML = '''
                         if (ampm === 'AM' && hora === 12) hora = 0;
                         let sorteoMinutos = hora * 60 + minuto;
                         let btn = document.getElementById('hora-' + (idx + 1));
-                        if (btn && horaActual > sorteoMinutos - 3) {
+                        if (btn && horaActual > sorteoMinutos - 5) {
                             btn.classList.add('expired');
                         }
                     } catch(e) {
@@ -3688,20 +3468,6 @@ POS_HTML = '''
             updateTicket();
         }
         
-        // CORREGIDO: Función para formatear montos con decimales correctamente
-        function formatearMonto(monto) {
-            let montoNum = parseFloat(monto);
-            if (isNaN(montoNum)) return '0';
-            
-            // Si es entero, mostrar sin decimales
-            if (montoNum === Math.floor(montoNum)) {
-                return montoNum.toString();
-            }
-            
-            // Si tiene decimales, mostrar con 1 decimal
-            return montoNum.toFixed(1);
-        }
-        
         function updateTicket() {
             const display = document.getElementById('ticket-display');
             let total = 0;
@@ -3713,14 +3479,12 @@ POS_HTML = '''
                 let color = item.tipo === 'animal' ? '#ffd700' : 
                            item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
                 let horaTxt = item.tipo === 'tripleta' ? 'Todo el día' : item.hora;
-                // CORREGIDO: Usar formatearMonto para mostrar decimales
-                let montoStr = formatearMonto(item.monto);
                 html += `<tr>
                     <td style="color:#aaa; font-size:0.75rem">${horaTxt}</td>
                     <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
-                    <td style="text-align:right; font-weight:bold">${montoStr}</td>
+                    <td style="text-align:right; font-weight:bold">${item.monto}</td>
                 </tr>`;
-                total += parseFloat(item.monto);
+                total += item.monto;
             }
             
             // Mostrar selección actual si hay algo pendiente
@@ -3728,29 +3492,27 @@ POS_HTML = '''
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
                 let nums = seleccionTripleta.map(a => a.k).join(',');
                 let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                let montoStr = formatearMonto(monto);
                 html += `<tr style="opacity:0.8; background:rgba(255,165,0,0.2)">
                     <td style="color:#FFA500; font-size:0.75rem">Todo el día</td>
                     <td style="color:#FFA500; font-size:0.8rem">🎯 ${nums} (${nombres})</td>
-                    <td style="text-align:right; color:#FFA500; font-weight:bold">${montoStr}</td>
+                    <td style="text-align:right; color:#FFA500; font-weight:bold">${monto}</td>
                 </tr>`;
             } else if (!modoTripleta && horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let montoStr = formatearMonto(monto);
                 for (let h of horariosSel) {
                     for (let a of seleccionados) {
                         let indicador = a.k === "40" ? " 🦉x70" : "";
                         html += `<tr style="opacity:0.7; background:rgba(255,215,0,0.1)">
                             <td style="color:#ffd700; font-size:0.75rem">${h}</td>
                             <td style="color:#ffd700; font-size:0.8rem">${a.k} ${a.nombre}${indicador}</td>
-                            <td style="text-align:right; color:#ffd700; font-weight:bold">${montoStr}</td>
+                            <td style="text-align:right; color:#ffd700; font-weight:bold">${monto}</td>
                         </tr>`;
                     }
                     for (let e of especiales) {
                         html += `<tr style="opacity:0.7; background:rgba(52,152,219,0.1)">
                             <td style="color:#3498db; font-size:0.75rem">${h}</td>
                             <td style="color:#3498db; font-size:0.8rem">${e}</td>
-                            <td style="text-align:right; color:#3498db; font-weight:bold">${montoStr}</td>
+                            <td style="text-align:right; color:#3498db; font-weight:bold">${monto}</td>
                         </tr>`;
                     }
                 }
@@ -3766,8 +3528,7 @@ POS_HTML = '''
             }
             
             if (total > 0) {
-                let totalStr = formatearMonto(total);
-                html += `<div class="ticket-total">TOTAL: S/${totalStr}</div>`;
+                html += `<div class="ticket-total">TOTAL: S/${total}</div>`;
             }
             
             display.innerHTML = html;
@@ -3839,7 +3600,7 @@ POS_HTML = '''
                 let jugadas = carrito.map(c => ({
                     hora: c.hora, 
                     seleccion: c.seleccion, 
-                    monto: parseFloat(c.monto), 
+                    monto: c.monto, 
                     tipo: c.tipo
                 }));
                 
@@ -4131,51 +3892,18 @@ POS_HTML = '''
                     let ganoClass = j.gano ? 'jugada-ganadora' : '';
                     let resultadoText = j.resultado ? `${j.resultado}` : 'Pendiente';
                     
-                    // CORREGIDO: Mostrar detalles de tripleta de forma destacada
-                    if (j.tipo === 'tripleta' && j.detalle_tripleta) {
-                        html += `
-                            <div class="tripleta-detail ${ganoClass}">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <strong style="color: #FFD700;">🎯 TRIPLETA</strong>
-                                    <span style="color: #888;">Todo el día</span>
-                                </div>
-                                <div class="tripleta-animales-row">
-                                    <div class="tripleta-animal-box">
-                                        <div class="num">${j.detalle_tripleta.animal1}</div>
-                                        <div class="name">${j.detalle_tripleta.nombres[0]}</div>
-                                    </div>
-                                    <div class="tripleta-animal-box">
-                                        <div class="num">${j.detalle_tripleta.animal2}</div>
-                                        <div class="name">${j.detalle_tripleta.nombres[1]}</div>
-                                    </div>
-                                    <div class="tripleta-animal-box">
-                                        <div class="num">${j.detalle_tripleta.animal3}</div>
-                                        <div class="name">${j.detalle_tripleta.nombres[2]}</div>
-                                    </div>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-                                    <small style="color: #888;">Resultado: ${resultadoText}</small>
-                                    <div>
-                                        <span>S/${j.monto}</span>
-                                        ${j.gano ? '<span style="color: #27ae60; font-weight: bold; margin-left: 10px;">S/' + j.premio + '</span>' : ''}
-                                    </div>
-                                </div>
+                    html += `
+                        <div class="jugada-detail ${ganoClass}">
+                            <div>
+                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
+                                <small style="color: #888;">Resultado: ${resultadoText}</small>
                             </div>
-                        `;
-                    } else {
-                        html += `
-                            <div class="jugada-detail ${ganoClass}">
-                                <div>
-                                    <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
-                                    <small style="color: #888;">Resultado: ${resultadoText}</small>
-                                </div>
-                                <div style="text-align: right;">
-                                    <div>S/${j.monto}</div>
-                                    ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
-                                </div>
+                            <div style="text-align: right;">
+                                <div>S/${j.monto}</div>
+                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
                             </div>
-                        `;
-                    }
+                        </div>
+                    `;
                 });
                 
                 html += '</div>';
@@ -4342,11 +4070,9 @@ POS_HTML = '''
         }
         
         async function anular() {
-            let serial = prompt('Ingrese SERIAL del ticket a anular:'); 
+            let serial = prompt('SERIAL a anular:'); 
             if (!serial) return;
-            
-            const confirmar = confirm(`¿Está seguro de anular el ticket ${serial}?\\n\\nSolo se puede anular:\\n• Si es de tu agencia\\n• Dentro de 5 minutos de creado\\n• Si el sorteo no ha iniciado`);
-            if (!confirmar) return;
+            if (!confirm('¿ANULAR ' + serial + '?')) return;
             
             try {
                 const response = await fetch('/api/anular-ticket', {
@@ -4363,42 +4089,6 @@ POS_HTML = '''
                 }
             } catch (e) {
                 showToast('Error de conexión', 'error');
-            }
-        }
-        
-        // CORREGIDO: Función para reimprimir ticket - MEJORADA
-        async function reimprimir() {
-            let serial = prompt('Ingrese SERIAL del ticket a reimprimir:'); 
-            if (!serial) return;
-            
-            const btn = document.querySelector('.btn-reimprimir');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳...';
-            btn.disabled = true;
-            
-            try {
-                const response = await fetch('/api/reimprimir-ticket', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({serial: serial})
-                });
-                const d = await response.json();
-                
-                if (d.error) {
-                    showToast(d.error, 'error');
-                } else {
-                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = d.url_whatsapp;
-                    } else {
-                        window.open(d.url_whatsapp, '_blank');
-                    }
-                    showToast('Ticket listo para reimprimir', 'success');
-                }
-            } catch (e) {
-                showToast('Error de conexión', 'error');
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
             }
         }
         
@@ -5007,7 +4697,7 @@ ADMIN_HTML = '''
         <div id="mensaje" class="mensaje"></div>
         
         <div class="info-pago">
-            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60 | Cierre: 3 min antes
+            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60
         </div>
         
         <div class="timezone-info" id="timezone-info" style="display: none;">
@@ -5092,7 +4782,7 @@ ADMIN_HTML = '''
 
         <div id="reporte" class="tab-content">
             <div class="form-box">
-                <h3>🏢 REPORTE POR AGENCIAS (Hasta 5000 tickets)</h3>
+                <h3>🏢 REPORTE POR AGENCIAS</h3>
                 
                 <div class="form-group" style="margin-bottom: 15px;">
                     <label>Filtrar por Agencia:</label>
@@ -5199,7 +4889,7 @@ ADMIN_HTML = '''
 
         <div id="historico" class="tab-content">
             <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA (Hasta 5000 tickets)</h3>
+                <h3>📅 CONSULTA HISTÓRICA</h3>
                 <div class="form-row">
                     <input type="date" id="hist-fecha-inicio">
                     <input type="date" id="hist-fecha-fin">
@@ -5648,6 +5338,7 @@ ADMIN_HTML = '''
                     } else {
                         cargarResultadosAdmin();
                     }
+                    // Recargar tripletas si estamos en esa pestaña
                     if (document.getElementById('tripletas').classList.contains('active')) {
                         cargarTripletas();
                     }
@@ -5675,7 +5366,7 @@ ADMIN_HTML = '''
             }
             
             fechasConsulta = { inicio, fin };
-            showMensaje('Consultando datos (puede tomar un momento para rangos largos)...', 'success');
+            showMensaje('Consultando datos...', 'success');
             
             fetch('/admin/estadisticas-rango', {
                 method: 'POST',
@@ -5726,7 +5417,7 @@ ADMIN_HTML = '''
                 return;
             }
             
-            showMensaje('Generando reporte (puede tomar un momento para rangos largos)...', 'success');
+            showMensaje('Consultando reporte...', 'success');
             
             fetch('/admin/reporte-agencias-rango', {
                 method: 'POST',
@@ -6125,13 +5816,13 @@ ADMIN_HTML = '''
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v6.3 - CORRECCIONES COMPLETAS")
+    print("  ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60")
+    print("  CORREGIDO: Error 404 en endpoint de tripletas")
     print("=" * 60)
-    print("  ✓ Reportes históricos ilimitados (hasta 5000 tickets)")
-    print("  ✓ Reimpresión de tickets funcional")
-    print("  ✓ Detalles de tripletas visibles en consultas")
-    print("  ✓ Decimales correctos en tickets (0.5, 1.5, etc.)")
-    print("  ✓ Código optimizado y limpio")
+    print("  ✓ Pago tripleta cambiado de x50 a x60")
+    print("  ✓ Endpoint /admin/tripletas-hoy verificado")
+    print("  ✓ Textos de ayuda actualizados")
+    print("  ✓ Cálculos de premios corregidos")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
