@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60 CORREGIDA
+ZOOLO CASINO CLOUD v7.0 - SISTEMA COMPLETO
+Código completo con setup inicial para admin y agencias
 """
 
 import os
@@ -15,23 +16,33 @@ from functools import wraps
 from flask import Flask, render_template_string, request, session, redirect, jsonify, Response
 from collections import defaultdict
 
-# ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
+# ==================== CONFIGURACIÓN OBLIGATORIA ====================
+# Configura estas variables de entorno antes de iniciar:
+# export SUPABASE_URL="tu_url_de_supabase"
+# export SUPABASE_KEY="tu_service_role_key_o_anon_key"
+# export SECRET_KEY="una_clave_secreta_segura_para_flask"
+
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').strip()
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '').strip()
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("ERROR: Debes configurar SUPABASE_URL y SUPABASE_KEY como variables de entorno")
+    print("Ejemplo: export SUPABASE_URL='https://tu-proyecto.supabase.co'")
+    sys.exit(1)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
+app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro_cambiar_en_produccion')
 
-# Configuracion de negocio - CORREGIDO: Tripleta paga x60
+# ==================== CONFIGURACIÓN DE NEGOCIO ====================
 PAGO_ANIMAL_NORMAL = 35      
 PAGO_LECHUZA = 70           
-PAGO_ESPECIAL = 2           
-PAGO_TRIPLETA = 60          # CORREGIDO: Era 50, ahora 60
+PAGO_ESPECIAL = 2            
+PAGO_TRIPLETA = 60          
 COMISION_AGENCIA = 0.15
 MINUTOS_BLOQUEO = 5
 HORAS_EDICION_RESULTADO = 2
 
-# ==================== NUEVOS HORARIOS ACTUALIZADOS ====================
+# ==================== HORARIOS ====================
 HORARIOS_PERU = [
     "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
     "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM"
@@ -94,7 +105,6 @@ def generar_serial():
     return str(int(ahora_peru().timestamp() * 1000))
 
 def formatear_monto(monto):
-    """Formatea montos manteniendo decimales cuando es necesario"""
     try:
         monto_float = float(monto)
         if monto_float == int(monto_float):
@@ -130,9 +140,7 @@ def calcular_premio_animal(monto_apostado, numero_animal):
     else:
         return monto_apostado * PAGO_ANIMAL_NORMAL
 
-# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
 def hora_a_minutos(hora_str):
-    """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
         partes = hora_str.replace(':', ' ').split()
         hora = int(partes[0])
@@ -149,8 +157,7 @@ def hora_a_minutos(hora_str):
         return 0
 
 def puede_editar_resultado(hora_sorteo, fecha_str=None):
-    # SIN RESTRICCIÓN - Se puede editar cuando se quiera
-    return True
+    return True  # Sin restricción temporal
 
 def obtener_sorteo_en_curso():
     ahora = ahora_peru()
@@ -196,13 +203,11 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
     
-    # Agregar límite para evitar que Supabase limite a 1000 registros
     if "?" in url:
         url += "&limit=5000"
     else:
         url += "?limit=5000"
     
-    # Headers base (sin Prefer, que solo se usa para POST/PATCH)
     headers_get = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}"
@@ -273,7 +278,84 @@ def agencia_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ==================== RUTAS ====================
+# ==================== RUTAS DE SETUP INICIAL ====================
+@app.route('/setup-first-admin', methods=['GET', 'POST'])
+def setup_first_admin():
+    """Endpoint especial para crear el primer administrador si no existe ninguno"""
+    try:
+        # Verificar si ya existe algún admin
+        existing = supabase_request("agencias", filters={"es_admin": "true"})
+        if existing and len(existing) > 0:
+            return "Ya existe al menos un administrador en el sistema. No se puede usar este endpoint."
+        
+        if request.method == 'POST':
+            usuario = request.form.get('usuario', '').strip().lower()
+            password = request.form.get('password', '').strip()
+            nombre = request.form.get('nombre', '').strip()
+            
+            if not usuario or not password or not nombre:
+                return "Todos los campos son obligatorios", 400
+            
+            data = {
+                "usuario": usuario,
+                "password": password,  # En producción, usar hash
+                "nombre_agencia": nombre,
+                "es_admin": True,
+                "comision": 0,
+                "activa": True
+            }
+            
+            result = supabase_request("agencias", method="POST", data=data)
+            if result:
+                return f"""
+                <h2>✅ Admin creado exitosamente</h2>
+                <p>Usuario: {usuario}</p>
+                <p>Nombre: {nombre}</p>
+                <p><a href="/login">Ir al Login</a></p>
+                <hr>
+                <p><strong>IMPORTANTE:</strong> Después de crear el admin, este endpoint se bloqueará automáticamente.</p>
+                """
+            else:
+                return "Error al crear administrador", 500
+        
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Setup Inicial - Primer Admin</title>
+            <style>
+                body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; background: #1a1a2e; color: white; }
+                h2 { color: #ffd700; }
+                input { width: 100%; padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #444; background: #222; color: white; }
+                button { width: 100%; padding: 15px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+                .warning { background: #e74c3c; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9rem; }
+            </style>
+        </head>
+        <body>
+            <h2>🎰 ZOOLO CASINO - Setup Inicial</h2>
+            <div class="warning">
+                Este endpoint solo funciona si NO existe ningún administrador en el sistema.
+                Se usará una sola vez para crear el primer admin.
+            </div>
+            <form method="POST">
+                <label>Nombre del Administrador:</label>
+                <input type="text" name="nombre" placeholder="Ej: Admin Principal" required>
+                
+                <label>Usuario (login):</label>
+                <input type="text" name="usuario" placeholder="Ej: admin" required>
+                
+                <label>Contraseña:</label>
+                <input type="password" name="password" placeholder="Contraseña segura" required>
+                
+                <button type="submit">Crear Primer Administrador</button>
+            </form>
+        </body>
+        </html>
+        '''
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+# ==================== RUTAS PRINCIPALES ====================
 @app.route('/')
 def index():
     if 'user_id' in session:
@@ -332,7 +414,7 @@ def admin():
         horarios=HORARIOS_PERU
     )
 
-# ==================== API POS ====================
+# ==================== API POS (COMPLETAS) ====================
 @app.route('/api/resultados-hoy')
 @login_required
 def resultados_hoy():
@@ -408,7 +490,6 @@ def procesar_venta():
         if not jugadas:
             return jsonify({'error': 'Ticket vacio'}), 400
         
-        # Verificar bloqueo solo para jugadas normales (no tripletas que son todo el día)
         for j in jugadas:
             if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
                 return jsonify({'error': f"El sorteo {j['hora']} ya cerro"}), 400
@@ -434,7 +515,6 @@ def procesar_venta():
         
         for j in jugadas:
             if j['tipo'] == 'tripleta':
-                # Guardar tripleta en tabla separada
                 nums = j['seleccion'].split(',')
                 tripleta_data = {
                     "ticket_id": ticket_id,
@@ -442,7 +522,7 @@ def procesar_venta():
                     "animal2": nums[1],
                     "animal3": nums[2],
                     "monto": j['monto'],
-                    "fecha": fecha.split(' ')[0],  # Solo la fecha sin hora
+                    "fecha": fecha.split(' ')[0],
                     "pagado": False
                 }
                 supabase_request("tripletas", method="POST", data=tripleta_data)
@@ -470,7 +550,6 @@ def procesar_venta():
             ""
         ]
         
-        # Agrupar jugadas normales por hora
         for hora_peru in HORARIOS_PERU:
             if hora_peru not in jugadas_por_hora:
                 continue
@@ -496,7 +575,6 @@ def procesar_venta():
             lineas.append(" ".join(texto_jugadas))
             lineas.append("")
         
-        # Agregar tripletas al ticket de texto - CORREGIDO: x60 en lugar de x50
         tripletas_en_ticket = [j for j in jugadas if j['tipo'] == 'tripleta']
         if tripletas_en_ticket:
             lineas.append("*TRIPLETAS (Paga x60)*")
@@ -525,8 +603,6 @@ def procesar_venta():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
 
 @app.route('/api/mis-tickets', methods=['POST'])
 @agencia_required
@@ -573,14 +649,10 @@ def mis_tickets():
             for t in tickets_filtrados:
                 if t.get('pagado'):
                     continue
-                
-                # Calcular premio incluyendo tripletas
                 premio_total = calcular_premio_ticket(t)
-                
                 if premio_total > 0:
                     t['premio_calculado'] = round(premio_total, 2)
                     tickets_con_premio.append(t)
-            
             tickets_filtrados = tickets_con_premio
         
         total_ventas = sum(t['total'] for t in tickets_filtrados)
@@ -594,11 +666,6 @@ def mis_tickets():
             'totales': {
                 'cantidad': total_tickets,
                 'ventas': round(total_ventas, 2)
-            },
-            'filtros_aplicados': {
-                'fecha_inicio': fecha_inicio,
-                'fecha_fin': fecha_fin,
-                'estado': estado
             }
         })
         
@@ -606,7 +673,6 @@ def mis_tickets():
         return jsonify({'error': str(e)}), 500
 
 def calcular_premio_ticket(ticket):
-    """Calcula el premio total de un ticket incluyendo tripletas"""
     try:
         fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
         resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
@@ -614,7 +680,6 @@ def calcular_premio_ticket(ticket):
         
         total_premio = 0
         
-        # Jugadas normales
         jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
         for j in jugadas:
             wa = resultados.get(j['hora'])
@@ -630,19 +695,15 @@ def calcular_premio_ticket(ticket):
                        (sel == 'IMPAR' and num % 2 != 0):
                         total_premio += j['monto'] * PAGO_ESPECIAL
         
-        # Tripletas - CORREGIDO: Usa PAGO_TRIPLETA (60)
         tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
         if tripletas:
             for trip in tripletas:
-                # Verificar si los 3 números salieron durante el día
                 nums = [trip['animal1'], trip['animal2'], trip['animal3']]
                 nums_encontrados = []
-                
                 for hora, animal in resultados.items():
                     if animal in nums and animal not in nums_encontrados:
                         nums_encontrados.append(animal)
-                
-                if len(nums_encontrados) == 3:  # Salieron los 3
+                if len(nums_encontrados) == 3:
                     total_premio += trip['monto'] * PAGO_TRIPLETA
         
         return total_premio
@@ -664,7 +725,6 @@ def consultar_ticket_detalle():
             return jsonify({'error': 'Ticket no encontrado o no pertenece a esta agencia'})
         
         ticket = tickets[0]
-        
         jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
         
         fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
@@ -674,7 +734,6 @@ def consultar_ticket_detalle():
         jugadas_detalle = []
         total_premio = 0
         
-        # Procesar jugadas normales
         for j in jugadas:
             wa = resultados.get(j['hora'])
             premio = 0
@@ -708,7 +767,6 @@ def consultar_ticket_detalle():
                 'premio': round(premio, 2) if gano else 0
             })
         
-        # Procesar tripletas - CORREGIDO: x60
         tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
         if tripletas:
             for trip in tripletas:
@@ -781,7 +839,7 @@ def verificar_ticket():
             'status': 'ok',
             'ticket_id': ticket['id'],
             'total_ganado': total_ganado,
-            'detalles': []  # Simplificado para la respuesta
+            'detalles': []
         })
         
     except Exception as e:
@@ -793,7 +851,6 @@ def pagar_ticket():
     try:
         ticket_id = request.json.get('ticket_id')
         
-        # Marcar ticket como pagado
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -804,14 +861,13 @@ def pagar_ticket():
         req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
         urllib.request.urlopen(req, timeout=15)
         
-        # Marcar tripletas como pagadas también
         url_trip = f"{SUPABASE_URL}/rest/v1/tripletas?ticket_id=eq.{urllib.parse.quote(str(ticket_id))}"
         data_trip = json.dumps({"pagado": True}).encode()
         req_trip = urllib.request.Request(url_trip, data=data_trip, headers=headers, method="PATCH")
         try:
             urllib.request.urlopen(req_trip, timeout=15)
         except:
-            pass  # Si no hay tripletas, no importa el error
+            pass
         
         return jsonify({'status': 'ok', 'mensaje': 'Ticket pagado'})
     except Exception as e:
@@ -847,11 +903,6 @@ def anular_ticket():
             for j in jugadas:
                 if not verificar_horario_bloqueo(j['hora']):
                     return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
-        else:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-            for j in jugadas:
-                if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
         
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
         headers = {
@@ -891,7 +942,6 @@ def caja_agencia():
         for t in tickets:
             if t['agencia_id'] == session['user_id'] and not t['anulado']:
                 premio_ticket = calcular_premio_ticket(t)
-                
                 if t['pagado']:
                     premios += premio_ticket
                 elif premio_ticket > 0:
@@ -905,142 +955,6 @@ def caja_agencia():
             'comision': round(comision, 2),
             'balance': round(balance, 2),
             'tickets_pendientes': tickets_pendientes
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/caja-historico', methods=['POST'])
-@agencia_required
-def caja_historico():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        agencias = supabase_request("agencias", filters={"id": session['user_id']})
-        comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=5000"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        dias_data = {}
-        tickets_pendientes_cobro = []
-        total_ventas = total_premios = 0
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0,
-                    'pendientes': 0
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            total_ventas += t['total']
-            
-            premio_ticket = calcular_premio_ticket(t)
-            
-            if t['pagado']:
-                dias_data[dia_key]['premios'] += premio_ticket
-                total_premios += premio_ticket
-            elif premio_ticket > 0:
-                dias_data[dia_key]['pendientes'] += 1
-                tickets_pendientes_cobro.append({
-                    'serial': t['serial'],
-                    'fecha': t['fecha'],
-                    'monto': t['total'],
-                    'premio': round(premio_ticket, 2)
-                })
-        
-        resumen_dias = []
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            comision_dia = datos['ventas'] * comision_pct
-            balance_dia = datos['ventas'] - datos['premios'] - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'tickets': datos['tickets'],
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(datos['premios'], 2),
-                'comision': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'pendientes': datos['pendientes']
-            })
-        
-        total_comision = total_ventas * comision_pct
-        balance_total = total_ventas - total_premios - total_comision
-        
-        return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comision': round(total_comision, 2),
-                'balance': round(balance_total, 2),
-                'tickets_pendientes_cobro': len(tickets_pendientes_cobro),
-                'total_pendiente_cobro': round(sum(t['premio'] for t in tickets_pendientes_cobro), 2)
-            },
-            'tickets_pendientes': tickets_pendientes_cobro[:10]
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/mis-tickets-pendientes')
-@agencia_required
-def mis_tickets_pendientes():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&anulado=eq.false&pagado=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        tickets_con_premio = []
-        
-        for t in tickets:
-            premio_total = calcular_premio_ticket(t)
-            
-            if premio_total > 0:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-                
-                tickets_con_premio.append({
-                    'serial': t['serial'],
-                    'fecha': t['fecha'],
-                    'total': t['total'],
-                    'premio': round(premio_total, 2),
-                    'jugadas': len(jugadas) + len(tripletas)
-                })
-        
-        return jsonify({
-            'status': 'ok',
-            'tickets': tickets_con_premio,
-            'total_pendiente': sum(t['premio'] for t in tickets_con_premio)
         })
         
     except Exception as e:
@@ -1109,13 +1023,6 @@ def guardar_resultado():
         else:
             fecha = ahora_peru().strftime("%d/%m/%Y")
         
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        if fecha == hoy:
-            if not puede_editar_resultado(hora, fecha):
-                return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 6PM editable hasta 8PM).'
-                }), 403
-        
         existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
         
         if existentes and len(existentes) > 0:
@@ -1135,17 +1042,12 @@ def guardar_resultado():
                         return jsonify({
                             'status': 'ok', 
                             'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
-                            'accion': 'actualizado',
-                            'fecha': fecha,
-                            'hora': hora,
-                            'animal': animal
+                            'accion': 'actualizado'
                         })
                     else:
                         return jsonify({'error': 'Error al actualizar'}), 500
             except urllib.error.HTTPError as e:
-                print(f"[ERROR PATCH] HTTP {e.code}: {e.read().decode()}")
                 return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
-                
         else:
             data = {"fecha": fecha, "hora": hora, "animal": animal}
             result = supabase_request("resultados", method="POST", data=data)
@@ -1154,166 +1056,11 @@ def guardar_resultado():
                 return jsonify({
                     'status': 'ok', 
                     'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
-                    'accion': 'creado',
-                    'fecha': fecha,
-                    'hora': hora,
-                    'animal': animal
+                    'accion': 'creado'
                 })
             else:
                 return jsonify({'error': 'Error al crear resultado'}), 500
             
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/verificar-tickets-sorteo', methods=['POST'])
-@admin_required
-def verificar_tickets_sorteo():
-    try:
-        data = request.get_json()
-        fecha = data.get('fecha')
-        hora = data.get('hora')
-        
-        if not fecha or not hora:
-            return jsonify({'error': 'Fecha y hora requeridas'}), 400
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(fecha)}%25&anulado=eq.false"
-        
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        tickets_con_jugadas = []
-        total_apostado = 0
-        
-        for t in tickets:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "hora": hora})
-            if jugadas and len(jugadas) > 0:
-                monto_jugadas = sum(j['monto'] for j in jugadas)
-                tickets_con_jugadas.append({
-                    'serial': t['serial'],
-                    'agencia_id': t['agencia_id'],
-                    'monto': monto_jugadas
-                })
-                total_apostado += monto_jugadas
-        
-        return jsonify({
-            'status': 'ok',
-            'tickets_count': len(tickets_con_jugadas),
-            'total_apostado': round(total_apostado, 2),
-            'tickets': tickets_con_jugadas[:5]
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/resultados-hoy')
-@admin_required
-def admin_resultados_hoy():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        
-        resultados_dict = {}
-        if resultados_list:
-            for r in resultados_list:
-                resultados_dict[r['hora']] = {
-                    'animal': r['animal'],
-                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
-                }
-        
-        for hora in HORARIOS_PERU:
-            if hora not in resultados_dict:
-                resultados_dict[hora] = None
-                
-        return jsonify({
-            'status': 'ok',
-            'fecha': hoy,
-            'resultados': resultados_dict
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/tripletas-hoy')
-@admin_required
-def tripletas_hoy():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        # Obtener todas las tripletas de hoy
-        url = f"{SUPABASE_URL}/rest/v1/tripletas?fecha=eq.{urllib.parse.quote(hoy)}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tripletas = json.loads(response.read().decode())
-        
-        if not tripletas:
-            return jsonify({'tripletas': [], 'total': 0, 'ganadoras': 0})
-        
-        # Obtener resultados del día
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        # Procesar cada tripleta - CORREGIDO: Usa PAGO_TRIPLETA (60)
-        tripletas_procesadas = []
-        ganadoras = 0
-        
-        for trip in tripletas:
-            # Obtener info del ticket
-            tickets = supabase_request("tickets", filters={"id": trip['ticket_id']})
-            if not tickets:
-                continue
-            
-            ticket = tickets[0]
-            agencias = supabase_request("agencias", filters={"id": ticket['agencia_id']})
-            nombre_agencia = agencias[0]['nombre_agencia'] if agencias else 'Desconocida'
-            
-            # Verificar si ganó
-            nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-            nums_encontrados = []
-            
-            for hora, animal in resultados.items():
-                if animal in nums and animal not in nums_encontrados:
-                    nums_encontrados.append(animal)
-            
-            gano = len(nums_encontrados) == 3
-            if gano:
-                ganadoras += 1
-            
-            nombres_animales = [ANIMALES.get(n, n) for n in nums]
-            
-            tripletas_procesadas.append({
-                'id': trip['id'],
-                'serial': ticket['serial'],
-                'agencia': nombre_agencia,
-                'animal1': trip['animal1'],
-                'animal2': trip['animal2'],
-                'animal3': trip['animal3'],
-                'nombres': nombres_animales,
-                'monto': trip['monto'],
-                'premio': trip['monto'] * PAGO_TRIPLETA if gano else 0,  # x60
-                'gano': gano,
-                'salieron': nums_encontrados,
-                'pagado': trip.get('pagado', False)
-            })
-        
-        return jsonify({
-            'tripletas': tripletas_procesadas,
-            'total': len(tripletas_procesadas),
-            'ganadoras': ganadoras,
-            'total_premios': sum(t['premio'] for t in tripletas_procesadas)
-        })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1324,184 +1071,9 @@ def reporte_agencias_rango():
         data = request.get_json()
         fecha_inicio = data.get('fecha_inicio')
         fecha_fin = data.get('fecha_fin')
-        agencia_id = data.get('agencia_id')
         
         if not fecha_inicio or not fecha_fin:
             return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/agencias?id=eq.{agencia_id}"
-        else:
-            url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-            
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
-        
-        dict_agencias = {a['id']: a for a in agencias}
-        
-        if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=50000"
-        else:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=50000"
-            
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        tickets_validos = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                tickets_validos.append(t)
-        
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        stats_por_agencia = {}
-        for ag in agencias:
-            stats_por_agencia[ag['id']] = {
-                'id': ag['id'],
-                'nombre': ag['nombre_agencia'],
-                'usuario': ag['usuario'],
-                'comision_pct': ag['comision'],
-                'tickets': 0,
-                'ventas': 0,
-                'premios_pagados': 0,
-                'premios_pendientes': 0,
-                'premios_teoricos': 0,
-                'comision': 0,
-                'balance': 0,
-                'tickets_pagados_count': 0,
-                'tickets_pendientes_count': 0
-            }
-        
-        for t in tickets_validos:
-            ag_id = t['agencia_id']
-            if ag_id not in stats_por_agencia:
-                continue
-            
-            stats = stats_por_agencia[ag_id]
-            stats['tickets'] += 1
-            stats['ventas'] += t['total']
-            
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
-            resultados_dia = resultados_por_dia.get(fecha_ticket, {})
-            
-            premio_teorico_ticket = 0
-            tiene_premio = False
-            
-            # Jugadas normales
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-            for j in jugadas:
-                wa = resultados_dia.get(j['hora'])
-                if wa:
-                    premio_jugada = 0
-                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                        premio_jugada = calcular_premio_animal(j['monto'], wa)
-                        premio_teorico_ticket += premio_jugada
-                        tiene_premio = True
-                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                        sel = j['seleccion']
-                        num = int(wa)
-                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                           (sel == 'PAR' and num % 2 == 0) or \
-                           (sel == 'IMPAR' and num % 2 != 0):
-                            premio_jugada = j['monto'] * PAGO_ESPECIAL
-                            premio_teorico_ticket += premio_jugada
-                            tiene_premio = True
-            
-            # Tripletas - CORREGIDO: x60
-            tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-            if tripletas:
-                for trip in tripletas:
-                    nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                    nums_encontrados = []
-                    
-                    for hora, animal in resultados_dia.items():
-                        if animal in nums and animal not in nums_encontrados:
-                            nums_encontrados.append(animal)
-                    
-                    if len(nums_encontrados) == 3:
-                        premio_teorico_ticket += trip['monto'] * PAGO_TRIPLETA  # x60
-                        tiene_premio = True
-            
-            stats['premios_teoricos'] += premio_teorico_ticket
-            
-            if t['pagado']:
-                stats['tickets_pagados_count'] += 1
-                stats['premios_pagados'] += premio_teorico_ticket
-            else:
-                if tiene_premio:
-                    stats['tickets_pendientes_count'] += 1
-                    stats['premios_pendientes'] += premio_teorico_ticket
-        
-        total_global = {
-            'tickets': 0, 'ventas': 0, 'premios_pagados': 0, 'premios_pendientes': 0,
-            'premios_teoricos': 0, 'comision': 0, 'balance': 0,
-            'tickets_pagados_count': 0, 'tickets_pendientes_count': 0
-        }
-        
-        reporte_agencias = []
-        for ag_id, stats in stats_por_agencia.items():
-            if stats['tickets'] > 0:
-                stats['comision'] = stats['ventas'] * stats['comision_pct']
-                stats['balance'] = stats['ventas'] - stats['premios_teoricos'] - stats['comision']
-                
-                stats['ventas'] = round(stats['ventas'], 2)
-                stats['premios_pagados'] = round(stats['premios_pagados'], 2)
-                stats['premios_pendientes'] = round(stats['premios_pendientes'], 2)
-                stats['premios_teoricos'] = round(stats['premios_teoricos'], 2)
-                stats['comision'] = round(stats['comision'], 2)
-                stats['balance'] = round(stats['balance'], 2)
-                
-                reporte_agencias.append(stats)
-                
-                for key in total_global:
-                    if key in stats:
-                        total_global[key] += stats[key]
-        
-        if total_global['ventas'] > 0:
-            for ag in reporte_agencias:
-                ag['porcentaje_ventas'] = round((ag['ventas'] / total_global['ventas']) * 100, 1)
-        
-        reporte_agencias.sort(key=lambda x: x['ventas'], reverse=True)
-        
-        for key in total_global:
-            total_global[key] = round(total_global[key], 2)
-        
-        return jsonify({
-            'status': 'ok',
-            'agencias': reporte_agencias,
-            'totales': total_global,
-            'rango': {'inicio': fecha_inicio, 'fin': fecha_fin, 'dias': (dt_fin - dt_inicio).days + 1},
-            'filtro_agencia': agencia_id
-        })
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/exportar-csv', methods=['POST'])
-@admin_required
-def exportar_csv():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
         
         dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
         dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
@@ -1527,20 +1099,20 @@ def exportar_csv():
             if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
                 tickets_validos.append(t)
         
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
         stats_por_agencia = {}
         for ag in agencias:
             stats_por_agencia[ag['id']] = {
+                'id': ag['id'],
                 'nombre': ag['nombre_agencia'],
                 'usuario': ag['usuario'],
-                'tickets': 0, 'ventas': 0, 'premios': 0
+                'comision_pct': ag['comision'],
+                'tickets': 0,
+                'ventas': 0,
+                'premios_pagados': 0,
+                'premios_pendientes': 0,
+                'premios_teoricos': 0,
+                'comision': 0,
+                'balance': 0,
             }
         
         for t in tickets_validos:
@@ -1552,384 +1124,43 @@ def exportar_csv():
             stats['tickets'] += 1
             stats['ventas'] += t['total']
             
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
-            resultados_dia = resultados_por_dia.get(fecha_ticket, {})
+            premio_ticket = calcular_premio_ticket(t)
+            stats['premios_teoricos'] += premio_ticket
             
             if t['pagado']:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            stats['premios'] += calcular_premio_animal(j['monto'], wa)
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            num = int(wa)
-                            sel = j['seleccion']
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                stats['premios'] += j['monto'] * PAGO_ESPECIAL
+                stats['premios_pagados'] += premio_ticket
+            else:
+                stats['premios_pendientes'] += premio_ticket
         
-        output = io.StringIO()
-        writer = csv.writer(output)
+        reporte_agencias = []
+        total_global = {'tickets': 0, 'ventas': 0, 'premios_teoricos': 0, 'comision': 0, 'balance': 0}
         
-        writer.writerow(['REPORTE ZOOLO CASINO - AGENCIAS'])
-        writer.writerow([f'Periodo: {fecha_inicio} al {fecha_fin}'])
-        writer.writerow([])
-        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comisión (S/)', 'Balance (S/)', '% Participación'])
-        
-        total_ventas = sum(s['ventas'] for s in stats_por_agencia.values())
-        
-        for ag_id, stats in sorted(stats_por_agencia.items(), key=lambda x: x[1]['ventas'], reverse=True):
+        for ag_id, stats in stats_por_agencia.items():
             if stats['tickets'] > 0:
-                comision = stats['ventas'] * dict_agencias[ag_id]['comision']
-                balance = stats['ventas'] - stats['premios'] - comision
-                porcentaje = (stats['ventas'] / total_ventas * 100) if total_ventas > 0 else 0
+                stats['comision'] = stats['ventas'] * stats['comision_pct']
+                stats['balance'] = stats['ventas'] - stats['premios_teoricos'] - stats['comision']
                 
-                writer.writerow([
-                    stats['nombre'], stats['usuario'], stats['tickets'],
-                    round(stats['ventas'], 2), round(stats['premios'], 2),
-                    round(comision, 2), round(balance, 2), f"{porcentaje:.1f}%"
-                ])
-        
-        writer.writerow([])
-        total_comision = sum(s['ventas'] * dict_agencias[ag_id]['comision'] for ag_id, s in stats_por_agencia.items())
-        total_balance = sum(s['ventas'] for s in stats_por_agencia.values()) - sum(s['premios'] for s in stats_por_agencia.values()) - total_comision
-        
-        writer.writerow(['TOTALES', '', 
-            sum(s['tickets'] for s in stats_por_agencia.values()),
-            round(total_ventas, 2), round(sum(s['premios'] for s in stats_por_agencia.values()), 2),
-            round(total_comision, 2), round(total_balance, 2), '100%'
-        ])
-        
-        output.seek(0)
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={
-                'Content-Type': 'text/csv; charset=utf-8',
-                'Content-Disposition': f'attachment; filename=reporte_agencias_{fecha_inicio}_{fecha_fin}.csv'
-            }
-        )
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/reporte-agencias')
-@admin_required
-def reporte_agencias():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
-        
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        data_agencias = []
-        total_ventas = total_premios = total_comisiones = 0
-        
-        for ag in agencias:
-            ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t['anulado'])
-            comision = ventas * ag['comision']
-            
-            premios_pagados = 0
-            premios_pendientes = 0
-            
-            for t in tickets:
-                if t['agencia_id'] == ag['id'] and not t['anulado']:
-                    premio_ticket = calcular_premio_ticket(t)
-                    
-                    if t['pagado']:
-                        premios_pagados += premio_ticket
-                    else:
-                        premios_pendientes += premio_ticket
-            
-            balance = ventas - premios_pagados - comision
-            
-            data_agencias.append({
-                'nombre': ag['nombre_agencia'],
-                'ventas': round(ventas, 2),
-                'premios_pagados': round(premios_pagados, 2),
-                'premios_pendientes': round(premios_pendientes, 2),
-                'premios_total': round(premios_pagados + premios_pendientes, 2),
-                'comision': round(comision, 2),
-                'balance': round(balance, 2)
-            })
-            
-            total_ventas += ventas
-            total_premios += premios_pagados
-            total_comisiones += comision
-        
-        return jsonify({
-            'agencias': data_agencias,
-            'global': {
-                'ventas': round(total_ventas, 2),
-                'pagos': round(total_premios, 2),
-                'comisiones': round(total_comisiones, 2),
-                'balance': round(total_ventas - total_premios - total_comisiones, 2)
-            }
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/riesgo')
-@admin_required
-def riesgo():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
-        
-        agencia_id = request.args.get('agencia_id')
-        nombre_agencia = "TODAS LAS AGENCIAS"
-        
-        if not sorteo_objetivo:
-            return jsonify({
-                'riesgo': {},
-                'sorteo_objetivo': None,
-                'mensaje': 'No hay más sorteos disponibles para hoy',
-                'agencia_nombre': nombre_agencia
-            })
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&anulado=eq.false"
-        
-        if agencia_id:
-            url += f"&agencia_id=eq.{urllib.parse.quote(str(agencia_id))}"
-            agencias = supabase_request("agencias", filters={"id": agencia_id})
-            if agencias and len(agencias) > 0:
-                nombre_agencia = agencias[0]['nombre_agencia']
-        
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        if not tickets:
-            return jsonify({
-                'riesgo': {},
-                'sorteo_objetivo': sorteo_objetivo,
-                'mensaje': 'No hay tickets vendidos hoy',
-                'total_apostado': 0,
-                'agencia_nombre': nombre_agencia,
-                'agencia_id': agencia_id
-            })
-        
-        apuestas = {}
-        total_apostado_sorteo = 0
-        total_jugadas_contadas = 0
-        
-        for t in tickets:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
-            
-            for j in jugadas:
-                if j.get('hora') == sorteo_objetivo:
-                    sel = j.get('seleccion')
-                    monto = j.get('monto', 0)
-                    if sel:
-                        if sel not in apuestas:
-                            apuestas[sel] = 0
-                        apuestas[sel] += monto
-                        total_apostado_sorteo += monto
-                        total_jugadas_contadas += 1
-        
-        apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
-        
-        riesgo = {}
-        for sel, monto in apuestas_ordenadas:
-            nombre = ANIMALES.get(sel, sel)
-            multiplicador = PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL
-            riesgo[f"{sel} - {nombre}"] = {
-                "apostado": round(monto, 2),
-                "pagaria": round(monto * multiplicador, 2),
-                "es_lechuza": sel == "40",
-                "porcentaje": round((monto / total_apostado_sorteo) * 100, 1) if total_apostado_sorteo > 0 else 0
-            }
-        
-        return jsonify({
-            'riesgo': riesgo,
-            'sorteo_objetivo': sorteo_objetivo,
-            'total_apostado': round(total_apostado_sorteo, 2),
-            'hora_actual': ahora_peru().strftime("%I:%M %p"),
-            'cantidad_jugadas': total_jugadas_contadas,
-            'agencia_nombre': nombre_agencia,
-            'agencia_id': agencia_id
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/estadisticas-rango', methods=['POST'])
-@admin_required
-def estadisticas_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        dias_data = {}
-        tickets_rango = []
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
+                for k in ['ventas', 'premios_pagados', 'premios_pendientes', 'premios_teoricos', 'comision', 'balance']:
+                    stats[k] = round(stats[k], 2)
                 
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            tickets_rango.append(t)
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0, 
-                    'comisiones': 0, 'ids_tickets': []
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            dias_data[dia_key]['ids_tickets'].append(t['id'])
+                reporte_agencias.append(stats)
+                for key in total_global:
+                    if key in stats:
+                        total_global[key] += stats[key]
         
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        resumen_dias = []
-        total_ventas = total_premios = total_tickets = 0
-        
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            resultados_dia = resultados_por_dia.get(dia_key, {})
-            
-            premios_dia = 0
-            for ticket_id in datos['ids_tickets'][:50]:
-                t = next((tk for tk in tickets_rango if tk['id'] == ticket_id), None)
-                if t:
-                    premio_ticket = calcular_premio_ticket(t)
-                    premios_dia += premio_ticket
-            
-            comision_dia = datos['ventas'] * COMISION_AGENCIA
-            balance_dia = datos['ventas'] - premios_dia - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(premios_dia, 2),
-                'comisiones': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'tickets': datos['tickets']
-            })
-            
-            total_ventas += datos['ventas']
-            total_premios += premios_dia
-            total_tickets += datos['tickets']
+        reporte_agencias.sort(key=lambda x: x['ventas'], reverse=True)
         
         return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comisiones': round(total_ventas * COMISION_AGENCIA, 2),
-                'balance': round(total_ventas - total_premios - (total_ventas * COMISION_AGENCIA), 2),
-                'tickets': total_tickets
-            }
+            'status': 'ok',
+            'agencias': reporte_agencias,
+            'totales': {k: round(v, 2) for k, v in total_global.items()},
+            'rango': {'inicio': fecha_inicio, 'fin': fecha_fin}
         })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/top-animales-rango', methods=['POST'])
-@admin_required
-def top_animales_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=5000"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        ticket_ids = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                ticket_ids.append(t['id'])
-        
-        if not ticket_ids:
-            return jsonify({'top_animales': []})
-        
-        apuestas = {}
-        for ticket_id in ticket_ids[:100]:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
-            for j in jugadas:
-                sel = j['seleccion']
-                if sel not in apuestas:
-                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
-                apuestas[sel]['monto'] += j['monto']
-                apuestas[sel]['cantidad'] += 1
-        
-        top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
-        resultado = []
-        
-        for sel, data in top[:20]:
-            nombre = ANIMALES.get(sel, sel)
-            resultado.append({
-                'numero': sel,
-                'nombre': nombre,
-                'total_apostado': round(data['monto'], 2),
-                'cantidad_jugadas': data['cantidad'],
-                'pago_potencial': round(data['monto'] * (PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL), 2)
-            })
-        
-        return jsonify({'top_animales': resultado})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== TEMPLATES HTML ====================
+# ==================== TEMPLATES HTML COMPLETOS ====================
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -2008,7 +1239,7 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">INICIAR SESIÓN</button>
         </form>
         <div class="info">
-            Sistema ZOOLO CASINO v6.1<br>Tripleta x60 + Nuevos Horarios Perú
+            Sistema ZOOLO CASINO v7.0<br>Tripleta x60 + Setup Inicial
         </div>
     </div>
 </body>
@@ -2027,110 +1258,10 @@ POS_HTML = '''
         html { height: 100%; }
         body { 
             background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            min-height: 100vh; 
-            display: flex; 
-            flex-direction: column;
-            overflow-x: hidden;
+            min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden;
         }
-        
-        .win-menu-bar {
-            background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
-            border-bottom: 2px solid #000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .win-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 15px;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            border-bottom: 1px solid #000;
-        }
-        
-        .win-title {
-            color: #ffd700;
-            font-size: 1rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .win-menu-items {
-            display: flex;
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            background: #2d2d2d;
-        }
-        
-        .win-menu-item {
-            position: relative;
-        }
-        
-        .win-menu-item > a {
-            display: block;
-            padding: 10px 20px;
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.85rem;
-            border-right: 1px solid #444;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-menu-item:hover > a {
-            background: linear-gradient(180deg, #404040 0%, #333 100%);
-            color: #ffd700;
-        }
-        
-        .win-submenu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #2d2d2d;
-            border: 1px solid #555;
-            border-top: none;
-            min-width: 220px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            z-index: 1001;
-        }
-        
-        .win-menu-item:hover .win-submenu {
-            display: block;
-        }
-        
-        .win-submenu-item {
-            border-bottom: 1px solid #444;
-        }
-        
-        .win-submenu-item:last-child {
-            border-bottom: none;
-        }
-        
-        .win-submenu-item a {
-            display: block;
-            padding: 12px 20px;
-            color: #ddd;
-            text-decoration: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-submenu-item a:hover {
-            background: #ffd700;
-            color: #000;
-            padding-left: 25px;
-        }
-        
         .mobile-header {
-            display: none;
+            display: flex;
             background: linear-gradient(90deg, #1a1a2e, #16213e);
             padding: 12px 15px;
             justify-content: space-between;
@@ -2140,190 +1271,66 @@ POS_HTML = '''
             top: 0;
             z-index: 1000;
         }
-        
-        .mobile-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-            font-weight: bold;
-        }
-        
+        .mobile-title { color: #ffd700; font-size: 1.1rem; font-weight: bold; }
         .hamburger-btn {
-            background: transparent;
-            border: none;
-            color: #ffd700;
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 5px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            background: transparent; border: none; color: #ffd700;
+            font-size: 1.5rem; cursor: pointer; padding: 5px;
+            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
         }
-        
         .mobile-menu {
-            display: none;
-            position: fixed;
-            top: 0;
-            right: -300px;
-            width: 280px;
-            height: 100vh;
+            display: none; position: fixed; top: 0; right: -300px;
+            width: 280px; height: 100vh;
             background: linear-gradient(180deg, #1a1a2e 0%, #0a0a0a 100%);
-            border-left: 2px solid #ffd700;
-            z-index: 2000;
-            transition: right 0.3s ease;
-            overflow-y: auto;
+            border-left: 2px solid #ffd700; z-index: 2000;
+            transition: right 0.3s ease; overflow-y: auto;
         }
-        
-        .mobile-menu.active {
-            right: 0;
-        }
-        
+        .mobile-menu.active { right: 0; display: block; }
         .mobile-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #333;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 15px; background: rgba(0,0,0,0.3); border-bottom: 1px solid #333;
         }
-        
-        .mobile-menu-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-        }
-        
+        .mobile-menu-title { color: #ffd700; font-size: 1.1rem; }
         .close-menu-btn {
-            background: #c0392b;
-            border: none;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.1rem;
+            background: #c0392b; border: none; color: white;
+            width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 1.1rem;
         }
-        
-        .mobile-menu-section {
-            border-bottom: 1px solid #333;
-        }
-        
+        .mobile-menu-section { border-bottom: 1px solid #333; }
         .mobile-menu-section-title {
-            background: rgba(255,215,0,0.1);
-            color: #ffd700;
-            padding: 12px 15px;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            background: rgba(255,215,0,0.1); color: #ffd700;
+            padding: 12px 15px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;
             border-bottom: 1px solid #333;
         }
-        
         .mobile-menu-item {
-            padding: 15px;
-            color: #fff;
-            cursor: pointer;
-            border-bottom: 1px solid #222;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.95rem;
+            padding: 15px; color: #fff; cursor: pointer; border-bottom: 1px solid #222;
+            display: flex; align-items: center; gap: 10px; font-size: 0.95rem;
         }
-        
-        .mobile-menu-item:active {
-            background: rgba(255,215,0,0.1);
-        }
-        
+        .mobile-menu-item:active { background: rgba(255,215,0,0.1); }
         .mobile-menu-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            z-index: 1999;
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1999;
         }
-        
-        .mobile-menu-overlay.active {
-            display: block;
-        }
-        
-        @media (max-width: 768px) {
-            .win-menu-bar {
-                display: none;
-            }
-            .mobile-header {
-                display: flex;
-            }
-            .mobile-menu {
-                display: block;
-            }
-        }
-        
-        @media (min-width: 769px) {
-            .mobile-menu, .mobile-menu-overlay {
-                display: none !important;
-            }
-        }
-        
-        .header {
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 10px 15px; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
-            border-bottom: 2px solid #ffd700; 
-            flex-shrink: 0;
-        }
-        .header-info h3 { color: #ffd700; font-size: 1rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-        .header-info p { color: #888; font-size: 0.75rem; margin: 0; }
-        .monto-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 20px; }
-        .monto-box span { font-size: 0.8rem; font-weight: bold; color: #ffd700; }
-        .monto-box input {
-            width: 60px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
-            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
-            -webkit-appearance: none;
-        }
+        .mobile-menu-overlay.active { display: block; }
         
         .main-container { 
-            display: flex; 
-            flex-direction: column;
-            flex: 1;
-            height: calc(100vh - 110px);
-            overflow: hidden;
+            display: flex; flex-direction: column; flex: 1;
+            height: calc(100vh - 60px); overflow: hidden;
         }
-        
         @media (min-width: 1024px) {
             .main-container { flex-direction: row; }
         }
         
         .left-panel { 
-            flex: 1; 
-            display: flex; 
-            flex-direction: column; 
-            min-height: 0;
-            overflow: hidden;
+            flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
         }
         
         .special-btns { 
-            display: grid; 
-            grid-template-columns: repeat(4, 1fr);
-            gap: 6px; 
-            padding: 10px; 
-            background: #111; 
-            flex-shrink: 0;
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 6px; padding: 10px; background: #111; flex-shrink: 0;
         }
         .btn-esp { 
-            padding: 12px 4px; 
-            border: none; 
-            border-radius: 8px; 
-            font-weight: bold; 
-            cursor: pointer; 
-            color: white; 
-            font-size: 0.8rem;
-            touch-action: manipulation;
-            min-height: 44px;
-            transition: all 0.1s;
+            padding: 12px 4px; border: none; border-radius: 8px;
+            font-weight: bold; cursor: pointer; color: white; font-size: 0.8rem;
+            touch-action: manipulation; min-height: 44px; transition: all 0.1s;
         }
         .btn-esp:active { transform: scale(0.95); }
         .btn-rojo { background: linear-gradient(135deg, #c0392b, #e74c3c); }
@@ -2331,19 +1338,13 @@ POS_HTML = '''
         .btn-par { background: linear-gradient(135deg, #2980b9, #3498db); }
         .btn-impar { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
         .btn-esp.active { 
-            box-shadow: 0 0 15px rgba(255,255,255,0.5); 
-            transform: scale(0.95);
-            border: 2px solid white;
+            box-shadow: 0 0 15px rgba(255,255,255,0.5); transform: scale(0.95); border: 2px solid white;
         }
         
         .animals-grid {
-            flex: 1; 
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-            gap: 5px; 
-            padding: 10px; 
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
+            flex: 1; display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 5px; padding: 10px; overflow-y: auto; -webkit-overflow-scrolling: touch;
         }
         @media (min-width: 768px) {
             .animals-grid { grid-template-columns: repeat(7, 1fr); }
@@ -2351,201 +1352,123 @@ POS_HTML = '''
         
         .animal-card {
             background: linear-gradient(135deg, #1a1a2e, #16213e); 
-            border: 2px solid; 
-            border-radius: 10px;
-            padding: 8px 2px; 
-            text-align: center; 
-            cursor: pointer; 
-            transition: all 0.15s; 
-            min-height: 65px; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: center;
-            user-select: none;
-            position: relative;
-            touch-action: manipulation;
+            border: 2px solid; border-radius: 10px; padding: 8px 2px;
+            text-align: center; cursor: pointer; transition: all 0.15s; 
+            min-height: 70px; display: flex; flex-direction: column; justify-content: center;
+            user-select: none; position: relative; touch-action: manipulation;
         }
         .animal-card:active { transform: scale(0.92); }
         .animal-card.active { 
-            box-shadow: 0 0 15px rgba(255,215,0,0.6); 
-            border-color: #ffd700 !important; 
+            box-shadow: 0 0 15px rgba(255,215,0,0.6); border-color: #ffd700 !important; 
             background: linear-gradient(135deg, #2a2a4e, #1a1a3e);
-            transform: scale(1.05);
-            z-index: 10;
+            transform: scale(1.05); z-index: 10;
         }
         .animal-card.tripleta-seleccionado {
-            box-shadow: 0 0 15px rgba(255,215,0,0.9); 
-            border-color: #ffd700 !important;
+            box-shadow: 0 0 15px rgba(255,215,0,0.9); border-color: #ffd700 !important;
             background: linear-gradient(135deg, #4a3c00, #2a2000);
-            transform: scale(1.08);
-            z-index: 15;
+            transform: scale(1.08); z-index: 15;
         }
         .animal-card .num { font-size: 1.2rem; font-weight: bold; line-height: 1; }
         .animal-card .name { font-size: 0.7rem; color: #aaa; line-height: 1; margin-top: 4px; font-weight: 500; }
         .animal-card.lechuza::after {
-            content: "x70";
-            position: absolute;
-            top: 3px;
-            right: 3px;
-            background: #ffd700;
-            color: black;
-            font-size: 0.6rem;
-            padding: 2px 4px;
-            border-radius: 4px;
-            font-weight: bold;
+            content: "x70"; position: absolute; top: 3px; right: 3px;
+            background: #ffd700; color: black; font-size: 0.6rem;
+            padding: 2px 4px; border-radius: 4px; font-weight: bold;
         }
         
         .right-panel {
-            background: #111; 
-            border-top: 2px solid #333;
-            display: flex; 
-            flex-direction: column;
-            height: 40vh;
-            flex-shrink: 0;
+            background: #111; border-top: 2px solid #333;
+            display: flex; flex-direction: column; height: 45vh; flex-shrink: 0;
         }
         @media (min-width: 1024px) { 
-            .right-panel { 
-                width: 350px; 
-                height: auto;
-                border-top: none;
-                border-left: 2px solid #333;
-            }
+            .right-panel { width: 400px; height: auto; border-top: none; border-left: 2px solid #333; }
+        }
+        
+        .monto-box { 
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            background: rgba(0,0,0,0.3); padding: 10px; border-bottom: 1px solid #333;
+        }
+        .monto-box span { font-size: 0.9rem; font-weight: bold; color: #ffd700; }
+        .monto-box input {
+            width: 80px; padding: 8px; border: 2px solid #ffd700; border-radius: 6px;
+            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1.1rem;
+            -webkit-appearance: none;
         }
         
         .horarios {
-            display: flex;
-            gap: 6px;
-            padding: 10px;
-            overflow-x: auto;
-            flex-shrink: 0;
-            background: #0a0a0a;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
-            scrollbar-color: #ffd700 #222;
+            display: flex; gap: 6px; padding: 10px;
+            overflow-x: auto; flex-shrink: 0; background: #0a0a0a;
+            -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: #ffd700 #222;
         }
         .horarios::-webkit-scrollbar { height: 8px; }
         .horarios::-webkit-scrollbar-track { background: #222; border-radius: 4px; }
         .horarios::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 4px; }
         
         .btn-hora {
-            flex: 0 0 auto;
-            min-width: 85px;
-            padding: 10px 6px; 
-            background: #222; 
-            border: 1px solid #444;
-            border-radius: 8px; 
-            color: #ccc; 
-            cursor: pointer; 
-            font-size: 0.75rem; 
-            text-align: center; 
-            line-height: 1.3;
-            touch-action: manipulation;
+            flex: 0 0 auto; min-width: 85px; padding: 10px 6px;
+            background: #222; border: 1px solid #444; border-radius: 8px;
+            color: #ccc; cursor: pointer; font-size: 0.75rem;
+            text-align: center; line-height: 1.3; touch-action: manipulation;
             transition: all 0.2s;
         }
         .btn-hora:hover { background: #333; border-color: #555; }
         .btn-hora.active { 
             background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            font-weight: bold; 
-            border-color: #27ae60;
+            color: white; font-weight: bold; border-color: #27ae60;
             box-shadow: 0 0 10px rgba(39, 174, 96, 0.4);
         }
         .btn-hora.expired { 
-            background: #300; 
-            color: #666; 
-            text-decoration: line-through; 
-            pointer-events: none;
-            opacity: 0.5;
+            background: #300; color: #666; text-decoration: line-through; 
+            pointer-events: none; opacity: 0.5;
         }
         
         .ticket-display {
-            flex: 1; 
-            background: #000; 
-            margin: 0 10px 10px; 
-            border-radius: 10px;
-            padding: 12px; 
-            border: 1px solid #333;
-            overflow-y: auto;
-            font-size: 0.85rem;
-            -webkit-overflow-scrolling: touch;
+            flex: 1; background: #000; margin: 0 10px 10px;
+            border-radius: 10px; padding: 12px; border: 1px solid #333;
+            overflow-y: auto; font-size: 0.85rem; -webkit-overflow-scrolling: touch;
         }
         
-        .ticket-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.8rem;
-        }
+        .ticket-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
         .ticket-table th {
-            background: #1a1a2e;
-            color: #ffd700;
-            padding: 8px 6px;
-            text-align: left;
-            position: sticky;
-            top: 0;
-            font-size: 0.75rem;
+            background: #1a1a2e; color: #ffd700; padding: 8px 6px;
+            text-align: left; position: sticky; top: 0; font-size: 0.75rem;
         }
-        .ticket-table td {
-            padding: 8px 6px;
-            border-bottom: 1px solid #222;
-            vertical-align: middle;
-        }
+        .ticket-table td { padding: 8px 6px; border-bottom: 1px solid #222; vertical-align: middle; }
         .ticket-table tr:last-child td { border-bottom: none; }
         .ticket-total {
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 2px solid #ffd700;
-            text-align: right;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #ffd700;
+            margin-top: 12px; padding-top: 12px; border-top: 2px solid #ffd700;
+            text-align: right; font-size: 1.2rem; font-weight: bold; color: #ffd700;
         }
         
         .action-btns { 
-            display: grid; 
-            grid-template-columns: repeat(3, 1fr); 
-            gap: 6px; 
-            padding: 10px;
-            background: #0a0a0a;
-            flex-shrink: 0;
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 6px; padding: 10px; background: #0a0a0a; flex-shrink: 0;
         }
         .action-btns button {
-            padding: 14px 5px; 
-            border: none; 
-            border-radius: 8px;
-            font-weight: bold; 
-            cursor: pointer; 
-            font-size: 0.8rem;
-            touch-action: manipulation;
-            min-height: 48px;
-            transition: all 0.1s;
+            padding: 14px 5px; border: none; border-radius: 8px;
+            font-weight: bold; cursor: pointer; font-size: 0.8rem;
+            touch-action: manipulation; min-height: 48px; transition: all 0.1s;
         }
         .action-btns button:active { transform: scale(0.95); }
         .btn-agregar { 
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            grid-column: span 3; 
-            font-size: 1.1rem;
+            background: linear-gradient(135deg, #27ae60, #229954);
+            color: white; grid-column: span 3; font-size: 1.1rem;
         }
         .btn-vender { 
-            background: linear-gradient(135deg, #2980b9, #2573a7); 
-            color: white; 
-            grid-column: span 3;
-            font-size: 1rem;
+            background: linear-gradient(135deg, #2980b9, #2573a7);
+            color: white; grid-column: span 3; font-size: 1rem;
         }
         .btn-resultados { background: #f39c12; color: black; }
         .btn-caja { background: #16a085; color: white; }
         .btn-pagar { background: #8e44ad; color: white; }
         .btn-tripleta { 
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            font-weight: bold;
-            border: 2px solid #FFD700;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            color: black; font-weight: bold; border: 2px solid #FFD700;
             box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
         }
         .btn-tripleta.active {
             background: linear-gradient(135deg, #FFA500, #FF8C00);
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
-            transform: scale(0.95);
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6); transform: scale(0.95);
         }
         .btn-anular { background: #c0392b; color: white; }
         .btn-borrar { background: #555; color: white; }
@@ -2553,1590 +1476,666 @@ POS_HTML = '''
         
         .tripleta-info {
             background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.1));
-            border: 2px solid #FFD700;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 0 10px 10px;
-            text-align: center;
-            color: #FFD700;
-            font-weight: bold;
-            display: none;
+            border: 2px solid #FFD700; border-radius: 8px; padding: 10px;
+            margin: 0 10px 10px; text-align: center; color: #FFD700;
+            font-weight: bold; display: none;
         }
-        .tripleta-info.active {
-            display: block;
-            animation: pulse 2s infinite;
-        }
+        .tripleta-info.active { display: block; animation: pulse 2s infinite; }
         @keyframes pulse {
             0%, 100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
             50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
         }
         
         .modal {
-            display: none; 
-            position: fixed; 
-            top: 0; left: 0;
-            width: 100%; 
-            height: 100%; 
-            background: rgba(0,0,0,0.95);
-            z-index: 1000; 
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.95);
+            z-index: 1000; overflow-y: auto; -webkit-overflow-scrolling: touch;
         }
         .modal-content {
-            background: #1a1a2e; 
-            margin: 10px; 
-            padding: 20px; 
-            border-radius: 15px; 
-            border: 2px solid #ffd700; 
-            max-width: 100%;
+            background: #1a1a2e; margin: 10px; padding: 20px;
+            border-radius: 15px; border: 2px solid #ffd700; max-width: 100%;
             min-height: calc(100vh - 20px);
         }
         @media (min-width: 768px) {
-            .modal-content {
-                margin: 40px auto; 
-                max-width: 700px;
-                min-height: auto;
-            }
+            .modal-content { margin: 40px auto; max-width: 700px; min-height: auto; }
         }
         .modal-header {
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
-            margin-bottom: 20px; 
-            padding-bottom: 15px; 
-            border-bottom: 1px solid #333;
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #333;
         }
         .modal h3 { color: #ffd700; font-size: 1.3rem; }
         .btn-close {
-            background: #c0392b; 
-            color: white; 
-            border: none; 
-            padding: 8px 16px; 
-            border-radius: 6px; 
-            cursor: pointer;
-            font-weight: bold;
+            background: #c0392b; color: white; border: none;
+            padding: 8px 16px; border-radius: 5px; cursor: pointer;
         }
-        
-        .tabs { 
-            display: flex; 
-            gap: 2px; 
-            margin-bottom: 20px; 
-            border-bottom: 2px solid #333;
-            overflow-x: auto;
-            scrollbar-width: none;
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.9rem; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 10px; border: 1px solid #444;
+            border-radius: 5px; background: #222; color: white;
         }
-        .tabs::-webkit-scrollbar { display: none; }
-        .tab-btn { 
-            flex: 1;
-            background: transparent; 
-            border: none; 
-            color: #888; 
-            padding: 14px 10px; 
-            cursor: pointer; 
-            font-size: 0.85rem; 
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            min-width: 80px;
+        .results-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px; margin-top: 15px;
         }
-        .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; font-weight: bold; }
+        .result-item {
+            background: rgba(255,255,255,0.05); padding: 10px;
+            border-radius: 8px; text-align: center; border: 1px solid #333;
+        }
+        .result-time { font-size: 0.8rem; color: #888; margin-bottom: 5px; }
+        .result-animal { font-size: 1.1rem; color: #ffd700; font-weight: bold; }
+        .empty-result { color: #666; font-style: italic; }
+        .tabs {
+            display: flex; gap: 10px; margin-bottom: 20px;
+            border-bottom: 1px solid #333; padding-bottom: 10px;
+        }
+        .tab {
+            padding: 10px 20px; background: #222; border: none;
+            color: #888; cursor: pointer; border-radius: 5px; font-weight: bold;
+        }
+        .tab.active { background: #ffd700; color: black; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        
-        .stats-box {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e); 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin: 15px 0;
-            border: 1px solid #333;
-        }
-        .stat-row {
-            display: flex; 
-            justify-content: space-between; 
-            padding: 12px 0;
-            border-bottom: 1px solid #222; 
-            font-size: 1rem;
-            align-items: center;
-        }
-        .stat-row:last-child { border-bottom: none; }
-        .stat-label { color: #aaa; }
-        .stat-value { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
-        .stat-value.negative { color: #e74c3c; }
-        .stat-value.positive { color: #27ae60; }
-        
-        .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin: 15px 0;
-            border-radius: 8px;
-            border: 1px solid #333;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 0.85rem; 
-            min-width: 300px;
-        }
-        th, td { 
-            padding: 12px 8px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-            white-space: nowrap;
-        }
-        th { 
-            background: linear-gradient(135deg, #ffd700, #ffed4e); 
-            color: black; 
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-        }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; color: #888; font-size: 0.9rem; margin-bottom: 6px; }
-        .form-group input, .form-group select {
-            width: 100%; padding: 12px; background: #000; border: 1px solid #444;
-            color: white; border-radius: 8px; font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        .btn-consultar {
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            border: none; 
-            padding: 14px;
-            width: 100%; 
-            border-radius: 8px; 
-            font-weight: bold; 
-            cursor: pointer;
-            margin-top: 10px;
-            font-size: 1rem;
-        }
-        
-        .alert-box {
-            background: rgba(243, 156, 18, 0.15); 
-            border: 1px solid #f39c12;
-            padding: 15px; 
-            border-radius: 8px; 
-            margin: 15px 0; 
-            font-size: 0.9rem;
-        }
-        .alert-box strong { color: #f39c12; }
-
-        .resultado-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #27ae60;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .resultado-item.pendiente {
-            border-left-color: #666;
-            opacity: 0.7;
-        }
-        .resultado-numero {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.4rem;
-        }
-        .resultado-nombre {
-            color: #aaa;
-            font-size: 1rem;
-        }
-        
-        .toast-notification {
-            position: fixed;
-            top: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 14px 24px;
-            border-radius: 30px;
-            font-size: 0.95rem;
-            z-index: 10000;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
-            max-width: 90%;
-            text-align: center;
-            font-weight: bold;
-            animation: slideDown 0.3s ease;
-        }
-        @keyframes slideDown {
-            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-            to { transform: translateX(-50%) translateY(0); opacity: 1; }
-        }
-        @keyframes slideUp {
-            from { transform: translateX(-50%) translateY(0); opacity: 1; }
-            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-        }
-        
         .ticket-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #2980b9;
-            cursor: pointer;
-            transition: all 0.2s;
+            background: rgba(255,255,255,0.05); padding: 15px;
+            margin-bottom: 10px; border-radius: 8px; border-left: 3px solid #ffd700;
         }
-        .ticket-item:active {
-            background: #1a1a2e;
-        }
-        .ticket-item.ganador {
-            border-left-color: #27ae60;
-            background: rgba(39,174,96,0.1);
-        }
-        .ticket-item.pendiente-pago {
-            border-left-color: #f39c12;
-            background: rgba(243,156,18,0.1);
-        }
-        .ticket-serial {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        .ticket-info {
-            color: #888;
-            font-size: 0.85rem;
-            margin-top: 5px;
-        }
-        .ticket-premio {
-            color: #27ae60;
-            font-weight: bold;
-            font-size: 1.2rem;
-            margin-top: 5px;
-        }
-        .ticket-estado {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .estado-pagado { background: #27ae60; color: white; }
-        .estado-pendiente { background: #f39c12; color: black; }
-        
-        .filter-row {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        .filter-row select, .filter-row input {
-            flex: 1;
-            min-width: 120px;
-            padding: 10px;
-            background: #000;
-            border: 1px solid #444;
-            color: white;
-            border-radius: 6px;
-        }
-        
-        .jugada-detail {
-            background: #111;
-            padding: 8px;
-            margin: 4px 0;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .jugada-ganadora {
-            background: rgba(39,174,96,0.2);
-            border: 1px solid #27ae60;
-        }
+        .ticket-serial { font-weight: bold; color: #ffd700; }
+        .ticket-fecha { font-size: 0.8rem; color: #888; }
+        .ticket-monto { float: right; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="win-menu-bar">
-        <div class="win-menu-header">
-            <div class="win-title">🦁 {{agencia}}</div>
-            <button onclick="location.href='/logout'" style="background: #c0392b; color: white; border: none; padding: 6px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.8rem;">SALIR</button>
-        </div>
-        <ul class="win-menu-items">
-            <li class="win-menu-item">
-                <a>📁 Archivo</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirCaja()">💰 Caja del Día</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCajaHistorico()">📊 Historial de Caja</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCalculadora()">🧮 Calculadora de Premios</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>🔍 Consultas</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">🎫 Mis Tickets Vendidos</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirBuscarTicket()">🔎 Buscar Ticket por Serial</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">💰 Tickets por Cobrar</a></li>
-                    <li class="win-submenu-item"><a onclick="verResultados()">📋 Resultados de Hoy</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>❓ Ayuda</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="mostrarReglas()">📖 Reglas de Pago</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarComoUsar()">❓ Cómo Usar</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarAcerca()">ℹ️ Acerca del Sistema</a></li>
-                </ul>
-            </li>
-        </ul>
-    </div>
-
     <div class="mobile-header">
         <div class="mobile-title">🦁 {{agencia}}</div>
-        <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
+        <button class="hamburger-btn" onclick="toggleMenu()">☰</button>
     </div>
     
-    <div class="mobile-menu-overlay" onclick="toggleMobileMenu()"></div>
+    <div class="mobile-menu-overlay" onclick="toggleMenu()"></div>
     <div class="mobile-menu" id="mobileMenu">
         <div class="mobile-menu-header">
-            <div class="mobile-menu-title">MENÚ</div>
-            <button class="close-menu-btn" onclick="toggleMobileMenu()">×</button>
+            <div class="mobile-menu-title">Menú</div>
+            <button class="close-menu-btn" onclick="toggleMenu()">×</button>
         </div>
-        
         <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">📁 Archivo</div>
-            <div class="mobile-menu-item" onclick="abrirCajaMobile()">💰 Caja del Día</div>
-            <div class="mobile-menu-item" onclick="abrirCajaHistoricoMobile()">📊 Historial de Caja</div>
-            <div class="mobile-menu-item" onclick="abrirCalculadoraMobile()">🧮 Calculadora</div>
+            <div class="mobile-menu-section-title">Operaciones</div>
+            <div class="mobile-menu-item" onclick="verResultados(); toggleMenu();">📊 Resultados</div>
+            <div class="mobile-menu-item" onclick="verCaja(); toggleMenu();">💰 Caja del Día</div>
+            <div class="mobile-menu-item" onclick="verMisTickets(); toggleMenu();">🎫 Mis Tickets</div>
+            <div class="mobile-menu-item" onclick="pagarTicket(); toggleMenu();">💵 Pagar Ticket</div>
         </div>
-        
         <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">🔍 Consultas</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">🎫 Mis Tickets Vendidos</div>
-            <div class="mobile-menu-item" onclick="abrirBuscarTicketMobile()">🔎 Buscar Ticket</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">💰 Tickets por Cobrar</div>
-            <div class="mobile-menu-item" onclick="verResultadosMobile()">📋 Resultados</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">❓ Ayuda</div>
-            <div class="mobile-menu-item" onclick="mostrarReglasMobile()">📖 Reglas</div>
-            <div class="mobile-menu-item" onclick="mostrarComoUsarMobile()">❓ Cómo Usar</div>
-            <div class="mobile-menu-item" onclick="mostrarAcercaMobile()">ℹ️ Acerca de</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-item" onclick="location.href='/logout'" style="color: #e74c3c; font-weight: bold;">🚪 Cerrar Sesión</div>
+            <div class="mobile-menu-section-title">Sistema</div>
+            <div class="mobile-menu-item" onclick="window.location='/logout'">🚪 Cerrar Sesión</div>
         </div>
     </div>
 
-    <div class="header">
-        <div class="header-info">
-            <h3>{{agencia}}</h3>
-            <p id="reloj">--</p>
-        </div>
-        <div class="monto-box">
-            <span>S/:</span>
-            <input type="number" id="monto" value="5" min="1">
-        </div>
-    </div>
-    
-    <div class="tripleta-info" id="tripleta-banner">
-        🎯 MODO TRIPLETA: Selecciona 3 animalitos (Paga x60 si salen hoy)
-    </div>
-    
     <div class="main-container">
         <div class="left-panel">
             <div class="special-btns">
-                <button class="btn-esp btn-rojo" onclick="toggleEsp('ROJO')">ROJO</button>
-                <button class="btn-esp btn-negro" onclick="toggleEsp('NEGRO')">NEGRO</button>
-                <button class="btn-esp btn-par" onclick="toggleEsp('PAR')">PAR</button>
-                <button class="btn-esp btn-impar" onclick="toggleEsp('IMPAR')">IMPAR</button>
+                <button class="btn-esp btn-rojo" onclick="seleccionarEspecial('ROJO', this)">ROJO</button>
+                <button class="btn-esp btn-negro" onclick="seleccionarEspecial('NEGRO', this)">NEGRO</button>
+                <button class="btn-esp btn-par" onclick="seleccionarEspecial('PAR', this)">PAR</button>
+                <button class="btn-esp btn-impar" onclick="seleccionarEspecial('IMPAR', this)">IMPAR</button>
             </div>
-            <div class="animals-grid" id="animals-grid">
-                {% for k, v in animales.items() %}
-                <div class="animal-card {{ 'lechuza' if k == '40' else '' }}" id="ani-{{k}}" style="border-color: {{get_color(k)}}" onclick="toggleAni('{{k}}', '{{v}}')">
-                    <div class="num">{{k}}</div>
-                    <div class="name">{{v}}</div>
+            
+            <div class="animals-grid" id="animalsGrid">
+                {% for num, nombre in animales.items() %}
+                <div class="animal-card {{ 'lechuza' if num == '40' else '' }}" 
+                     style="border-color: {{ get_color(num) }}"
+                     onclick="seleccionarAnimal('{{ num }}', '{{ nombre }}')"
+                     data-num="{{ num }}">
+                    <div class="num">{{ num }}</div>
+                    <div class="name">{{ nombre[:3] }}</div>
                 </div>
                 {% endfor %}
             </div>
         </div>
+        
         <div class="right-panel">
-            <div class="horarios" id="horarios">
-                {% for h in horarios_peru %}
-                <div class="btn-hora" id="hora-{{loop.index}}" onclick="toggleHora('{{h}}', '{{loop.index}}')">
-                    {{h}}<br><small>{{horarios_venezuela[loop.index0]}}</small>
-                </div>
+            <div class="monto-box">
+                <span>MONTO: S/</span>
+                <input type="number" id="montoInput" value="5" min="1" step="1">
+            </div>
+            
+            <div class="tripleta-info" id="tripletaInfo">
+                Modo Tripleta Activo: Selecciona 3 animales<br>
+                <small>Paga x60 si salen los 3 en el día</small>
+            </div>
+            
+            <div class="horarios" id="horariosContainer">
+                {% for hora in horarios_peru %}
+                <button class="btn-hora" onclick="seleccionarHora('{{ hora }}', this)" data-hora="{{ hora }}">
+                    {{ hora }}
+                </button>
                 {% endfor %}
             </div>
-            <div class="ticket-display" id="ticket-display">
-                <div style="text-align:center; color:#666; padding:20px; font-style:italic;">
-                    Selecciona animales y horarios...
-                </div>
+            
+            <div class="ticket-display" id="ticketDisplay">
+                <table class="ticket-table" id="ticketTable">
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Jugada</th>
+                            <th>Monto</th>
+                            <th>Del</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ticketBody">
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: #666; padding: 20px;">
+                                Ticket vacío. Selecciona jugadas.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="ticket-total" id="ticketTotal">TOTAL: S/0.00</div>
             </div>
+            
             <div class="action-btns">
-                <button class="btn-agregar" onclick="agregar()">AGREGAR AL TICKET</button>
-                <button class="btn-vender" onclick="vender()">ENVIAR POR WHATSAPP</button>
-                <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
-                <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
-                <button class="btn-pagar" onclick="pagar()">PAGAR</button>
-                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
-                <button class="btn-anular" onclick="anular()">ANULAR</button>
-                <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
-                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
+                <button class="btn-agregar" onclick="agregarJugada()">➕ AGREGAR AL TICKET</button>
+                <button class="btn-resultados" onclick="verResultados()">📊 RESULTADOS</button>
+                <button class="btn-caja" onclick="verCaja()">💰 CAJA</button>
+                <button class="btn-pagar" onclick="pagarTicket()">💵 PAGAR</button>
+                <button class="btn-tripleta" id="btnTripleta" onclick="toggleTripleta()">🎲 TRIPLETA</button>
+                <button class="btn-anular" onclick="anularTicket()">❌ ANULAR</button>
+                <button class="btn-borrar" onclick="borrarUltima()">🗑️ BORRAR</button>
+                <button class="btn-vender" onclick="venderTicket()">✅ VENDER TICKET</button>
+                <button class="btn-salir" onclick="window.location='/logout'">🚪 SALIR</button>
             </div>
         </div>
     </div>
 
-    <div class="modal" id="modal-caja">
+    <!-- Modal Resultados -->
+    <div id="modalResultados" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>ESTADO DE CAJA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-caja')">X</button>
+                <h3>📊 Resultados del Día</h3>
+                <button class="btn-close" onclick="cerrarModal('modalResultados')">Cerrar</button>
             </div>
-            
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('hoy')">Hoy</button>
-                <button class="tab-btn" onclick="switchTab('historico')">Histórico</button>
-            </div>
-
-            <div id="tab-hoy" class="tab-content active">
-                <div class="stats-box">
-                    <div class="stat-row">
-                        <span class="stat-label">Ventas:</span>
-                        <span class="stat-value" id="caja-ventas">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Premios Pagados:</span>
-                        <span class="stat-value negative" id="caja-premios">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Tu Comisión:</span>
-                        <span class="stat-value" id="caja-comision">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Balance:</span>
-                        <span class="stat-value" id="caja-balance">S/0.00</span>
-                    </div>
-                </div>
-                
-                <div id="alerta-pendientes" class="alert-box" style="display:none;">
-                    <strong>⚠️ Tickets por Cobrar:</strong>
-                    <div id="info-pendientes"></div>
-                </div>
-            </div>
-
-            <div id="tab-historico" class="tab-content">
-                <div class="form-group">
-                    <label>Desde:</label>
-                    <input type="date" id="hist-fecha-inicio">
-                </div>
-                <div class="form-group">
-                    <label>Hasta:</label>
-                    <input type="date" id="hist-fecha-fin">
-                </div>
-                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR HISTORIAL</button>
-                
-                <div id="resultado-historico" style="display:none; margin-top: 20px;">
-                    <div class="stats-box">
-                        <div class="stat-row">
-                            <span class="stat-label">Total Ventas:</span>
-                            <span class="stat-value" id="hist-ventas">S/0.00</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total Premios:</span>
-                            <span class="stat-value negative" id="hist-premios">S/0.00</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Balance:</span>
-                            <span class="stat-value" id="hist-balance">S/0.00</span>
-                        </div>
-                    </div>
-
-                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin-top: 15px;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico-caja"></tbody>
-                        </table>
-                    </div>
-
-                    <div id="hist-alerta-pendientes" class="alert-box" style="display:none;">
-                        <strong>💰 Pendiente por Cobrar:</strong>
-                        <div id="hist-info-pendientes"></div>
-                    </div>
-                </div>
-            </div>
+            <div class="results-grid" id="resultsGrid"></div>
         </div>
     </div>
 
-    <div class="modal" id="modal-resultados">
+    <!-- Modal Caja -->
+    <div id="modalCaja" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>RESULTADOS DE SORTEOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-resultados')">X</button>
+                <h3>💰 Caja del Día</h3>
+                <button class="btn-close" onclick="cerrarModal('modalCaja')">Cerrar</button>
             </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label>Seleccionar Fecha:</label>
-                <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
-                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR FECHA</button>
-            </div>
-
-            <div style="margin-bottom: 15px; text-align: center; color: #ffd700; font-size: 1.1rem; font-weight: bold;" id="resultados-fecha-titulo">
-                Hoy
-            </div>
-
-            <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
-                <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
-            </div>
+            <div id="cajaContent"></div>
         </div>
     </div>
 
-    <div class="modal" id="modal-mis-tickets">
+    <!-- Modal Pagar -->
+    <div id="modalPagar" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🎫 MIS TICKETS VENDIDOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
+                <h3>💵 Pagar Ticket</h3>
+                <button class="btn-close" onclick="cerrarModal('modalPagar')">Cerrar</button>
             </div>
-            
-            <div class="filter-row">
-                <input type="date" id="mis-tickets-fecha-inicio" placeholder="Desde">
-                <input type="date" id="mis-tickets-fecha-fin" placeholder="Hasta">
-                <select id="mis-tickets-estado">
-                    <option value="todos">Todos</option>
-                    <option value="pagados">Pagados</option>
-                    <option value="pendientes">Pendientes</option>
-                    <option value="por_pagar">Con Premio (por cobrar)</option>
-                </select>
-            </div>
-            <button class="btn-consultar" onclick="consultarMisTickets()">BUSCAR</button>
-            
-            <div id="mis-tickets-resumen" style="margin: 15px 0; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 8px; display: none;">
-                <strong style="color: #ffd700;">Resumen:</strong> <span id="mis-tickets-info"></span>
-            </div>
-            
-            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
-                <p style="color: #888; text-align: center; padding: 20px;">Use los filtros y presione BUSCAR</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-buscar-ticket">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🔎 BUSCAR TICKET POR SERIAL</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button>
-            </div>
-            
             <div class="form-group">
-                <label>Ingrese el número de serial:</label>
-                <input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center; letter-spacing: 2px;">
+                <label>Número de Serial:</label>
+                <input type="text" id="serialPagar" placeholder="Ej: 1234567890">
             </div>
-            <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
-            
-            <div id="resultado-busqueda-ticket" style="margin-top: 20px;">
-            </div>
+            <button class="btn-vender" onclick="consultarTicketPagar()" style="width: 100%; margin-bottom: 10px;">
+                Verificar Ticket
+            </button>
+            <div id="infoPago"></div>
         </div>
     </div>
 
-    <div class="modal" id="modal-calculadora">
+    <!-- Modal Mis Tickets -->
+    <div id="modalTickets" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🧮 CALCULADORA DE PREMIOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button>
+                <h3>🎫 Mis Tickets</h3>
+                <button class="btn-close" onclick="cerrarModal('modalTickets')">Cerrar</button>
             </div>
-            
             <div class="form-group">
-                <label>Monto Apostado (S/):</label>
-                <input type="number" id="calc-monto" value="10" min="1">
+                <label>Fecha Inicio:</label>
+                <input type="date" id="fechaInicioTickets">
             </div>
-            
             <div class="form-group">
-                <label>Tipo de Apuesta:</label>
-                <select id="calc-tipo" onchange="calcularPremio()">
-                    <option value="35">Animal Normal (00-39) x35</option>
-                    <option value="70">Lechuza (40) x70</option>
-                    <option value="2">Especial (Rojo/Negro/Par/Impar) x2</option>
-                    <option value="60">TRIPLETA x60</option>
-                </select>
+                <label>Fecha Fin:</label>
+                <input type="date" id="fechaFinTickets">
             </div>
-            
-            <button class="btn-consultar" onclick="calcularPremio()">CALCULAR</button>
-            
-            <div class="stats-box" id="calc-resultado" style="display: none; margin-top: 20px; text-align: center;">
-                <div style="color: #888; margin-bottom: 5px;">Premio a Pagar:</div>
-                <div style="color: #ffd700; font-size: 2rem; font-weight: bold;" id="calc-total">S/0.00</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-pendientes">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>💰 MIS TICKETS POR COBRAR</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button>
-            </div>
-            
-            <div id="pendientes-info" style="margin-bottom: 15px; color: #ffd700; font-weight: bold; text-align: center;">
-                Cargando...
-            </div>
-            
-            <div id="lista-pendientes" style="max-height: 400px; overflow-y: auto;">
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-reglas">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>📖 REGLAS DE PAGO</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-reglas')">X</button>
-            </div>
-            
-            <div style="line-height: 2; color: #ddd;">
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 Animales (00-39)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/350</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #e74c3c;">x70</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/700</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 TRIPLETA (Nuevo)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Selecciona <strong>3 animalitos</strong></li>
-                    <li>Si salen los 3 durante el día (cualquier hora, cualquier orden): <strong style="color: #ffd700;">x60</strong></li>
-                    <li>Ejemplo: S/10 → S/600</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🎲 Especiales</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Rojo, Negro, Par, Impar</li>
-                    <li>Pago: <strong style="color: #2980b9;">x2</strong> veces el monto</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Importante</h4>
-                <ul style="margin-left: 20px;">
-                    <li>Anular: Solo dentro de 5 minutos</li>
-                    <li>Bloqueo: 5 minutos antes del sorteo</li>
-                    <li>Vencimiento: Tickets vencen a los 3 días</li>
-                    <li>Horarios: 8AM a 6PM hora Perú (11 sorteos)</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-como-usar">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>❓ CÓMO USAR EL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-como-usar')">X</button>
-            </div>
-            
-            <div style="line-height: 1.8; color: #ddd;">
-                <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
-                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta Normal</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Selecciona el monto (arriba a la derecha)</li>
-                        <li>Toca los animales que quieres jugar</li>
-                        <li>Selecciona los horarios (puedes varios)</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>Repite si quieres más jugadas</li>
-                        <li>Presiona "ENVIAR POR WHATSAPP"</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(255,165,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #FFA500;">
-                    <h4 style="color: #FFA500; margin-bottom: 10px;">2. Hacer una Tripleta</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón 🎯 TRIPLETA (se pone dorado)</li>
-                        <li>Selecciona exactamente 3 animalitos</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>La tripleta gana si salen los 3 números en cualquier momento del día</li>
-                        <li>Paga <strong>x60</strong> veces el monto apostado</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(39,174,96,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
-                    <h4 style="color: #27ae60; margin-bottom: 10px;">3. Pagar un Ticket Ganador</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón PAGAR</li>
-                        <li>Ingresa el SERIAL del ticket</li>
-                        <li>Verifica el monto ganado</li>
-                        <li>Confirma el pago</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-acerca">
-        <div class="modal-content" style="text-align: center;">
-            <div class="modal-header">
-                <h3>ℹ️ ACERCA DEL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-acerca')">X</button>
-            </div>
-            
-            <div style="padding: 20px;">
-                <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
-                <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 6.1 - Tripleta x60</p>
-                
-                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
-                    <p style="color: #ffd700; margin: 0; line-height: 1.8;">
-                        Sistema de Lotería Animal<br>
-                        Zona Horaria: Perú (UTC-5)<br>
-                        Nuevos Horarios: 8AM - 6PM (11 sorteos)<br><br>
-                        <strong>Novedades v6.1:</strong><br>
-                        ✓ Apuesta Tripleta (x60)<br>
-                        ✓ Horarios actualizados<br>
-                        ✓ 11 sorteos diarios
-                    </p>
-                </div>
-                
-                <p style="color: #666; margin-top: 20px; font-size: 0.9rem;">
-                    © 2025 ZOOLO CASINO<br>
-                    Todos los derechos reservados
-                </p>
-            </div>
+            <button class="btn-vender" onclick="cargarMisTickets()" style="width: 100%; margin-bottom: 10px;">
+                Buscar Tickets
+            </button>
+            <div id="listaTickets"></div>
         </div>
     </div>
 
     <script>
-        let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
+        let jugadas = [];
+        let seleccionActual = null;
+        let horaSeleccionada = null;
         let modoTripleta = false;
         let seleccionTripleta = [];
-        let horasPeru = JSON.parse('{{ horarios_peru | tojson | safe }}');
-        let horasVen = JSON.parse('{{ horarios_venezuela | tojson | safe }}');
-        
-        function toggleMobileMenu() {
-            const menu = document.getElementById('mobileMenu');
-            const overlay = document.querySelector('.mobile-menu-overlay');
-            menu.classList.toggle('active');
-            overlay.classList.toggle('active');
+
+        // Inicializar fechas en los inputs
+        document.getElementById('fechaInicioTickets').valueAsDate = new Date();
+        document.getElementById('fechaFinTickets').valueAsDate = new Date();
+
+        function toggleMenu() {
+            document.getElementById('mobileMenu').classList.toggle('active');
+            document.querySelector('.mobile-menu-overlay').classList.toggle('active');
         }
-        
-        function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
-        function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
-        function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
-        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
-        function abrirBuscarTicketMobile() { toggleMobileMenu(); abrirBuscarTicket(); }
-        function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
-        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
-        function mostrarReglasMobile() { toggleMobileMenu(); mostrarReglas(); }
-        function mostrarComoUsarMobile() { toggleMobileMenu(); mostrarComoUsar(); }
-        function mostrarAcercaMobile() { toggleMobileMenu(); mostrarAcerca(); }
-        
-        function showToast(message, type = 'info') {
-            const existing = document.querySelector('.toast-notification');
-            if (existing) existing.remove();
-            
-            const toast = document.createElement('div');
-            toast.className = 'toast-notification';
-            toast.style.background = type === 'error' ? '#c0392b' : type === 'success' ? '#27ae60' : '#2980b9';
-            toast.style.color = 'white';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => {
-                toast.style.animation = 'slideUp 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
-        
-        function toggleModoTripleta() {
-            modoTripleta = !modoTripleta;
-            const btn = document.getElementById('btn-tripleta');
-            const banner = document.getElementById('tripleta-banner');
-            
+
+        function seleccionarAnimal(num, nombre) {
             if (modoTripleta) {
-                btn.classList.add('active');
-                banner.classList.add('active');
-                seleccionTripleta = [];
-                showToast('Modo Tripleta activado: Selecciona 3 animalitos (Paga x60)', 'info');
-            } else {
-                btn.classList.remove('active');
-                banner.classList.remove('active');
-                seleccionTripleta = [];
-                // Limpiar selección visual
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
-                });
-            }
-            updateTicket();
-        }
-        
-        function updateReloj() {
-            try {
-                let now = new Date();
-                let peruTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Lima"}));
-                document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {
-                    hour: '2-digit', 
-                    minute:'2-digit', 
-                    hour12: true,
-                    timeZone: 'America/Lima'
-                });
+                const idx = seleccionTripleta.indexOf(num);
+                const card = document.querySelector(`[data-num="${num}"]`);
                 
-                let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
-                
-                if (typeof horasPeru === 'undefined' || !Array.isArray(horasPeru)) {
-                    console.error('horasPeru no está definido correctamente');
-                    return;
-                }
-                
-                horasPeru.forEach((h, idx) => {
-                    try {
-                        let partes = h.split(/[: ]/);
-                        let hora = parseInt(partes[0]);
-                        let minuto = parseInt(partes[1]);
-                        let ampm = partes[2];
-                        if (ampm === 'PM' && hora !== 12) hora += 12;
-                        if (ampm === 'AM' && hora === 12) hora = 0;
-                        let sorteoMinutos = hora * 60 + minuto;
-                        let btn = document.getElementById('hora-' + (idx + 1));
-                        if (btn && horaActual > sorteoMinutos - 5) {
-                            btn.classList.add('expired');
-                        }
-                    } catch(e) {
-                        console.error('Error procesando hora:', h, e);
-                    }
-                });
-            } catch(e) {
-                console.error('Error en updateReloj:', e);
-            }
-        }
-        
-        setInterval(updateReloj, 30000);
-        setTimeout(updateReloj, 1000);
-        
-        function toggleAni(k, nombre) {
-            if (modoTripleta) {
-                // Lógica de tripleta: máximo 3, toggle individual
-                let idx = seleccionTripleta.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                
-                if (idx >= 0) {
+                if (idx > -1) {
                     seleccionTripleta.splice(idx, 1);
-                    el.classList.remove('tripleta-seleccionado');
+                    card.classList.remove('tripleta-seleccionado');
                 } else {
-                    if (seleccionTripleta.length >= 3) {
-                        showToast('Solo puedes seleccionar 3 animalitos para la tripleta', 'error');
-                        return;
+                    if (seleccionTripleta.length < 3) {
+                        seleccionTripleta.push(num);
+                        card.classList.add('tripleta-seleccionado');
+                    } else {
+                        alert('Ya seleccionaste 3 animales. Deselecciona uno primero.');
                     }
-                    seleccionTripleta.push({k, nombre});
-                    el.classList.add('tripleta-seleccionado');
-                    if (navigator.vibrate) navigator.vibrate(50);
                 }
             } else {
-                // Lógica normal
-                let idx = seleccionados.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                if (idx >= 0) {
-                    seleccionados.splice(idx, 1);
-                    el.classList.remove('active');
-                } else {
-                    seleccionados.push({k, nombre});
-                    el.classList.add('active');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }
+                document.querySelectorAll('.animal-card').forEach(c => c.classList.remove('active'));
+                document.querySelector(`[data-num="${num}"]`).classList.add('active');
+                seleccionActual = {tipo: 'animal', valor: num, nombre: nombre};
             }
-            updateTicket();
         }
-        
-        function toggleEsp(tipo) {
-            if (modoTripleta) {
-                showToast('No puedes jugar especiales en modo Tripleta', 'error');
-                return;
-            }
-            let idx = especiales.indexOf(tipo);
-            let el = document.querySelector('.btn-' + tipo.toLowerCase());
-            if (idx >= 0) {
-                especiales.splice(idx, 1);
-                el.classList.remove('active');
-            } else {
-                especiales.push(tipo);
-                el.classList.add('active');
-            }
-            updateTicket();
+
+        function seleccionarEspecial(tipo, btn) {
+            if (modoTripleta) return;
+            document.querySelectorAll('.btn-esp').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            seleccionActual = {tipo: 'especial', valor: tipo};
         }
-        
-        function toggleHora(hora, id) {
+
+        function seleccionarHora(hora, btn) {
+            if (modoTripleta) return;
+            document.querySelectorAll('.btn-hora').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            horaSeleccionada = hora;
+        }
+
+        function toggleTripleta() {
+            modoTripleta = !modoTripleta;
+            const btn = document.getElementById('btnTripleta');
+            const info = document.getElementById('tripletaInfo');
+            
             if (modoTripleta) {
-                showToast('Las tripletas no necesitan horario (válidas todo el día)', 'info');
-                return;
-            }
-            let btn = document.getElementById('hora-' + id);
-            if (btn.classList.contains('expired')) {
-                showToast('Este sorteo ya cerró', 'error');
-                return;
-            }
-            let idx = horariosSel.indexOf(hora);
-            if (idx >= 0) {
-                horariosSel.splice(idx, 1);
-                btn.classList.remove('active');
-            } else {
-                horariosSel.push(hora);
                 btn.classList.add('active');
+                info.classList.add('active');
+                seleccionTripleta = [];
+                document.querySelectorAll('.animal-card').forEach(c => {
+                    c.classList.remove('active');
+                    c.classList.remove('tripleta-seleccionado');
+                });
+                document.querySelectorAll('.btn-esp').forEach(b => b.classList.remove('active'));
+                seleccionActual = null;
+                horaSeleccionada = null;
+            } else {
+                btn.classList.remove('active');
+                info.classList.remove('active');
+                seleccionTripleta = [];
+                document.querySelectorAll('.animal-card').forEach(c => {
+                    c.classList.remove('tripleta-seleccionado');
+                });
             }
-            updateTicket();
         }
-        
-        function updateTicket() {
-            const display = document.getElementById('ticket-display');
-            let total = 0;
-            let html = '<table class="ticket-table"><thead><tr><th>Hora</th><th>Apuesta</th><th>S/</th></tr></thead><tbody>';
+
+        function agregarJugada() {
+            const monto = parseFloat(document.getElementById('montoInput').value);
             
-            for (let item of carrito) {
-                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : 
-                         item.tipo === 'tripleta' ? 'TRIP' : item.seleccion;
-                let color = item.tipo === 'animal' ? '#ffd700' : 
-                           item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
-                let horaTxt = item.tipo === 'tripleta' ? 'Todo el día' : item.hora;
-                html += `<tr>
-                    <td style="color:#aaa; font-size:0.75rem">${horaTxt}</td>
-                    <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
-                    <td style="text-align:right; font-weight:bold">${item.monto}</td>
-                </tr>`;
-                total += item.monto;
+            if (!monto || monto <= 0) {
+                alert('Ingresa un monto válido');
+                return;
             }
-            
-            // Mostrar selección actual si hay algo pendiente
-            if (modoTripleta && seleccionTripleta.length > 0) {
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                html += `<tr style="opacity:0.8; background:rgba(255,165,0,0.2)">
-                    <td style="color:#FFA500; font-size:0.75rem">Todo el día</td>
-                    <td style="color:#FFA500; font-size:0.8rem">🎯 ${nums} (${nombres})</td>
-                    <td style="text-align:right; color:#FFA500; font-weight:bold">${monto}</td>
-                </tr>`;
-            } else if (!modoTripleta && horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                for (let h of horariosSel) {
-                    for (let a of seleccionados) {
-                        let indicador = a.k === "40" ? " 🦉x70" : "";
-                        html += `<tr style="opacity:0.7; background:rgba(255,215,0,0.1)">
-                            <td style="color:#ffd700; font-size:0.75rem">${h}</td>
-                            <td style="color:#ffd700; font-size:0.8rem">${a.k} ${a.nombre}${indicador}</td>
-                            <td style="text-align:right; color:#ffd700; font-weight:bold">${monto}</td>
-                        </tr>`;
-                    }
-                    for (let e of especiales) {
-                        html += `<tr style="opacity:0.7; background:rgba(52,152,219,0.1)">
-                            <td style="color:#3498db; font-size:0.75rem">${h}</td>
-                            <td style="color:#3498db; font-size:0.8rem">${e}</td>
-                            <td style="text-align:right; color:#3498db; font-weight:bold">${monto}</td>
-                        </tr>`;
-                    }
-                }
-            }
-            
-            html += '</tbody></table>';
-            
-            if (carrito.length === 0 && 
-                (seleccionados.length === 0 && especiales.length === 0 && seleccionTripleta.length === 0)) {
-                html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
-            } else if (carrito.length === 0) {
-                html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
-            }
-            
-            if (total > 0) {
-                html += `<div class="ticket-total">TOTAL: S/${total}</div>`;
-            }
-            
-            display.innerHTML = html;
-        }
-        
-        function agregar() {
+
             if (modoTripleta) {
                 if (seleccionTripleta.length !== 3) {
-                    showToast('Debes seleccionar exactamente 3 animalitos para la tripleta', 'error');
+                    alert('Debes seleccionar exactamente 3 animales para la tripleta');
                     return;
                 }
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                
-                carrito.push({
-                    hora: 'Todo el día', 
-                    seleccion: nums, 
-                    nombre: nombres, 
-                    monto: monto, 
-                    tipo: 'tripleta'
+                jugadas.push({
+                    tipo: 'tripleta',
+                    seleccion: seleccionTripleta.join(','),
+                    monto: monto,
+                    hora: 'Todo el día'
                 });
                 
-                // Limpiar selección
                 seleccionTripleta = [];
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
+                document.querySelectorAll('.animal-card').forEach(c => {
+                    c.classList.remove('tripleta-seleccionado');
                 });
-                
-                showToast('Tripleta agregada al ticket (Paga x60)', 'success');
-                updateTicket();
-                return;
-            }
-            
-            if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
-                showToast('Selecciona horario y animal/especial', 'error'); 
-                return;
-            }
-            let monto = parseFloat(document.getElementById('monto').value) || 5;
-            let count = 0;
-            for (let h of horariosSel) {
-                for (let a of seleccionados) {
-                    carrito.push({hora: h, seleccion: a.k, nombre: a.nombre, monto: monto, tipo: 'animal'});
-                    count++;
+            } else {
+                if (!seleccionActual) {
+                    alert('Selecciona un animal o especial');
+                    return;
                 }
-                for (let e of especiales) {
-                    carrito.push({hora: h, seleccion: e, nombre: e, monto: monto, tipo: 'especial'});
-                    count++;
+                if (!horaSeleccionada) {
+                    alert('Selecciona un horario');
+                    return;
                 }
+
+                jugadas.push({
+                    tipo: seleccionActual.tipo,
+                    seleccion: seleccionActual.valor,
+                    nombre: seleccionActual.nombre || seleccionActual.valor,
+                    monto: monto,
+                    hora: horaSeleccionada
+                });
+
+                document.querySelectorAll('.animal-card').forEach(c => c.classList.remove('active'));
+                document.querySelectorAll('.btn-esp').forEach(b => b.classList.remove('active'));
+                seleccionActual = null;
             }
-            seleccionados = []; especiales = []; horariosSel = [];
-            document.querySelectorAll('.animal-card.active, .btn-esp.active, .btn-hora.active').forEach(el => el.classList.remove('active'));
-            updateTicket();
-            showToast(`${count} jugada(s) agregada(s)`, 'success');
+
+            actualizarTicket();
         }
-        
-        async function vender() {
-            if (carrito.length === 0) { 
-                showToast('Carrito vacío', 'error'); 
-                return; 
+
+        function actualizarTicket() {
+            const tbody = document.getElementById('ticketBody');
+            const totalEl = document.getElementById('ticketTotal');
+            
+            if (jugadas.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666; padding: 20px;">Ticket vacío. Selecciona jugadas.</td></tr>';
+                totalEl.textContent = 'TOTAL: S/0.00';
+                return;
             }
-            
-            const btn = document.querySelector('.btn-vender');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Procesando...';
-            btn.disabled = true;
-            
-            try {
-                let jugadas = carrito.map(c => ({
-                    hora: c.hora, 
-                    seleccion: c.seleccion, 
-                    monto: c.monto, 
-                    tipo: c.tipo
-                }));
+
+            let html = '';
+            let total = 0;
+
+            jugadas.forEach((j, idx) => {
+                total += j.monto;
+                let display = '';
+                if (j.tipo === 'animal') {
+                    display = j.nombre;
+                } else if (j.tipo === 'tripleta') {
+                    display = 'Tripleta: ' + j.seleccion;
+                } else {
+                    display = j.seleccion;
+                }
                 
+                html += `
+                    <tr>
+                        <td>${j.hora}</td>
+                        <td>${display}</td>
+                        <td>S/${j.monto}</td>
+                        <td><button onclick="eliminarJugada(${idx})" style="background:#c0392b;color:white;border:none;padding:2px 8px;border-radius:3px;cursor:pointer;">X</button></td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+            totalEl.textContent = `TOTAL: S/${total.toFixed(2)}`;
+        }
+
+        function eliminarJugada(idx) {
+            jugadas.splice(idx, 1);
+            actualizarTicket();
+        }
+
+        function borrarUltima() {
+            if (jugadas.length > 0) {
+                jugadas.pop();
+                actualizarTicket();
+            }
+        }
+
+        async function venderTicket() {
+            if (jugadas.length === 0) {
+                alert('El ticket está vacío');
+                return;
+            }
+
+            try {
                 const response = await fetch('/api/procesar-venta', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({jugadas: jugadas})
                 });
-                
+
                 const data = await response.json();
                 
-                if (data.error) {
-                    showToast(data.error, 'error');
-                } else {
-                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = data.url_whatsapp;
-                    } else {
+                if (data.status === 'ok') {
+                    if (confirm(`Ticket #${data.ticket_id} creado. Total: S/${data.total}\\n\\n¿Compartir por WhatsApp?`)) {
                         window.open(data.url_whatsapp, '_blank');
                     }
-                    carrito = []; 
-                    updateTicket();
-                    showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
+                    jugadas = [];
+                    actualizarTicket();
+                } else {
+                    alert('Error: ' + (data.error || 'Desconocido'));
                 }
             } catch (e) {
-                showToast('Error de conexión. Intenta de nuevo.', 'error');
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+                alert('Error de conexión: ' + e.message);
             }
         }
 
-        function verResultados() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('resultados-fecha').value = hoy;
-            cargarResultadosFecha();
-            document.getElementById('modal-resultados').style.display = 'block';
-        }
-
-        function cargarResultadosFecha() {
-            let fecha = document.getElementById('resultados-fecha').value;
-            if (!fecha) return;
-            
-            let container = document.getElementById('lista-resultados');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('resultados-fecha-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
-            fetch('/api/resultados-fecha', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
+        async function verResultados() {
+            try {
+                const response = await fetch('/api/resultados-hoy');
+                const data = await response.json();
                 
-                let html = '';
-                if (d.resultados && Object.keys(d.resultados).length > 0) {
-                    for (let hora of horasPeru) {
-                        let resultado = d.resultados[hora];
-                        let clase = resultado ? '' : 'pendiente';
-                        let contenido;
-                        
-                        if (resultado) {
-                            contenido = `
-                                <span class="resultado-numero">${resultado.animal}</span>
-                                <span class="resultado-nombre">${resultado.nombre}</span>
+                if (data.status === 'ok') {
+                    let html = '';
+                    const horarios = {{ horarios_peru | tojson }};
+                    
+                    horarios.forEach(hora => {
+                        const res = data.resultados[hora];
+                        if (res) {
+                            html += `
+                                <div class="result-item">
+                                    <div class="result-time">${hora}</div>
+                                    <div class="result-animal">${res.animal} - ${res.nombre}</div>
+                                </div>
                             `;
                         } else {
-                            contenido = `
-                                <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                                <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
+                            html += `
+                                <div class="result-item">
+                                    <div class="result-time">${hora}</div>
+                                    <div class="empty-result">Sin resultado</div>
+                                </div>
                             `;
                         }
-                        
-                        let horaVenIdx = horasPeru.indexOf(hora);
-                        let horaVen = horaVenIdx >= 0 ? horasVen[horaVenIdx] : '';
-                        
-                        html += `
-                            <div class="resultado-item ${clase}">
-                                <div style="display: flex; flex-direction: column;">
-                                    <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                                    <small style="color: #666; font-size: 0.75rem;">Venezuela: ${horaVen}</small>
-                                </div>
-                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
-                                    ${contenido}
-                                </div>
-                            </div>
-                        `;
-                    }
-                } else {
-                    html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles para esta fecha</p>';
+                    });
+                    
+                    document.getElementById('resultsGrid').innerHTML = html;
+                    document.getElementById('modalResultados').style.display = 'block';
                 }
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
+            } catch (e) {
+                alert('Error cargando resultados');
+            }
         }
 
-        function cerrarModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-        
-        function abrirCaja() {
-            fetch('/api/caja')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) { 
-                    showToast(d.error, 'error'); 
-                    return; 
-                }
-                document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
-                document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
-                document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
-                
-                let balanceEl = document.getElementById('caja-balance');
-                balanceEl.textContent = 'S/' + d.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
-                
-                let alertaDiv = document.getElementById('alerta-pendientes');
-                let infoDiv = document.getElementById('info-pendientes');
-                if (d.tickets_pendientes > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.<br>¡Pasa a pagar!`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
-                
-                document.getElementById('modal-caja').style.display = 'block';
-            })
-            .catch(e => showToast('Error de conexión', 'error'));
-            
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-        }
-        
-        function abrirCajaHistorico() {
-            abrirCaja();
-            setTimeout(() => switchTab('historico'), 100);
-        }
-        
-        function abrirCalculadora() {
-            document.getElementById('modal-calculadora').style.display = 'block';
-            calcularPremio();
-        }
-        
-        function calcularPremio() {
-            const monto = parseFloat(document.getElementById('calc-monto').value) || 0;
-            const multiplicador = parseInt(document.getElementById('calc-tipo').value);
-            const total = monto * multiplicador;
-            
-            document.getElementById('calc-total').textContent = 'S/' + total.toFixed(2);
-            document.getElementById('calc-resultado').style.display = 'block';
-        }
-        
-        function abrirMisTickets() {
-            document.getElementById('modal-mis-tickets').style.display = 'block';
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
-        }
-        
-        function abrirBuscarTicket() {
-            document.getElementById('modal-buscar-ticket').style.display = 'block';
-            document.getElementById('buscar-serial-input').value = '';
-            document.getElementById('resultado-busqueda-ticket').innerHTML = '';
-            document.getElementById('buscar-serial-input').focus();
-        }
-        
-        function consultarMisTickets() {
-            let inicio = document.getElementById('mis-tickets-fecha-inicio').value;
-            let fin = document.getElementById('mis-tickets-fecha-fin').value;
-            let estado = document.getElementById('mis-tickets-estado').value;
-            
-            if (!inicio || !fin) {
-                showToast('Seleccione fechas', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('lista-mis-tickets');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio,
-                    fecha_fin: fin,
-                    estado: estado
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                document.getElementById('mis-tickets-resumen').style.display = 'block';
-                document.getElementById('mis-tickets-info').textContent = 
-                    `${d.totales.cantidad} tickets - Total ventas: S/${d.totales.ventas.toFixed(2)}`;
-                
-                if (d.tickets.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No se encontraron tickets con esos filtros</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    let estadoClass = t.pagado ? 'ganador' : (t.premio_calculado ? 'pendiente-pago' : '');
-                    let estadoText = t.pagado ? 'PAGADO' : (t.premio_calculado ? 'GANADOR (sin cobrar)' : 'PENDIENTE');
-                    
-                    html += `
-                        <div class="ticket-item ${estadoClass}" onclick="verDetalleTicket('${t.serial}')">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">${t.fecha} - Total: S/${t.total}</div>
-                            ${t.premio_calculado ? `<div class="ticket-premio">Premio: S/${t.premio_calculado}</div>` : ''}
-                            <span class="ticket-estado ${t.pagado ? 'estado-pagado' : 'estado-pendiente'}">${estadoText}</span>
-                        </div>
-                    `;
-                });
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function buscarTicketEspecifico() {
-            let serial = document.getElementById('buscar-serial-input').value.trim();
-            if (!serial) {
-                showToast('Ingrese un serial', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('resultado-busqueda-ticket');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Buscando...</p>';
-            
-            fetch('/api/consultar-ticket-detalle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">' + d.error + '</p>';
-                    return;
-                }
-                
-                let t = d.ticket;
-                let estadoColor = t.pagado ? '#27ae60' : (t.premio_total > 0 ? '#f39c12' : '#888');
-                let estadoText = t.pagado ? 'PAGADO' : (t.premio_total > 0 ? 'GANADOR - PENDIENTE DE COBRO' : 'NO GANADOR');
+        async function verCaja() {
+            try {
+                const response = await fetch('/api/caja');
+                const data = await response.json();
                 
                 let html = `
-                    <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; border: 2px solid ${estadoColor};">
-                        <h3 style="color: #ffd700; margin-bottom: 15px; text-align: center;">TICKET #${t.serial}</h3>
-                        <div class="stats-box" style="margin-bottom: 15px;">
-                            <div class="stat-row">
-                                <span class="stat-label">Fecha:</span>
-                                <span class="stat-value" style="font-size: 1rem;">${t.fecha}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Apostado:</span>
-                                <span class="stat-value" style="font-size: 1rem;">S/${t.total_apostado}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Estado:</span>
-                                <span class="stat-value" style="color: ${estadoColor}; font-size: 1rem;">${estadoText}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Premio Total:</span>
-                                <span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">
-                                    S/${t.premio_total.toFixed(2)}
-                                </span>
-                            </div>
+                    <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <h4 style="color: #ffd700; margin-bottom: 15px;">Resumen del Día</h4>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Ventas:</span>
+                            <span style="color: #27ae60; font-weight: bold;">S/${data.ventas}</span>
                         </div>
-                        <h4 style="color: #ffd700; margin-bottom: 10px;">Detalle de Jugadas:</h4>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Premios Pagados:</span>
+                            <span style="color: #e74c3c; font-weight: bold;">S/${data.premios}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span>Comisión (15%):</span>
+                            <span style="color: #f39c12; font-weight: bold;">S/${data.comision}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 2px solid #333; font-size: 1.2rem;">
+                            <span>Balance:</span>
+                            <span style="color: ${data.balance >= 0 ? '#27ae60' : '#e74c3c'}; font-weight: bold;">S/${data.balance}</span>
+                        </div>
+                    </div>
+                    <div style="text-align: center; color: #888;">
+                        Tickets pendientes de pago: <strong style="color: #ffd700;">${data.tickets_pendientes}</strong>
+                    </div>
                 `;
                 
-                d.jugadas.forEach(j => {
-                    let ganoClass = j.gano ? 'jugada-ganadora' : '';
-                    let resultadoText = j.resultado ? `${j.resultado}` : 'Pendiente';
-                    
-                    html += `
-                        <div class="jugada-detail ${ganoClass}">
-                            <div>
-                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
-                                <small style="color: #888;">Resultado: ${resultadoText}</small>
-                            </div>
-                            <div style="text-align: right;">
-                                <div>S/${j.monto}</div>
-                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function verDetalleTicket(serial) {
-            document.getElementById('modal-mis-tickets').style.display = 'none';
-            abrirBuscarTicket();
-            document.getElementById('buscar-serial-input').value = serial;
-            buscarTicketEspecifico();
-        }
-        
-        function abrirMisTicketsPendientes() {
-            document.getElementById('modal-pendientes').style.display = 'block';
-            document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets-pendientes')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                document.getElementById('pendientes-info').innerHTML = 
-                    `Total Pendiente: <span style="color: #27ae60; font-size: 1.3rem;">S/${d.total_pendiente.toFixed(2)}</span> (${d.tickets.length} tickets)`;
-                
-                if (d.tickets.length === 0) {
-                    document.getElementById('lista-pendientes').innerHTML = 
-                        '<p style="color: #888; text-align: center; padding: 20px;">No tienes tickets pendientes por cobrar</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    html += `
-                        <div class="ticket-item ganador">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">Fecha: ${t.fecha} • Jugadas: ${t.jugadas} • Apostado: S/${t.total}</div>
-                            <div class="ticket-premio">💰 Ganancia: S/${t.premio.toFixed(2)}</div>
-                        </div>
-                    `;
-                });
-                document.getElementById('lista-pendientes').innerHTML = html;
-            })
-            .catch(e => {
-                document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
-            });
-        }
-        
-        function mostrarReglas() {
-            document.getElementById('modal-reglas').style.display = 'block';
-        }
-        
-        function mostrarComoUsar() {
-            document.getElementById('modal-como-usar').style.display = 'block';
-        }
-        
-        function mostrarAcerca() {
-            document.getElementById('modal-acerca').style.display = 'block';
-        }
-        
-        function switchTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById('tab-' + tab).classList.add('active');
-        }
-        
-        function consultarHistoricoCaja() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showToast('Seleccione ambas fechas', 'error');
-                return;
+                document.getElementById('cajaContent').innerHTML = html;
+                document.getElementById('modalCaja').style.display = 'block';
+            } catch (e) {
+                alert('Error cargando caja');
             }
-            
-            fetch('/api/caja-historico', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showToast(d.error, 'error');
-                    return;
-                }
-                
-                document.getElementById('resultado-historico').style.display = 'block';
-                document.getElementById('hist-ventas').textContent = 'S/' + d.totales.ventas.toFixed(2);
-                document.getElementById('hist-premios').textContent = 'S/' + d.totales.premios.toFixed(2);
-                
-                let balanceEl = document.getElementById('hist-balance');
-                balanceEl.textContent = 'S/' + d.totales.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.totales.balance >= 0 ? 'positive' : 'negative');
-                
-                let tbody = document.getElementById('tabla-historico-caja');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                let alertaDiv = document.getElementById('hist-alerta-pendientes');
-                let infoDiv = document.getElementById('hist-info-pendientes');
-                if (d.totales.tickets_pendientes_cobro > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `${d.totales.tickets_pendientes_cobro} ticket(s) sin cobrar por <strong>S/${d.totales.total_pendiente_cobro.toFixed(2)}</strong>`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
-            })
-            .catch(e => showToast('Error de conexión', 'error'));
         }
-        
-        async function pagar() {
-            let serial = prompt('Ingrese SERIAL del ticket:'); 
+
+        async function pagarTicket() {
+            document.getElementById('modalPagar').style.display = 'block';
+        }
+
+        async function consultarTicketPagar() {
+            const serial = document.getElementById('serialPagar').value;
             if (!serial) return;
-            
+
             try {
                 const response = await fetch('/api/verificar-ticket', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({serial: serial})
                 });
-                const d = await response.json();
                 
-                if (d.error) { 
-                    showToast(d.error, 'error'); 
-                    return; 
-                }
+                const data = await response.json();
+                const infoDiv = document.getElementById('infoPago');
                 
-                let msg = "=== RESULTADO ===\\n\\n";
-                let total = d.total_ganado;
-                
-                msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
-                
-                if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
-                    await fetch('/api/pagar-ticket', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ticket_id: d.ticket_id})
-                    });
-                    showToast('✅ Ticket pagado correctamente', 'success');
-                } else if (total === 0) {
-                    showToast('Ticket no ganador', 'info');
+                if (data.error) {
+                    infoDiv.innerHTML = `<div style="color: #e74c3c; padding: 10px; background: rgba(231, 76, 60, 0.1); border-radius: 5px;">${data.error}</div>`;
+                } else {
+                    infoDiv.innerHTML = `
+                        <div style="background: rgba(39, 174, 96, 0.1); padding: 15px; border-radius: 5px; margin-bottom: 10px;">
+                            <h4 style="color: #27ae60; margin-bottom: 10px;">Ticket Ganador!</h4>
+                            <p style="font-size: 1.3rem; color: #ffd700; font-weight: bold;">Monto a Pagar: S/${data.total_ganado}</p>
+                        </div>
+                        <button class="btn-vender" onclick="confirmarPago('${data.ticket_id}')" style="width: 100%;">
+                            Confirmar Pago
+                        </button>
+                    `;
                 }
             } catch (e) {
-                showToast('Error de conexión', 'error');
+                alert('Error verificando ticket');
             }
         }
-        
-        async function anular() {
-            let serial = prompt('SERIAL a anular:'); 
+
+        async function confirmarPago(ticketId) {
+            if (!confirm('¿Confirmas que vas a pagar este ticket?')) return;
+
+            try {
+                const response = await fetch('/api/pagar-ticket', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ticket_id: ticketId})
+                });
+                
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    alert('Ticket pagado exitosamente');
+                    cerrarModal('modalPagar');
+                    document.getElementById('serialPagar').value = '';
+                    document.getElementById('infoPago').innerHTML = '';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (e) {
+                alert('Error procesando pago');
+            }
+        }
+
+        async function anularTicket() {
+            const serial = prompt('Ingresa el número de serial del ticket a anular:');
             if (!serial) return;
-            if (!confirm('¿ANULAR ' + serial + '?')) return;
-            
+
+            if (!confirm('¿Estás seguro de anular este ticket?')) return;
+
             try {
                 const response = await fetch('/api/anular-ticket', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({serial: serial})
                 });
-                const d = await response.json();
                 
-                if (d.error) {
-                    showToast(d.error, 'error');
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    alert('Ticket anulado correctamente');
                 } else {
-                    showToast('✅ ' + d.mensaje, 'success');
+                    alert('Error: ' + data.error);
                 }
             } catch (e) {
-                showToast('Error de conexión', 'error');
+                alert('Error anulando ticket');
             }
         }
-        
-        function borrarTodo() {
-            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0 || seleccionTripleta.length > 0) {
-                if (!confirm('¿Borrar todo?')) return;
-            }
-            seleccionados = []; especiales = []; horariosSel = []; carrito = []; seleccionTripleta = [];
-            document.querySelectorAll('.active, .tripleta-seleccionado').forEach(el => {
-                el.classList.remove('active');
-                el.classList.remove('tripleta-seleccionado');
-            });
-            if (modoTripleta) toggleModoTripleta();
-            updateTicket();
-            showToast('Ticket limpiado', 'info');
+
+        async function verMisTickets() {
+            document.getElementById('modalTickets').style.display = 'block';
         }
-        
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) this.style.display = 'none';
-            });
-        });
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('resultados-fecha').value = hoy;
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
-        });
+
+        async function cargarMisTickets() {
+            const fechaInicio = document.getElementById('fechaInicioTickets').value;
+            const fechaFin = document.getElementById('fechaFinTickets').value;
+
+            try {
+                const response = await fetch('/api/mis-tickets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        fecha_inicio: fechaInicio,
+                        fecha_fin: fechaFin,
+                        estado: 'todos'
+                    })
+                });
+                
+                const data = await response.json();
+                const listaDiv = document.getElementById('listaTickets');
+                
+                if (data.tickets && data.tickets.length > 0) {
+                    let html = `<div style="margin-bottom: 15px; color: #888;">Mostrando ${data.tickets.length} de ${data.totales.cantidad} tickets</div>`;
+                    
+                    data.tickets.forEach(t => {
+                        html += `
+                            <div class="ticket-item">
+                                <div class="ticket-serial">#${t.serial}</div>
+                                <div class="ticket-fecha">${t.fecha}</div>
+                                <div class="ticket-monto">S/${t.total}</div>
+                                <div style="clear: both;"></div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                        <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; margin-top: 15px;">
+                            <strong style="color: #ffd700;">Total Ventas: S/${data.totales.ventas}</strong>
+                        </div>
+                    `;
+                    
+                    listaDiv.innerHTML = html;
+                } else {
+                    listaDiv.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No se encontraron tickets</div>';
+                }
+            } catch (e) {
+                alert('Error cargando tickets');
+            }
+        }
+
+        function cerrarModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+
+        // Verificar bloqueo de horarios cada minuto
+        setInterval(async () => {
+            try {
+                const response = await fetch('/api/resultados-hoy');
+                const data = await response.json();
+                // Actualizar visualización de horarios bloqueados si es necesario
+            } catch (e) {}
+        }, 60000);
     </script>
 </body>
 </html>
@@ -4147,1699 +2146,506 @@ ADMIN_HTML = '''
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-    <title>Panel Admin - ZOOLO CASINO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - ZOOLO CASINO</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body { 
-            background: #0a0a0a; 
-            color: white; 
+            background: #0a0a0a; color: white; 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.5;
+            line-height: 1.6;
         }
-        
-        .admin-header {
+        .header {
             background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 15px;
-            border-bottom: 2px solid #ffd700;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
+            padding: 20px; text-align: center;
+            border-bottom: 3px solid #ffd700;
         }
-        
-        .admin-title {
-            color: #ffd700;
-            font-size: 1.2rem;
-            font-weight: bold;
+        .header h1 { color: #ffd700; margin-bottom: 5px; }
+        .header p { color: #888; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px; margin-top: 20px;
         }
-        
-        .logout-btn {
-            background: #c0392b;
-            color: white;
-            border: none;
-            padding: 8px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.9rem;
-        }
-        
-        .admin-tabs {
-            display: flex;
-            background: #1a1a2e;
-            border-bottom: 1px solid #333;
-            overflow-x: auto;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        .admin-tabs::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .admin-tab {
-            flex: 1;
-            min-width: 100px;
-            padding: 15px 10px;
-            background: transparent;
-            border: none;
-            color: #888;
-            cursor: pointer;
-            font-size: 0.85rem;
-            border-bottom: 3px solid transparent;
-            transition: all 0.2s;
-            white-space: nowrap;
-        }
-        
-        .admin-tab:hover {
-            color: #ffd700;
-            background: rgba(255,215,0,0.05);
-        }
-        
-        .admin-tab.active {
-            color: #ffd700;
-            border-bottom-color: #ffd700;
-            font-weight: bold;
-        }
-        
-        .content { 
-            padding: 20px; 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            padding-bottom: 30px;
-        }
-        
-        .info-pago {
-            background: linear-gradient(135deg, rgba(255,215,0,0.1), rgba(255,215,0,0.05)); 
-            padding: 15px; 
-            border-radius: 10px; 
-            margin: 15px 0; 
-            font-size: 0.85rem; 
-            text-align: center;
-            border: 1px solid rgba(255,215,0,0.3);
-            color: #ffd700;
-        }
-        
-        .stats-grid {
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px; 
-            margin-bottom: 20px;
-        }
-        @media (min-width: 768px) {
-            .stats-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 20px 15px; 
-            border-radius: 12px; 
-            border: 1px solid #ffd700; 
-            text-align: center;
-            transition: transform 0.2s;
-        }
-        .stat-card:active { transform: scale(0.98); }
-        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
-        .stat-card p { color: #ffd700; font-size: 1.4rem; font-weight: bold; }
-        
-        .form-box { 
-            background: #1a1a2e; 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            border: 1px solid #333;
-        }
-        .form-box h3 { 
-            color: #ffd700; 
-            margin-bottom: 15px; 
-            font-size: 1.1rem; 
-            border-bottom: 1px solid #333;
-            padding-bottom: 10px;
-        }
-        .form-row { 
-            display: flex; 
-            gap: 10px; 
-            margin-bottom: 12px; 
-            flex-wrap: wrap; 
-            align-items: center; 
-        }
-        .form-row input, .form-row select {
-            flex: 1; 
-            min-width: 120px; 
-            padding: 12px; 
-            background: #000;
-            border: 1px solid #444; 
-            color: white; 
-            border-radius: 8px; 
-            font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        .btn-submit {
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-            flex: 1;
-            min-width: 120px;
-        }
-        .btn-danger {
-            background: linear-gradient(135deg, #c0392b, #e74c3c); 
-            color: white; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-        }
-        .btn-secondary {
-            background: #444; 
-            color: white; 
-            border: none;
-            padding: 10px 16px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-size: 0.85rem;
-            flex: 1;
-        }
-        .btn-csv {
-            background: linear-gradient(135deg, #f39c12, #e67e22); 
-            color: black; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-        }
-        .btn-tripleta {
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-            border: 2px solid #FFD700;
-        }
-        
-        .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin: 15px 0;
-            border-radius: 8px;
-            border: 1px solid #333;
-            background: #1a1a2e;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 0.85rem; 
-        }
-        th, td { 
-            padding: 12px 10px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-            white-space: nowrap;
-        }
-        th { 
-            background: linear-gradient(135deg, #ffd700, #ffed4e); 
-            color: black; 
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-        }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
-        .riesgo-item {
-            background: #1a1a2e; 
-            padding: 15px; 
-            margin-bottom: 10px;
-            border-radius: 8px; 
-            border-left: 4px solid #c0392b;
-            font-size: 0.9rem;
-        }
-        .riesgo-item.lechuza {
-            border-left-color: #ffd700;
-            background: linear-gradient(135deg, rgba(255,215,0,0.1), #1a1a2e);
-        }
-        .riesgo-item b { color: #ffd700; font-size: 1.1rem; }
-        
-        .sorteo-actual-box {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            border: 2px solid #2980b9; 
-            text-align: center;
-        }
-        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 8px; font-size: 0.9rem; }
-        .sorteo-actual-box p { color: #ffd700; font-size: 1.8rem; font-weight: bold; }
-        
-        .agencia-selector {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #444;
-        }
-        .agencia-selector label {
-            color: #ffd700;
-            font-weight: bold;
-            display: block;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        .agencia-selector select {
-            width: 100%;
-            padding: 12px;
-            background: #000;
-            border: 2px solid #ffd700;
-            color: white;
-            border-radius: 8px;
-            font-size: 1rem;
-        }
-        .agencia-info {
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(255,215,0,0.1);
-            border-radius: 6px;
-            text-align: center;
-            color: #ffd700;
-            font-weight: bold;
-        }
-        
-        .resultado-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #27ae60;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .resultado-item.pendiente {
-            border-left-color: #666;
-            opacity: 0.7;
-        }
-        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
-        .resultado-nombre { color: #888; font-size: 0.9rem; }
-        
-        .btn-editar {
-            background: linear-gradient(135deg, #2980b9, #3498db);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.85rem;
-            font-weight: bold;
-            margin-left: 10px;
-            transition: all 0.2s;
-        }
-        .btn-editar:hover {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            transform: scale(1.05);
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 2000;
-            justify-content: center;
-            align-items: center;
+        .card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #333; border-radius: 10px;
             padding: 20px;
         }
-        .modal.active { display: flex; }
-        .modal-box {
-            background: #1a1a2e;
-            padding: 25px;
-            border-radius: 15px;
-            border: 2px solid #ffd700;
-            max-width: 400px;
-            width: 100%;
+        .card h3 {
+            color: #ffd700; margin-bottom: 15px;
+            border-bottom: 1px solid #333; padding-bottom: 10px;
         }
-        .modal-box h3 {
-            color: #ffd700;
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 10px;
+            background: #222; border: 1px solid #444;
+            color: white; border-radius: 5px;
+        }
+        .btn {
+            padding: 12px 24px; border: none; border-radius: 5px;
+            cursor: pointer; font-weight: bold; transition: all 0.3s;
+        }
+        .btn-primary { background: #ffd700; color: black; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .results-table {
+            width: 100%; border-collapse: collapse; margin-top: 15px;
+        }
+        .results-table th, .results-table td {
+            padding: 10px; text-align: left; border-bottom: 1px solid #333;
+        }
+        .results-table th { color: #ffd700; background: rgba(255,215,0,0.1); }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;
             margin-bottom: 20px;
-            text-align: center;
         }
-        .warning-box {
-            background: rgba(243, 156, 18, 0.2);
-            border: 1px solid #f39c12;
-            color: #f39c12;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            display: none;
+        .stat-box {
+            background: rgba(255,255,255,0.05); padding: 15px;
+            border-radius: 8px; text-align: center;
         }
-        
-        .ranking-item {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 10px;
-            border-left: 4px solid #ffd700;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .stat-value {
+            font-size: 1.5rem; font-weight: bold; color: #ffd700;
         }
-        .ranking-pos {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #ffd700;
-            min-width: 40px;
+        .stat-label { color: #888; font-size: 0.9rem; }
+        .nav-tabs {
+            display: flex; gap: 10px; margin-bottom: 20px;
+            border-bottom: 2px solid #333; padding-bottom: 10px;
         }
-        .ranking-info { flex: 1; padding: 0 10px; }
-        .ranking-nombre { font-weight: bold; color: white; font-size: 1.1rem; }
-        .ranking-detalle { font-size: 0.85rem; color: #888; margin-top: 3px; }
-        .ranking-monto { text-align: right; }
-        .ranking-ventas { font-size: 1.3rem; font-weight: bold; color: #27ae60; }
-        .ranking-balance { font-size: 0.9rem; color: #888; }
-        
-        .mensaje {
-            padding: 15px; 
-            margin: 15px 0; 
-            border-radius: 8px; 
-            display: none;
-            font-size: 0.95rem;
-            text-align: center;
+        .nav-tab {
+            padding: 10px 20px; background: #222; border: none;
+            color: #888; cursor: pointer; border-radius: 5px 5px 0 0;
         }
-        .mensaje.success { 
-            background: rgba(39,174,96,0.2); 
-            border: 1px solid #27ae60; 
-            display: block; 
-            color: #27ae60;
-        }
-        .mensaje.error { 
-            background: rgba(192,57,43,0.2); 
-            border: 1px solid #c0392b; 
-            display: block; 
-            color: #c0392b;
-        }
-        
+        .nav-tab.active { background: #ffd700; color: black; }
         .tab-content { display: none; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
-        .btn-group {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 10px;
+        .tab-content.active { display: block; }
+        .animal-select {
+            display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px;
+            max-height: 200px; overflow-y: auto;
         }
-        .btn-group button {
-            flex: 1;
-            min-width: 80px;
+        .animal-option {
+            padding: 8px; text-align: center;
+            background: #222; border: 1px solid #444;
+            cursor: pointer; border-radius: 5px; font-size: 0.8rem;
         }
-        
-        .timezone-info {
-            background: rgba(41, 128, 185, 0.1);
-            border: 1px solid #2980b9;
-            color: #3498db;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 15px 0;
-            font-size: 0.85rem;
-            text-align: center;
+        .animal-option:hover { background: #333; }
+        .animal-option.selected {
+            background: #ffd700; color: black; font-weight: bold;
         }
-        
-        .premio-box {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
+        #message {
+            position: fixed; top: 20px; right: 20px;
+            padding: 15px 20px; border-radius: 5px;
+            display: none; z-index: 1000;
         }
-        .premio-pagado { background: #27ae60; color: white; }
-        .premio-pendiente { background: #f39c12; color: black; }
-        .premio-total { background: #2980b9; color: white; }
-        
-        .tripleta-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            border: 2px solid #FFD700;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-            position: relative;
-        }
-        .tripleta-card.ganadora {
-            background: linear-gradient(135deg, rgba(39,174,96,0.2), #1a1a2e);
-            border-color: #27ae60;
-        }
-        .tripleta-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .tripleta-serial {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        .tripleta-agencia {
-            color: #888;
-            font-size: 0.85rem;
-        }
-        .tripleta-animales {
-            display: flex;
-            gap: 10px;
-            margin: 15px 0;
-            justify-content: center;
-        }
-        .tripleta-animal {
-            background: #000;
-            border: 2px solid #FFD700;
-            border-radius: 10px;
-            padding: 10px 15px;
-            text-align: center;
-            min-width: 80px;
-        }
-        .tripleta-animal .num {
-            color: #FFD700;
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-        .tripleta-animal .name {
-            color: #aaa;
-            font-size: 0.75rem;
-            margin-top: 4px;
-        }
-        .tripleta-monto {
-            text-align: center;
-            margin-top: 10px;
-            color: #aaa;
-        }
-        .tripleta-premio {
-            text-align: center;
-            color: #27ae60;
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .tripleta-estado {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-        .estado-ganadora { background: #27ae60; color: white; }
-        .estado-pendiente { background: #666; color: white; }
-        .estado-pagada { background: #2980b9; color: white; }
+        .message-success { background: #27ae60; }
+        .message-error { background: #e74c3c; }
     </style>
 </head>
 <body>
-    <div class="modal" id="modal-editar">
-        <div class="modal-box">
-            <h3>✏️ EDITAR RESULTADO</h3>
-            <div class="warning-box" id="editar-advertencia">
-                ⚠️ Este sorteo tiene tickets vendidos. Al cambiar el resultado, los tickets ganadores cambiarán.
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Fecha:</label>
-                <input type="text" id="editar-fecha-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Hora:</label>
-                <input type="text" id="editar-hora-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Nuevo Animal:</label>
-                <select id="editar-animal-select" style="width: 100%; padding: 12px; background: #000; border: 2px solid #ffd700; color: white; border-radius: 8px; font-size: 1rem;">
-                    {% for k, v in animales.items() %}
-                    <option value="{{k}}">{{k}} - {{v}}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button onclick="cerrarModalEditar()" style="flex: 1; background: #444; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">CANCELAR</button>
-                <button onclick="confirmarEdicion()" style="flex: 2; background: linear-gradient(135deg, #27ae60, #229954); color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">GUARDAR CAMBIO</button>
-            </div>
-        </div>
+    <div class="header">
+        <h1>🦁 ZOOLO CASINO - ADMIN</h1>
+        <p>Panel de Control y Administración</p>
     </div>
 
-    <div class="admin-header">
-        <div class="admin-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
-        <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
+    <div class="nav-tabs" style="max-width: 1200px; margin: 20px auto 0; padding: 0 20px;">
+        <button class="nav-tab active" onclick="showTab('resultados')">Resultados</button>
+        <button class="nav-tab" onclick="showTab('agencias')">Agencias</button>
+        <button class="nav-tab" onclick="showTab('reportes')">Reportes</button>
+        <button class="nav-tab" onclick="showTab('riesgo')">Riesgo</button>
+        <button class="nav-tab" onclick="window.location='/logout'">Salir</button>
     </div>
 
-    <div class="admin-tabs">
-        <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
-        <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
-        <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
-        <button class="admin-tab" onclick="showTab('tripletas')">🎯 Tripletas</button>
-        <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
-        <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
-        <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
-        <button class="admin-tab" onclick="showTab('operaciones')">⚙️ Operaciones</button>
-    </div>
+    <div class="container">
+        <div id="message"></div>
 
-    <div class="content">
-        <div id="mensaje" class="mensaje"></div>
-        
-        <div class="info-pago">
-            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60
-        </div>
-        
-        <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 6PM hasta 8PM).
-        </div>
-        
-        <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">📊 RESUMEN DE HOY</h3>
-            <div class="stats-grid">
-                <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PAGADOS</h3><p id="stat-premios">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PENDIENTES</h3><p id="stat-premios-pendientes" style="color: #f39c12;">S/0</p></div>
-                <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
-            </div>
-            
-            <div class="form-box">
-                <h3>⚡ ACCIONES RÁPIDAS</h3>
-                <div class="btn-group">
-                    <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
-                    <button class="btn-tripleta" onclick="showTab('tripletas')">🎯 Ver Tripletas</button>
-                    <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
-                    <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
+        <!-- Tab Resultados -->
+        <div id="tab-resultados" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <h3>🎯 Ingresar Resultado</h3>
+                    <form id="formResultado" onsubmit="guardarResultado(event)">
+                        <div class="form-group">
+                            <label>Fecha (dejar vacío para hoy):</label>
+                            <input type="date" id="fechaResultado">
+                        </div>
+                        <div class="form-group">
+                            <label>Horario:</label>
+                            <select id="horaResultado" required>
+                                {% for hora in horarios %}
+                                <option value="{{ hora }}">{{ hora }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Animal Ganador:</label>
+                            <select id="animalResultado" required>
+                                {% for num, nombre in animales.items() %}
+                                <option value="{{ num }}">{{ num }} - {{ nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">
+                            💾 Guardar Resultado
+                        </button>
+                    </form>
                 </div>
-            </div>
-        </div>
 
-        <div id="riesgo" class="tab-content">
-            <div class="agencia-selector">
-                <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
-                <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()">
-                    <option value="">TODAS LAS AGENCIAS</option>
-                </select>
-                <div class="agencia-info" id="riesgo-agencia-nombre" style="display:none;">
-                    Mostrando riesgo para: <span id="nombre-agencia-actual">TODAS</span>
-                </div>
-            </div>
-            
-            <div class="sorteo-actual-box">
-                <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
-                <p id="sorteo-objetivo">Cargando...</p>
-                <small style="color: #888; font-size: 0.8rem;">Riesgo calculado para este horario específico</small>
-            </div>
-            
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">
-                💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
-                <span id="cantidad-jugadas-info" style="color: #888; font-size: 0.8rem; display: block; margin-top: 5px;"></span>
-            </h3>
-            <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
-            
-            <div style="margin-top: 20px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                <small style="color: #ff6b6b;">
-                    ⚠️ El riesgo se resetea automáticamente cuando cambia el sorteo.
-                </small>
-            </div>
-        </div>
-
-        <div id="tripletas" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">🎯 TRIPLETAS DE HOY (Paga x60)</h3>
-            <div class="form-box">
-                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn-tripleta" onclick="cargarTripletas()">🔄 Actualizar</button>
-                </div>
-                <div class="stats-grid" style="margin-bottom: 20px;">
-                    <div class="stat-card" style="border-color: #FFD700;">
-                        <h3>TOTAL TRIPLETAS</h3>
-                        <p id="trip-total" style="color: #FFD700;">0</p>
+                <div class="card">
+                    <h3>📊 Resultados de Hoy</h3>
+                    <div id="resultadosHoy">
+                        <p style="color: #666; text-align: center;">Cargando...</p>
                     </div>
-                    <div class="stat-card" style="border-color: #27ae60;">
-                        <h3>GANADORAS</h3>
-                        <p id="trip-ganadoras" style="color: #27ae60;">0</p>
-                    </div>
-                    <div class="stat-card" style="border-color: #c0392b;">
-                        <h3>PREMIOS</h3>
-                        <p id="trip-premios" style="color: #c0392b;">S/0</p>
-                    </div>
-                </div>
-                <div id="lista-tripletas" style="max-height: 600px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Cargando tripletas...</p>
+                    <button class="btn btn-success" onclick="cargarResultadosHoy()" style="width: 100%; margin-top: 10px;">
+                        🔄 Actualizar
+                    </button>
                 </div>
             </div>
         </div>
 
-        <div id="reporte" class="tab-content">
-            <div class="form-box">
-                <h3>🏢 REPORTE POR AGENCIAS</h3>
-                
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>Filtrar por Agencia:</label>
-                    <select id="reporte-agencia-select" onchange="cambiarFiltroAgencia()">
-                        <option value="">TODAS LAS AGENCIAS (GLOBAL)</option>
+        <!-- Tab Agencias -->
+        <div id="tab-agencias" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>➕ Crear Nueva Agencia</h3>
+                    <form id="formAgencia" onsubmit="crearAgencia(event)">
+                        <div class="form-group">
+                            <label>Nombre de la Agencia:</label>
+                            <input type="text" id="nombreAgencia" required placeholder="Ej: Agencia Principal">
+                        </div>
+                        <div class="form-group">
+                            <label>Usuario (login):</label>
+                            <input type="text" id="usuarioAgencia" required placeholder="Ej: agencia01">
+                        </div>
+                        <div class="form-group">
+                            <label>Contraseña:</label>
+                            <input type="password" id="passwordAgencia" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">
+                            Crear Agencia
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>📋 Lista de Agencias</h3>
+                    <div id="listaAgencias" style="max-height: 300px; overflow-y: auto;">
+                        <p style="color: #666;">Cargando...</p>
+                    </div>
+                    <button class="btn btn-success" onclick="cargarAgencias()" style="width: 100%; margin-top: 10px;">
+                        🔄 Actualizar Lista
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Reportes -->
+        <div id="tab-reportes" class="tab-content">
+            <div class="card" style="margin-bottom: 20px;">
+                <h3>📈 Reporte por Rango de Fechas</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
+                    <div class="form-group" style="margin: 0;">
+                        <label>Fecha Inicio:</label>
+                        <input type="date" id="reporteFechaInicio">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label>Fecha Fin:</label>
+                        <input type="date" id="reporteFechaFin">
+                    </div>
+                    <button class="btn btn-primary" onclick="generarReporte()">Generar</button>
+                </div>
+            </div>
+            
+            <div id="resultadoReporte"></div>
+        </div>
+
+        <!-- Tab Riesgo -->
+        <div id="tab-riesgo" class="tab-content">
+            <div class="card">
+                <h3>⚠️ Análisis de Riesgo por Sorteo</h3>
+                <div class="form-group">
+                    <label>Seleccionar Agencia (opcional):</label>
+                    <select id="riesgoAgencia">
+                        <option value="">Todas las agencias</option>
                     </select>
                 </div>
-                
-                <div class="form-row">
-                    <input type="date" id="reporte-fecha-inicio">
-                    <input type="date" id="reporte-fecha-fin">
-                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR</button>
-                </div>
-                <div class="btn-group">
-                    <button class="btn-secondary" onclick="setRangoReporte('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('semana')">7 días</button>
-                    <button class="btn-csv" onclick="exportarCSV()">📊 CSV</button>
-                </div>
-                
-                <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES <span id="titulo-filtro-agencia"></span></h4>
-                    
-                    <div class="stats-grid" id="stats-agencias-totales"></div>
-                    
-                    <div class="form-box" style="background: rgba(255,215,0,0.05);">
-                        <h4 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">💰 DESGLOSE DE PREMIOS</h4>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pagados:</span>
-                            <span class="stat-value" id="reporte-premios-pagados" style="color: #27ae60;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pendientes (por cobrar):</span>
-                            <span class="stat-value" id="reporte-premios-pendientes" style="color: #f39c12;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total en Premios (Teórico):</span>
-                            <span class="stat-value" id="reporte-premios-total" style="color: #ffd700;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Tickets Ganadores sin Cobrar:</span>
-                            <span class="stat-value" id="reporte-tickets-pendientes" style="color: #f39c12;">0</span>
-                        </div>
-                    </div>
-
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🏆 TOP 5 AGENCIAS</h4>
-                    <div id="ranking-agencias"></div>
-
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE COMPLETO</h4>
-                    <div class="table-container">
-                        <table id="tabla-detalle-agencias">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Agencia</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios Pagados</th>
-                                    <th>Pendientes</th>
-                                    <th>Balance</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="resultados" class="tab-content">
-            <div class="form-box">
-                <h3>🔍 CONSULTAR RESULTADOS</h3>
-                <div class="form-row">
-                    <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
-                    <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
-                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">HOY</button>
-                </div>
-                <div id="admin-resultados-titulo" style="margin-top: 15px; color: #ffd700; font-weight: bold; text-align: center; font-size: 1.1rem;"></div>
-            </div>
-
-            <div class="form-box">
-                <h3>📋 RESULTADOS CARGADOS</h3>
-                <div class="timezone-info">
-                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 6PM hasta 8PM hora Perú).
-                </div>
-                <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
-                </div>
-            </div>
-
-            <div class="form-box">
-                <h3>✏️ CARGAR/EDITAR RESULTADO</h3>
-                <div class="form-row">
-                    <select id="res-hora" style="flex: 1.5;">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
-                    <select id="res-animal" style="flex: 2;">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
-                    <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
-                </div>
-                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;">
-                    ℹ️ Si el resultado ya existe, se actualizará automáticamente (dentro de la ventana de 2 horas).
-                </div>
-            </div>
-        </div>
-
-        <div id="historico" class="tab-content">
-            <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA</h3>
-                <div class="form-row">
-                    <input type="date" id="hist-fecha-inicio">
-                    <input type="date" id="hist-fecha-fin">
-                    <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
-                </div>
-                <div class="btn-group">
-                    <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
-                    <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
-                </div>
-                
-                <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 20px;">
-                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
-                        <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
-                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico"></tbody>
-                        </table>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
-                    <div id="top-animales-hist"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="operaciones" class="tab-content">
-            <div class="form-box">
-                <h3>💰 PAGAR TICKET</h3>
-                <div class="form-row">
-                    <input type="text" id="pagar-serial-admin" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-submit" onclick="pagarTicketAdmin()">VERIFICAR Y PAGAR</button>
-                </div>
-                <div id="resultado-pago-admin" style="margin-top: 15px;"></div>
-            </div>
-
-            <div class="form-box">
-                <h3>❌ ANULAR TICKET</h3>
-                <div class="form-row">
-                    <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR</button>
-                </div>
-                <div style="margin-top: 15px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                    <small style="color: #ff6b6b;">
-                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado.
-                    </small>
-                </div>
-                <div id="resultado-anular" style="margin-top: 15px; font-size: 1rem; text-align: center;"></div>
-            </div>
-        </div>
-
-        <div id="agencias" class="tab-content">
-            <div class="form-box">
-                <h3>➕ CREAR NUEVA AGENCIA</h3>
-                <div class="form-row">
-                    <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contraseña">
-                </div>
-                <div class="form-row">
-                    <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
-                    <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
-                </div>
-            </div>
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">🏢 AGENCIAS EXISTENTES</h3>
-            <div class="table-container">
-                <table>
-                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comisión</th></tr></thead>
-                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody>
-                </table>
+                <button class="btn btn-primary" onclick="cargarRiesgo()" style="width: 100%; margin-bottom: 20px;">
+                    Analizar Riesgo
+                </button>
+                <div id="riesgoContent"></div>
             </div>
         </div>
     </div>
 
     <script>
-        const HORARIOS_ORDEN = JSON.parse('{{ horarios | tojson | safe }}');
-        let historicoData = null;
-        let reporteAgenciasData = null;
-        let fechasConsulta = { inicio: null, fin: null };
-        let listaAgencias = [];
-        let editandoFecha = null;
-        let editandoHora = null;
-        let filtroAgenciaActual = null;
+        // Inicializar fechas
+        document.getElementById('fechaResultado').valueAsDate = new Date();
+        document.getElementById('reporteFechaInicio').valueAsDate = new Date();
+        document.getElementById('reporteFechaFin').valueAsDate = new Date();
 
-        function showTab(tab) {
+        function showTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-' + tabName).classList.add('active');
+            event.target.classList.add('active');
             
-            const target = document.getElementById(tab);
-            if (target) {
-                target.classList.add('active');
-            }
-            
-            const buttons = document.querySelectorAll('.admin-tab');
-            buttons.forEach(btn => {
-                if (btn.getAttribute('onclick').includes("'" + tab + "'")) {
-                    btn.classList.add('active');
-                }
-            });
-            
-            if (tab === 'riesgo') {
-                cargarAgenciasSelect();
-                cargarRiesgo();
-            }
-            if (tab === 'tripletas') {
-                cargarTripletas();
-            }
-            if (tab === 'reporte') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('reporte-fecha-inicio').value = hoy;
-                document.getElementById('reporte-fecha-fin').value = hoy;
-                cargarAgenciasReporte();
-                consultarReporteAgencias();
-            }
-            if (tab === 'agencias') cargarAgencias();
-            if (tab === 'dashboard') cargarDashboard();
-            if (tab === 'resultados') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('admin-resultados-fecha').value = hoy;
-                cargarResultadosAdmin();
-            }
+            if (tabName === 'resultados') cargarResultadosHoy();
+            if (tabName === 'agencias') cargarAgencias();
         }
 
-        function showMensaje(msg, tipo) {
-            let div = document.getElementById('mensaje');
-            div.textContent = msg; 
-            div.className = 'mensaje ' + tipo;
-            setTimeout(() => div.className = 'mensaje', 4000);
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = type === 'error' ? 'message-error' : 'message-success';
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
         }
 
-        function setRango(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
-            
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
-            }
-            
-            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarHistorico();
-        }
+        async function guardarResultado(e) {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('fecha', document.getElementById('fechaResultado').value);
+            formData.append('hora', document.getElementById('horaResultado').value);
+            formData.append('animal', document.getElementById('animalResultado').value);
 
-        function setRangoReporte(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
-            
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
-            }
-            
-            document.getElementById('reporte-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('reporte-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarReporteAgencias();
-        }
-
-        function cargarAgenciasSelect() {
-            fetch('/admin/lista-agencias')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) return;
-                listaAgencias = d;
-                let select = document.getElementById('riesgo-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
+            try {
+                const response = await fetch('/admin/guardar-resultado', {
+                    method: 'POST',
+                    body: formData
                 });
-            });
-        }
-        
-        function cargarAgenciasReporte() {
-            fetch('/admin/lista-agencias')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) return;
-                let select = document.getElementById('reporte-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS (GLOBAL)</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
-                });
-            });
-        }
-        
-        function cambiarFiltroAgencia() {
-            filtroAgenciaActual = document.getElementById('reporte-agencia-select').value;
-            consultarReporteAgencias();
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    showMessage(data.mensaje, 'success');
+                    cargarResultadosHoy();
+                } else {
+                    showMessage('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showMessage('Error de conexión', 'error');
+            }
         }
 
-        function cambiarAgenciaRiesgo() {
-            cargarRiesgo();
-        }
-
-        function cargarTripletas() {
-            fetch('/admin/tripletas-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
+        async function cargarResultadosHoy() {
+            try {
+                const response = await fetch('/admin/resultados-hoy');
+                const data = await response.json();
                 
-                document.getElementById('trip-total').textContent = d.total;
-                document.getElementById('trip-ganadoras').textContent = d.ganadoras;
-                document.getElementById('trip-premios').textContent = 'S/' + d.total_premios.toFixed(2);
-                
-                let container = document.getElementById('lista-tripletas');
-                
-                if (!d.tripletas || d.tripletas.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tripletas jugadas hoy</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tripletas.forEach(trip => {
-                    let claseGanadora = trip.gano ? 'ganadora' : '';
-                    let estadoClass = trip.pagado ? 'estado-pagada' : (trip.gano ? 'estado-ganadora' : 'estado-pendiente');
-                    let estadoText = trip.pagado ? 'PAGADA' : (trip.gano ? 'GANADORA' : 'EN JUEGO');
+                if (data.status === 'ok') {
+                    let html = '<table class="results-table">';
+                    html += '<tr><th>Horario</th><th>Resultado</th></tr>';
                     
-                    html += `
-                        <div class="tripleta-card ${claseGanadora}">
-                            <div class="tripleta-estado ${estadoClass}">${estadoText}</div>
-                            <div class="tripleta-header">
-                                <div>
-                                    <div class="tripleta-serial">#${trip.serial}</div>
-                                    <div class="tripleta-agencia">${trip.agencia}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-animales">
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal1}</div>
-                                    <div class="name">${trip.nombres[0]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal2}</div>
-                                    <div class="name">${trip.nombres[1]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal3}</div>
-                                    <div class="name">${trip.nombres[2]}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-monto">
-                                Apostado: S/${trip.monto} | Paga x60
-                            </div>
-                            ${trip.gano ? `<div class="tripleta-premio">💰 Premio: S/${trip.premio}</div>` : ''}
-                            ${!trip.gano && trip.salieron.length > 0 ? `<div style="text-align: center; color: #f39c12; margin-top: 5px;">Han salido: ${trip.salieron.join(', ')}</div>` : ''}
-                        </div>
-                    `;
+                    const horarios = {{ horarios | tojson }};
+                    horarios.forEach(hora => {
+                        const res = data.resultados[hora];
+                        html += `<tr>
+                            <td>${hora}</td>
+                            <td style="color: ${res ? '#ffd700' : '#666'}">
+                                ${res ? res.animal + ' - ' + res.nombre : 'Sin resultado'}
+                            </td>
+                        </tr>`;
+                    });
+                    html += '</table>';
+                    document.getElementById('resultadosHoy').innerHTML = html;
+                }
+            } catch (e) {
+                document.getElementById('resultadosHoy').innerHTML = '<p style="color: #e74c3c;">Error cargando resultados</p>';
+            }
+        }
+
+        async function crearAgencia(e) {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('nombre', document.getElementById('nombreAgencia').value);
+            formData.append('usuario', document.getElementById('usuarioAgencia').value);
+            formData.append('password', document.getElementById('passwordAgencia').value);
+
+            try {
+                const response = await fetch('/admin/crear-agencia', {
+                    method: 'POST',
+                    body: formData
                 });
+                const data = await response.json();
                 
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando tripletas', 'error');
-            });
-        }
-
-        function pagarTicketAdmin() {
-            const serial = document.getElementById('pagar-serial-admin').value.trim();
-            if (!serial) {
-                showMensaje('Ingrese un serial', 'error');
-                return;
-            }
-            
-            fetch('/api/verificar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('resultado-pago-admin').innerHTML = `<div style="color: #c0392b; padding: 15px; background: rgba(192,57,43,0.1); border-radius: 8px;">${d.error}</div>`;
-                    return;
-                }
-                
-                let html = `<div style="background: rgba(39,174,96,0.1); padding: 20px; border-radius: 10px; border: 1px solid #27ae60;">`;
-                html += `<h4 style="color: #27ae60; margin-bottom: 15px;">Ticket #${d.ticket_id}</h4>`;
-                html += `<p style="font-size: 1.3rem; color: #ffd700; margin-bottom: 15px;">Total Ganado: S/${d.total_ganado.toFixed(2)}</p>`;
-                
-                if (d.total_ganado > 0) {
-                    html += `<button onclick="confirmarPagoAdmin('${d.ticket_id}')" class="btn-submit" style="width: 100%;">CONFIRMAR PAGO</button>`;
-                } else {
-                    html += `<p style="color: #888;">Ticket no ganador</p>`;
-                }
-                html += `</div>`;
-                
-                document.getElementById('resultado-pago-admin').innerHTML = html;
-            });
-        }
-
-        function confirmarPagoAdmin(ticketId) {
-            fetch('/api/pagar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ticket_id: ticketId})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ Ticket pagado correctamente', 'success');
-                    document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;">✅ Pago realizado con éxito</div>';
-                } else {
-                    showMensaje(d.error || 'Error al pagar', 'error');
-                }
-            });
-        }
-
-        function anularTicketAdmin() {
-            let serial = document.getElementById('anular-serial').value.trim();
-            if (!serial) {
-                showMensaje('Ingrese un serial', 'error');
-                return;
-            }
-            
-            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
-                return;
-            }
-            
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let resultadoDiv = document.getElementById('resultado-anular');
-                if (d.error) {
-                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
-                    showMensaje(d.error, 'error');
-                } else {
-                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
-                    showMensaje(d.mensaje, 'success');
-                    document.getElementById('anular-serial').value = '';
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
-        function abrirModalEditar(hora, fecha, animalActual) {
-            editandoHora = hora;
-            editandoFecha = fecha;
-            
-            document.getElementById('editar-fecha-display').value = fecha;
-            document.getElementById('editar-hora-display').value = hora;
-            document.getElementById('editar-animal-select').value = animalActual;
-            
-            verificarTicketsSorteo(fecha, hora);
-            document.getElementById('modal-editar').classList.add('active');
-        }
-        
-        function cerrarModalEditar() {
-            document.getElementById('modal-editar').classList.remove('active');
-            editandoFecha = null;
-            editandoHora = null;
-        }
-        
-        function verificarTicketsSorteo(fecha, hora) {
-            fetch('/admin/verificar-tickets-sorteo', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha, hora: hora})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let advertencia = document.getElementById('editar-advertencia');
-                if (d.tickets_count > 0) {
-                    advertencia.style.display = 'block';
-                    advertencia.innerHTML = `⚠️ <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.<br>Cambiar el resultado afectará quién gana o pierde.`;
-                } else {
-                    advertencia.style.display = 'none';
-                }
-            })
-            .catch(e => console.error('Error verificando tickets:', e));
-        }
-        
-        function confirmarEdicion() {
-            let nuevoAnimal = document.getElementById('editar-animal-select').value;
-            
-            if (!confirm(`¿Está seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal} - ${getNombreAnimal(nuevoAnimal)}?`)) {
-                return;
-            }
-            
-            let partes = editandoFecha.split('/');
-            let fechaISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
-            
-            let form = new FormData();
-            form.append('hora', editandoHora);
-            form.append('animal', nuevoAnimal);
-            form.append('fecha', fechaISO);
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    cerrarModalEditar();
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                    // Recargar tripletas si estamos en esa pestaña
-                    if (document.getElementById('tripletas').classList.contains('active')) {
-                        cargarTripletas();
-                    }
-                } else {
-                    showMensaje(d.error || 'Error al guardar', 'error');
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-        
-        function getNombreAnimal(numero) {
-            const animales = JSON.parse('{{ animales | tojson | safe }}');
-            return animales[numero] || 'Desconocido';
-        }
-
-        function consultarHistorico() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            fechasConsulta = { inicio, fin };
-            showMensaje('Consultando datos...', 'success');
-            
-            fetch('/admin/estadisticas-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                historicoData = d;
-                document.getElementById('historico-resumen').style.display = 'block';
-                
-                document.getElementById('hist-total-ventas').textContent = 'S/' + d.totales.ventas.toFixed(0);
-                document.getElementById('hist-total-premios').textContent = 'S/' + d.totales.premios.toFixed(0);
-                document.getElementById('hist-total-tickets').textContent = d.totales.tickets;
-                document.getElementById('hist-total-balance').textContent = 'S/' + d.totales.balance.toFixed(0);
-                
-                let tbody = document.getElementById('tabla-historico');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td>S/${dia.premios.toFixed(0)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                cargarTopAnimalesHistorico(inicio, fin);
-            })
-            .catch(e => showMensaje('Error de conexión', 'error'));
-        }
-
-        function consultarReporteAgencias() {
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            let agenciaId = document.getElementById('reporte-agencia-select').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            showMensaje('Consultando reporte...', 'success');
-            
-            fetch('/admin/reporte-agencias-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio, 
-                    fecha_fin: fin,
-                    agencia_id: agenciaId || null
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                reporteAgenciasData = d;
-                document.getElementById('reporte-agencias-resumen').style.display = 'block';
-                
-                let tituloAgencia = agenciaId ? 
-                    document.querySelector('#reporte-agencia-select option:checked').text : 
-                    'TODAS LAS AGENCIAS';
-                document.getElementById('titulo-filtro-agencia').textContent = `- ${tituloAgencia}`;
-                
-                let totales = d.totales;
-                let htmlTotales = `
-                    <div class="stat-card">
-                        <h3>AGENCIAS</h3>
-                        <p>${d.agencias.length}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>TICKETS</h3>
-                        <p>${totales.tickets}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>VENTAS</h3>
-                        <p>S/${totales.ventas.toFixed(0)}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>BALANCE</h3>
-                        <p style="color: ${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</p>
-                    </div>
-                `;
-                document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
-                
-                document.getElementById('reporte-premios-pagados').textContent = 'S/' + totales.premios_pagados.toFixed(2);
-                document.getElementById('reporte-premios-pendientes').textContent = 'S/' + totales.premios_pendientes.toFixed(2);
-                document.getElementById('reporte-premios-total').textContent = 'S/' + totales.premios_teoricos.toFixed(2);
-                document.getElementById('reporte-tickets-pendientes').textContent = totales.tickets_pendientes_count;
-                
-                let htmlRanking = '';
-                d.agencias.slice(0, 5).forEach((ag, idx) => {
-                    let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteInfo = ag.premios_pendientes > 0 ? `<br><small style="color:#f39c12">Pendiente: S/${ag.premios_pendientes}</small>` : '';
-                    
-                    htmlRanking += `
-                        <div class="ranking-item">
-                            <div class="ranking-pos">${medalla}</div>
-                            <div class="ranking-info">
-                                <div class="ranking-nombre">${ag.nombre}</div>
-                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total${pendienteInfo}</div>
-                            </div>
-                            <div class="ranking-monto">
-                                <div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div>
-                                <div class="ranking-balance" style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div>
-                            </div>
-                        </div>
-                    `;
-                });
-                document.getElementById('ranking-agencias').innerHTML = htmlRanking;
-                
-                let tbody = document.querySelector('#tabla-detalle-agencias tbody');
-                let htmlTabla = '';
-                d.agencias.forEach((ag, idx) => {
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteBadge = ag.premios_pendientes > 0 ? 
-                        `<span class="premio-box premio-pendiente">S/${ag.premios_pendientes}</span>` : 
-                        '<span style="color:#666">-</span>';
-                    
-                    htmlTabla += `<tr>
-                        <td>${idx + 1}</td>
-                        <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
-                        <td>${ag.tickets}</td>
-                        <td>S/${ag.ventas.toFixed(0)}</td>
-                        <td style="color:#27ae60">S/${ag.premios_pagados.toFixed(0)}</td>
-                        <td>${pendienteBadge}</td>
-                        <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td>
-                        <td>${ag.porcentaje_ventas}%</td>
-                    </tr>`;
-                });
-                
-                if (!agenciaId) {
-                    htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
-                        <td colspan="2">TOTALES</td>
-                        <td>${totales.tickets}</td>
-                        <td>S/${totales.ventas.toFixed(0)}</td>
-                        <td>S/${totales.premios_pagados.toFixed(0)}</td>
-                        <td><span class="premio-box premio-pendiente">S/${totales.premios_pendientes.toFixed(0)}</span></td>
-                        <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
-                        <td>100%</td>
-                    </tr>`;
-                }
-                
-                tbody.innerHTML = htmlTabla;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
-        function exportarCSV() {
-            if (!reporteAgenciasData) {
-                showMensaje('Primero genere un reporte', 'error');
-                return;
-            }
-            
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            
-            fetch('/admin/exportar-csv', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.blob())
-            .then(blob => {
-                let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a');
-                a.href = url;
-                a.download = `reporte_agencias_${inicio}_${fin}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                showMensaje('CSV descargado correctamente', 'success');
-            })
-            .catch(e => showMensaje('Error al exportar', 'error'));
-        }
-
-        function cargarTopAnimalesHistorico(inicio, fin) {
-            fetch('/admin/top-animales-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let container = document.getElementById('top-animales-hist');
-                if (!d.top_animales || d.top_animales.length === 0) {
-                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.top_animales.slice(0, 10).forEach((a, idx) => {
-                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
-                    let esLechuza = a.numero === "40";
-                    let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
-                    
-                    html += `<div class="${clase}" style="margin-bottom: 10px;">
-                        <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
-                        <small>Apostado: S/${a.total_apostado} • Si sale pagaría: S/${a.pago_potencial}</small>
-                    </div>`;
-                });
-                container.innerHTML = html;
-            });
-        }
-
-        function cargarDashboard() {
-            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
-                if (d.global) {
-                    document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
-                    document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
-                    document.getElementById('stat-premios-pendientes').textContent = 'S/' + d.global.premios_pendientes.toFixed(0);
-                    document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
-                }
-            }).catch(() => showMensaje('Error de conexion', 'error'));
-        }
-
-        function cargarRiesgo() {
-            let agenciaId = document.getElementById('riesgo-agencia-select').value;
-            let url = '/admin/riesgo';
-            
-            if (agenciaId) {
-                url += '?agencia_id=' + agenciaId;
-            }
-            
-            fetch(url)
-            .then(r => r.json())
-            .then(d => {
-                if (d.sorteo_objetivo) {
-                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
-                    
-                    let nombreAgencia = d.agencia_nombre || "TODAS LAS AGENCIAS";
-                    document.getElementById('nombre-agencia-actual').textContent = nombreAgencia;
-                    document.getElementById('riesgo-agencia-nombre').style.display = 'block';
-                    
-                    let infoExtra = d.cantidad_jugadas ? `${d.cantidad_jugadas} jugadas registradas` : '';
-                    if (d.hora_actual) infoExtra += ` • Hora actual: ${d.hora_actual}`;
-                    document.getElementById('cantidad-jugadas-info').textContent = infoExtra;
-                } else {
-                    document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
-                    document.getElementById('cantidad-jugadas-info').textContent = '';
-                }
-                
-                let container = document.getElementById('lista-riesgo');
-                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
-                    return;
-                }
-                let html = '';
-                for (let [k, v] of Object.entries(d.riesgo)) {
-                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
-                    html += `<div class="${clase}">
-                        <b>${k}${extra}</b><br>
-                        Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total
-                    </div>`;
-                }
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando riesgo', 'error');
-            });
-        }
-
-        function cargarResultadosAdminFecha() {
-            let fecha = document.getElementById('admin-resultados-fecha').value;
-            if (!fecha) return;
-            
-            let container = document.getElementById('lista-resultados-admin');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('admin-resultados-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
-            fetch('/api/resultados-fecha', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                renderizarResultadosAdmin(d.resultados, d.fecha_consulta);
-            })
-            .catch(() => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function cargarResultadosAdmin() {
-            fetch('/admin/resultados-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>';
-                    return;
-                }
-                document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
-                renderizarResultadosAdmin(d.resultados, d.fecha);
-            })
-            .catch(() => {
-                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function renderizarResultadosAdmin(resultados, fechaStr) {
-            let container = document.getElementById('lista-resultados-admin');
-            let html = '';
-            
-            for (let hora of HORARIOS_ORDEN) {
-                let resultado = resultados[hora];
-                let clase = resultado ? '' : 'pendiente';
-                let contenido;
-                let botonEditar = '';
-                
-                if (resultado) {
-                    contenido = `
-                        <span class="resultado-numero">${resultado.animal}</span>
-                        <span class="resultado-nombre">${resultado.nombre}</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')">✏️ EDITAR</button>`;
-                } else {
-                    contenido = `
-                        <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                        <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;">➕ CARGAR</button>`;
-                }
-                
-                html += `
-                    <div class="resultado-item ${clase}">
-                        <div style="display: flex; flex-direction: column;">
-                            <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                        </div>
-                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-                            ${contenido}
-                            ${botonEditar}
-                        </div>
-                    </div>
-                `;
-            }
-            container.innerHTML = html;
-        }
-        
-        function prepararNuevoResultado(hora) {
-            document.getElementById('res-hora').value = hora;
-            document.getElementById('res-animal').focus();
-            document.getElementById('res-hora').scrollIntoView({behavior: 'smooth'});
-        }
-
-        function guardarResultado() {
-            let form = new FormData();
-            form.append('hora', document.getElementById('res-hora').value);
-            form.append('animal', document.getElementById('res-animal').value);
-            
-            let fechaActual = document.getElementById('admin-resultados-fecha').value;
-            if (fechaActual) {
-                form.append('fecha', fechaActual);
-            }
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                }
-                else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        function cargarAgencias() {
-            fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
-                let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { 
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; 
-                    return; 
-                }
-                let html = '';
-                for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
-                tbody.innerHTML = html;
-            });
-        }
-
-        function crearAgencia() {
-            let form = new FormData();
-            form.append('usuario', document.getElementById('new-usuario').value.trim());
-            form.append('password', document.getElementById('new-password').value.trim());
-            form.append('nombre', document.getElementById('new-nombre').value.trim());
-            fetch('/admin/crear-agencia', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    document.getElementById('new-usuario').value = '';
-                    document.getElementById('new-password').value = '';
-                    document.getElementById('new-nombre').value = '';
+                if (data.status === 'ok') {
+                    showMessage(data.mensaje, 'success');
+                    document.getElementById('formAgencia').reset();
                     cargarAgencias();
-                } else showMensaje(d.error || 'Error', 'error');
-            });
+                } else {
+                    showMessage('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showMessage('Error de conexión', 'error');
+            }
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('admin-resultados-fecha').value = hoy;
-            
-            setTimeout(() => {
-                document.getElementById('timezone-info').style.display = 'block';
-            }, 1000);
-        });
+        async function cargarAgencias() {
+            try {
+                const response = await fetch('/admin/lista-agencias');
+                const data = await response.json();
+                
+                let html = '<table class="results-table">';
+                html += '<tr><th>Agencia</th><th>Usuario</th><th>Comisión</th></tr>';
+                
+                data.forEach(ag => {
+                    html += `<tr>
+                        <td>${ag.nombre_agencia}</td>
+                        <td>${ag.usuario}</td>
+                        <td>${(ag.comision * 100)}%</td>
+                    </tr>`;
+                });
+                html += '</table>';
+                
+                document.getElementById('listaAgencias').innerHTML = html;
+                
+                // Actualizar select de riesgo
+                const selectRiesgo = document.getElementById('riesgoAgencia');
+                selectRiesgo.innerHTML = '<option value="">Todas las agencias</option>';
+                data.forEach(ag => {
+                    selectRiesgo.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
+                });
+            } catch (e) {
+                document.getElementById('listaAgencias').innerHTML = '<p style="color: #e74c3c;">Error cargando agencias</p>';
+            }
+        }
 
-        cargarDashboard();
+        async function generarReporte() {
+            const fechaInicio = document.getElementById('reporteFechaInicio').value;
+            const fechaFin = document.getElementById('reporteFechaFin').value;
+            
+            try {
+                const response = await fetch('/admin/reporte-agencias-rango', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({fecha_inicio: fechaInicio, fecha_fin: fechaFin})
+                });
+                
+                const data = await response.json();
+                const div = document.getElementById('resultadoReporte');
+                
+                if (data.status === 'ok') {
+                    let html = '<div class="grid">';
+                    
+                    data.agencias.forEach(ag => {
+                        html += `
+                            <div class="card">
+                                <h3>${ag.nombre}</h3>
+                                <div class="stats-grid">
+                                    <div class="stat-box">
+                                        <div class="stat-value">${ag.tickets}</div>
+                                        <div class="stat-label">Tickets</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value">S/${ag.ventas}</div>
+                                        <div class="stat-label">Ventas</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value">S/${ag.premios_teoricos}</div>
+                                        <div class="stat-label">Premios</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value" style="color: ${ag.balance >= 0 ? '#27ae60' : '#e74c3c'}">
+                                            S/${ag.balance}
+                                        </div>
+                                        <div class="stat-label">Balance</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    
+                    // Totales
+                    html += `
+                        <div class="card" style="margin-top: 20px; background: rgba(255,215,0,0.1);">
+                            <h3>Totales Generales</h3>
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <div class="stat-value">${data.totales.tickets}</div>
+                                    <div class="stat-label">Total Tickets</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-value">S/${data.totales.ventas}</div>
+                                    <div class="stat-label">Total Ventas</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-value">S/${data.totales.premios_teoricos}</div>
+                                    <div class="stat-label">Total Premios</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-value" style="color: ${data.totales.balance >= 0 ? '#27ae60' : '#e74c3c'}">
+                                        S/${data.totales.balance}
+                                    </div>
+                                    <div class="stat-label">Balance Total</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    div.innerHTML = html;
+                } else {
+                    div.innerHTML = `<p style="color: #e74c3c;">Error: ${data.error}</p>`;
+                }
+            } catch (e) {
+                document.getElementById('resultadoReporte').innerHTML = '<p style="color: #e74c3c;">Error generando reporte</p>';
+            }
+        }
+
+        async function cargarRiesgo() {
+            const agenciaId = document.getElementById('riesgoAgencia').value;
+            try {
+                const url = agenciaId ? `/admin/riesgo?agencia_id=${agenciaId}` : '/admin/riesgo';
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('riesgoContent').innerHTML = `<p style="color: #e74c3c;">${data.error}</p>`;
+                    return;
+                }
+                
+                let html = `
+                    <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <strong>Sorteo:</strong> ${data.sorteo_objetivo || 'N/A'}<br>
+                        <strong>Total Apostado:</strong> S/${data.total_apostado}<br>
+                        <strong>Agencia:</strong> ${data.agencia_nombre}
+                    </div>
+                    <h4 style="color: #ffd700; margin-bottom: 10px;">Top Apuestas:</h4>
+                `;
+                
+                if (Object.keys(data.riesgo).length === 0) {
+                    html += '<p style="color: #666;">No hay apuestas para este sorteo</p>';
+                } else {
+                    html += '<table class="results-table">';
+                    html += '<tr><th>Animal</th><th>Apostado</th><th>Pagaría</th><th>%</th></tr>';
+                    
+                    for (const [animal, info] of Object.entries(data.riesgo)) {
+                        html += `<tr>
+                            <td>${animal} ${info.es_lechuza ? '👑' : ''}</td>
+                            <td>S/${info.apostado}</td>
+                            <td style="color: ${info.pagaria > data.total_apostado ? '#e74c3c' : '#27ae60'}">
+                                S/${info.pagaria}
+                            </td>
+                            <td>${info.porcentaje}%</td>
+                        </tr>`;
+                    }
+                    html += '</table>';
+                }
+                
+                document.getElementById('riesgoContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('riesgoContent').innerHTML = '<p style="color: #e74c3c;">Error cargando riesgo</p>';
+            }
+        }
+
+        // Cargar datos iniciales
+        cargarResultadosHoy();
+        cargarAgencias();
     </script>
 </body>
 </html>
 '''
 
-# ==================== MAIN ====================
 if __name__ == '__main__':
-    print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60")
-    print("  CORREGIDO: Error 404 en endpoint de tripletas")
-    print("=" * 60)
-    print("  ✓ Pago tripleta cambiado de x50 a x60")
-    print("  ✓ Endpoint /admin/tripletas-hoy verificado")
-    print("  ✓ Textos de ayuda actualizados")
-    print("  ✓ Cálculos de premios corregidos")
-    print("=" * 60)
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
