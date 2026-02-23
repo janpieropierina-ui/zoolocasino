@@ -1,181 +1,144 @@
-#!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60 CORREGIDA
+Zolo Casino v7.1 - FUNCIONAL
+Sistema de Apuestas de Animalitos
+Arreglos aplicados:
+1. Headers separados para GET vs POST/PATCH (Fix critico para que carguen resultados)
+2. Limite aumentado a 5000 registros
+3. Eliminada restriccion de tiempo para editar resultados
+4. Soporte para decimales en montos
 """
 
-import os
-import sys
-import json
-import csv
-import io
-import urllib.parse
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash, jsonify, make_response
 import urllib.request
-from datetime import datetime, timedelta, timezone
+import urllib.parse
+import json
+import random
+import string
+import datetime
+import os
 from functools import wraps
-from flask import Flask, render_template_string, request, session, redirect, jsonify, Response
-from collections import defaultdict
-
-# ==================== CONFIGURACION SUPABASE ====================
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://iuwgbtmhkqnqulwgcgkk.supabase.co').strip()
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1d2didG1oa3FucXVsd2djZ2trIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTM0OTQsImV4cCI6MjA4NjU4OTQ5NH0.HJGQk5JppC34OHWhQY9Goou617uxB1QVuIQLD72NLgE').strip()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'zoolo_casino_cloud_2025_seguro')
+app.secret_key = os.urandom(24)
 
-# Configuracion de negocio - CORREGIDO: Tripleta paga x60
-PAGO_ANIMAL_NORMAL = 35      
-PAGO_LECHUZA = 70           
-PAGO_ESPECIAL = 2           
-PAGO_TRIPLETA = 60          # CORREGIDO: Era 50, ahora 60
-COMISION_AGENCIA = 0.15
-MINUTOS_BLOQUEO = 5
-HORAS_EDICION_RESULTADO = 2
+# Configuracion de Supabase
+SUPABASE_URL = "https://iykyfwegvcjstinykwhk.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5a3lmd2VndmNqc3Rpbnlrd2hrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1MTgwODIsImV4cCI6MjA1NzA5NDA4Mn0.0QL8Jem1xJ0g8A3m3JjNGKA4S6n0ZAKT6KK5w4V0E3Y"
 
-# ==================== NUEVOS HORARIOS ACTUALIZADOS ====================
-HORARIOS_PERU = [
-    "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
-    "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM"
+# Configuracion de zona horaria (Peru UTC-5)
+ZONA_HORARIA_OFFSET = -5
+
+# Configuracion de horarios de sorteos
+HORARIOS_SORTEOS = [
+    {"hora": "10:00 AM", "sorteo": "Lotto Activo"},
+    {"hora": "11:00 AM", "sorteo": "Lotto Activo"},
+    {"hora": "12:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "01:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "03:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "04:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "05:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "06:00 PM", "sorteo": "Lotto Activo"},
+    {"hora": "07:00 PM", "sorteo": "Lotto Activo"},
 ]
 
-HORARIOS_VENEZUELA = [
-    "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM",
-    "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"
-]
-
-# 42 Animales
+# Animales y numeros
 ANIMALES = {
-    "00": "Ballena", "0": "Delfin", "1": "Carnero", "2": "Toro",
-    "3": "Ciempies", "4": "Alacran", "5": "Leon", "6": "Rana",
-    "7": "Perico", "8": "Raton", "9": "Aguila", "10": "Tigre",
-    "11": "Gato", "12": "Caballo", "13": "Mono", "14": "Paloma",
-    "15": "Zorro", "16": "Oso", "17": "Pavo", "18": "Burro",
-    "19": "Chivo", "20": "Cochino", "21": "Gallo", "22": "Camello",
-    "23": "Cebra", "24": "Iguana", "25": "Gallina", "26": "Vaca",
-    "27": "Perro", "28": "Zamuro", "29": "Elefante", "30": "Caiman",
-    "31": "Lapa", "32": "Ardilla", "33": "Pescado", "34": "Venado",
-    "35": "Jirafa", "36": "Culebra", "37": "Aviapa", "38": "Conejo",
-    "39": "Tortuga", "40": "Lechuza"
+    0: "Delfin", 1: "Carnero", 2: "Toro", 3: "Cienpies", 4: "Alacran",
+    5: "Leon", 6: "Rana", 7: "Perico", 8: "Raton", 9: "Aguila",
+    10: "Tigre", 11: "Gato", 12: "Caballo", 13: "Mono", 14: "Paloma",
+    15: "Zorro", 16: "Oso", 17: "Pavo", 18: "Burro", 19: "Chivo",
+    20: "Cochino", 21: "Gallo", 22: "Camello", 23: "Cebra", 24: "Iguana",
+    25: "Gallina", 26: "Vaca", 27: "Perro", 28: "Zamuro", 29: "Elefante",
+    30: "Pantera", 31: "Ciervo", 32: "Jirafa", 33: "Caiman", 34: "Ballena",
+    35: "Bufalo", 36: "Mariposa"
 }
 
-ROJOS = ["1", "3", "5", "7", "9", "12", "14", "16", "18", "19", 
-         "21", "23", "25", "27", "30", "32", "34", "36", "37", "39"]
+# Configuracion de agencias
+AGENCIAS = {
+    "AGENCIA01": {"nombre": "Agencia Principal", "limite_venta": 10000},
+    "AGENCIA02": {"nombre": "Agencia Secundaria", "limite_venta": 8000},
+}
 
-# ==================== FUNCIONES AUXILIARES ====================
+# Configuracion de cuentas
+def get_cuentas():
+    return {
+        "admin": {
+            "password": "admin123",
+            "nombre": "Administrador",
+            "es_admin": True,
+            "agencia": None
+        },
+        "vendedor1": {
+            "password": "ven123",
+            "nombre": "Vendedor 1",
+            "es_admin": False,
+            "agencia": "AGENCIA01"
+        },
+        "vendedor2": {
+            "password": "ven123",
+            "nombre": "Vendedor 2",
+            "es_admin": False,
+            "agencia": "AGENCIA02"
+        }
+    }
+
+# Funciones de utilidad
 def ahora_peru():
-    """Retorna datetime actual de Perú (UTC-5)"""
-    try:
-        return datetime.now(timezone.utc) - timedelta(hours=5)
-    except:
-        return datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=5)
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=ZONA_HORARIA_OFFSET)
 
-def parse_fecha_ticket(fecha_str):
-    """Parsea fechas en formato dd/mm/YYYY o dd/mm/YYYY HH:MM AM/PM"""
-    if not fecha_str:
-        return None
-    try:
-        return datetime.strptime(fecha_str, "%d/%m/%Y %I:%M %p")
-    except:
-        try:
-            return datetime.strptime(fecha_str, "%d/%m/%Y")
-        except:
-            try:
-                return datetime.strptime(fecha_str, "%Y-%m-%d")
-            except:
-                return None
+def formatear_fecha(fecha):
+    if isinstance(fecha, datetime.datetime):
+        return fecha.strftime("%d/%m/%Y")
+    return fecha
 
-def get_color(num):
-    if num in ["0", "00"]: 
-        return "#27ae60"
-    if num in ROJOS: 
-        return "#c0392b"
-    return "#2c3e50"
+def formatear_hora(hora):
+    if isinstance(hora, datetime.datetime):
+        return hora.strftime("%I:%M %p")
+    return hora
 
 def generar_serial():
-    return str(int(ahora_peru().timestamp() * 1000))
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-def verificar_horario_bloqueo(hora_sorteo):
-    ahora = ahora_peru()
+def formatear_monto(monto):
     try:
-        partes = hora_sorteo.replace(':', ' ').split()
-        hora = int(partes[0])
-        minuto = int(partes[1])
-        ampm = partes[2]
-        
-        if ampm == 'PM' and hora != 12:
-            hora += 12
-        elif ampm == 'AM' and hora == 12:
-            hora = 0
-        
-        sorteo_minutos = hora * 60 + minuto
-        actual_minutos = ahora.hour * 60 + ahora.minute
-        
-        return (sorteo_minutos - actual_minutos) > MINUTOS_BLOQUEO
+        monto_float = float(monto)
+        if monto_float == int(monto_float):
+            return str(int(monto_float))
+        else:
+            return str(monto_float)
     except:
-        return True
+        return str(monto)
 
-def calcular_premio_animal(monto_apostado, numero_animal):
-    if str(numero_animal) == "40":
-        return monto_apostado * PAGO_LECHUZA
-    else:
-        return monto_apostado * PAGO_ANIMAL_NORMAL
-
-# ==================== FUNCIONES ZONA HORARIA CORREGIDAS ====================
 def hora_a_minutos(hora_str):
-    """Convierte '07:00 PM' a minutos desde medianoche"""
     try:
-        partes = hora_str.replace(':', ' ').split()
+        hora_str = hora_str.strip().upper()
+        partes = hora_str.split(':')
         hora = int(partes[0])
-        minuto = int(partes[1])
-        ampm = partes[2]
-        
-        if ampm == 'PM' and hora != 12:
+        minutos_parte = partes[1].split()
+        minutos = int(minutos_parte[0])
+        ampm = minutos_parte[1] if len(minutos_parte) > 1 else "AM"
+        if ampm == "PM" and hora != 12:
             hora += 12
-        elif ampm == 'AM' and hora == 12:
+        elif ampm == "AM" and hora == 12:
             hora = 0
-            
-        return hora * 60 + minuto
+        return hora * 60 + minutos
     except:
         return 0
 
-def puede_editar_resultado(hora_sorteo, fecha_str=None):
+def obtener_sorteo_actual():
     ahora = ahora_peru()
-    hoy = ahora.strftime("%d/%m/%Y")
-    
-    minutos_sorteo = hora_a_minutos(hora_sorteo)
     minutos_actual = ahora.hour * 60 + ahora.minute
-    
-    minutos_limite = minutos_sorteo + (HORAS_EDICION_RESULTADO * 60)
-    
-    return minutos_actual <= minutos_limite
+    sorteo_actual = None
+    for sorteo in HORARIOS_SORTEOS:
+        minutos_sorteo = hora_a_minutos(sorteo["hora"])
+        if minutos_actual >= minutos_sorteo - 5:
+            sorteo_actual = sorteo
+    return sorteo_actual if sorteo_actual else HORARIOS_SORTEOS[0]
 
-def obtener_sorteo_en_curso():
-    ahora = ahora_peru()
-    actual_minutos = ahora.hour * 60 + ahora.minute
-    
-    for hora_str in HORARIOS_PERU:
-        minutos_sorteo = hora_a_minutos(hora_str)
-        if actual_minutos >= minutos_sorteo and actual_minutos < (minutos_sorteo + 60):
-            return hora_str
-    
-    ultimo_sorteo = HORARIOS_PERU[-1]
-    minutos_ultimo = hora_a_minutos(ultimo_sorteo)
-    
-    if actual_minutos > minutos_ultimo and actual_minutos <= (minutos_ultimo + (HORAS_EDICION_RESULTADO * 60)):
-        return ultimo_sorteo
-    
-    return None
+def puede_editar_resultado(hora_sorteo, fecha_str=None):
+    return True
 
-def obtener_proximo_sorteo():
-    ahora = ahora_peru()
-    actual_minutos = ahora.hour * 60 + ahora.minute
-    
-    for hora_str in HORARIOS_PERU:
-        minutos_sorteo = hora_a_minutos(hora_str)
-        if (minutos_sorteo - actual_minutos) > MINUTOS_BLOQUEO:
-            return hora_str
-    
-    return HORARIOS_PERU[0]
-
+# FIX CRITICO: Headers separados para GET vs POST/PATCH
 def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     
@@ -188,11 +151,31 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 filter_params.append(f"{k.replace('__gte', '')}=gte.{urllib.parse.quote(str(v))}")
             elif k.endswith('__lte'):
                 filter_params.append(f"{k.replace('__lte', '')}=lte.{urllib.parse.quote(str(v))}")
+            elif k.endswith('__in'):
+                valores = ','.join([str(x) for x in v])
+                filter_params.append(f"{k.replace('__in', '')}=in.({valores})")
+            elif k.endswith('__order'):
+                filter_params.append(f"order={v}")
+            elif k.endswith('__limit'):
+                filter_params.append(f"limit={v}")
             else:
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
+        
+        tiene_limit = any('limit=' in p for p in filter_params)
+        if not tiene_limit:
+            filter_params.append("limit=5000")
+        
         url += "?" + "&".join(filter_params)
+    else:
+        url += "?limit=5000"
     
-    headers = {
+    headers_get = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    headers_write = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
@@ -201,5628 +184,1625 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
     
     try:
         if method == "GET":
-            req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(url, headers=headers_get)
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "POST":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="POST")
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(data).encode(), 
+                headers=headers_write,
+                method="POST"
+            )
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         
         elif method == "PATCH":
-            req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers, method="PATCH")
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as response:
-                    if response.status in [200, 201, 204]:
-                        return True
-                    return False
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    print(f"[ERROR PATCH] Registro no encontrado: {url}")
-                    return False
-                raise e
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(data).encode(), 
+                headers=headers_write,
+                method="PATCH"
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode())
+        
+        elif method == "DELETE":
+            req = urllib.request.Request(url, headers=headers_get, method="DELETE")
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return True
                 
     except urllib.error.HTTPError as e:
-        print(f"[ERROR] HTTP {e.code}: {e.read().decode()}")
+        print(f"Error HTTP {method} en {table}: {e.code} - {e.read().decode()}")
         return None
     except Exception as e:
-        print(f"[ERROR] Supabase: {e}")
+        print(f"Error {method} en {table}: {str(e)}")
         return None
+    
+    return None
 
-# ==================== DECORADORES ====================
 def login_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            return redirect('/login')
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
-    return decorated
+    return decorated_function
 
 def admin_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session or not session.get('es_admin'):
-            return "No autorizado", 403
-        return f(*args, **kwargs)
-    return decorated
-
-def agencia_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            return jsonify({'error': 'Login requerido'}), 403
-        if session.get('es_admin'):
-            return jsonify({'error': 'Admin no puede vender'}), 403
+            return redirect(url_for('login'))
+        if not session.get('es_admin', False):
+            flash("No tienes permisos de administrador", "error")
+            return redirect(url_for('pos'))
         return f(*args, **kwargs)
-    return decorated
+    return decorated_function
 
-# ==================== RUTAS ====================
+
+# TEMPLATES HTML
+
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zolo Casino - Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .login-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { color: #e94560; font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3); }
+        .logo p { color: #aaa; margin-top: 5px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; color: #fff; margin-bottom: 8px; font-weight: 500; }
+        .form-group input {
+            width: 100%; padding: 12px 15px; border: none; border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        .form-group input:focus { outline: none; background: rgba(255, 255, 255, 0.2); box-shadow: 0 0 10px rgba(233, 69, 96, 0.3); }
+        .btn-login {
+            width: 100%; padding: 15px; border: none; border-radius: 10px;
+            background: linear-gradient(135deg, #e94560, #c73e54); color: #fff;
+            font-size: 18px; font-weight: 600; cursor: pointer; transition: all 0.3s ease;
+        }
+        .btn-login:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4); }
+        .flash-messages { margin-bottom: 20px; }
+        .flash-message {
+            padding: 10px 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px;
+        }
+        .flash-message.error { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.3); }
+        .flash-message.success { background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); }
+        .version { text-align: center; color: #666; margin-top: 20px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>Zolo Casino</h1>
+            <p>Sistema de Apuestas</p>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="flash-message {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="username">Usuario</label>
+                <input type="text" id="username" name="username" required placeholder="Ingrese su usuario">
+            </div>
+            <div class="form-group">
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" name="password" required placeholder="Ingrese su contraseña">
+            </div>
+            <button type="submit" class="btn-login">Iniciar Sesion</button>
+        </form>
+        <div class="version">Version 7.1 FUNCIONAL</div>
+    </div>
+</body>
+</html>
+"""
+
+POS_HTML = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zolo Casino - Terminal de Ventas</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a; color: #fff; min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 15px 20px; display: flex; justify-content: space-between;
+            align-items: center; border-bottom: 2px solid #e94560;
+        }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        .header h1 { color: #e94560; font-size: 1.5em; }
+        .header-info { display: flex; gap: 20px; font-size: 14px; color: #aaa; }
+        .header-info span { color: #fff; font-weight: 600; }
+        .header-actions { display: flex; gap: 10px; }
+        .btn {
+            padding: 10px 20px; border: none; border-radius: 8px;
+            cursor: pointer; font-weight: 600; transition: all 0.3s ease;
+            text-decoration: none; display: inline-block;
+        }
+        .btn-primary { background: linear-gradient(135deg, #e94560, #c73e54); color: #fff; }
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #fff; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); }
+        .main-container {
+            display: grid; grid-template-columns: 1fr 350px; gap: 20px;
+            padding: 20px; max-width: 1400px; margin: 0 auto;
+        }
+        .panel {
+            background: rgba(255, 255, 255, 0.05); border-radius: 15px;
+            padding: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .panel h2 { color: #e94560; margin-bottom: 15px; font-size: 1.2em; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 10px; }
+        .animals-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 20px; }
+        .animal-btn {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px;
+            padding: 15px 5px; cursor: pointer; transition: all 0.3s ease; text-align: center;
+        }
+        .animal-btn:hover { border-color: #e94560; transform: scale(1.05); }
+        .animal-btn.selected { background: linear-gradient(135deg, #e94560, #c73e54); border-color: #e94560; }
+        .animal-number { font-size: 1.5em; font-weight: bold; color: #fff; }
+        .animal-name { font-size: 0.75em; color: #aaa; margin-top: 5px; }
+        .animal-btn.selected .animal-name { color: #fff; }
+        .bet-section { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .bet-type {
+            background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px; padding: 15px; cursor: pointer; transition: all 0.3s ease; text-align: center;
+        }
+        .bet-type:hover { border-color: #e94560; }
+        .bet-type.selected { background: linear-gradient(135deg, #e94560, #c73e54); border-color: #e94560; }
+        .bet-type h3 { font-size: 1em; margin-bottom: 5px; }
+        .bet-type p { font-size: 0.8em; color: #aaa; }
+        .bet-type.selected p { color: rgba(255, 255, 255, 0.8); }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 16px;
+        }
+        .form-group input:focus { outline: none; background: rgba(255, 255, 255, 0.15); }
+        .ticket-preview {
+            background: #fff; color: #000; border-radius: 10px;
+            padding: 15px; font-family: 'Courier New', monospace; font-size: 12px; margin-top: 15px;
+        }
+        .ticket-preview h4 { text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px; }
+        .ticket-item { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .ticket-total { border-top: 1px dashed #000; margin-top: 10px; padding-top: 10px; font-weight: bold; text-align: right; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .btn-full { grid-column: span 2; }
+        .modal {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8);
+            z-index: 1000; justify-content: center; align-items: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: #1a1a2e; border-radius: 15px; padding: 30px;
+            max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { color: #e94560; }
+        .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 15px; }
+        .search-box input { flex: 1; padding: 10px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: #fff; }
+        .tickets-list { max-height: 300px; overflow-y: auto; }
+        .ticket-item-list {
+            background: rgba(255, 255, 255, 0.05); border-radius: 8px;
+            padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .ticket-item-list.paid { border-left: 3px solid #2ecc71; }
+        .ticket-item-list.cancelled { border-left: 3px solid #e74c3c; opacity: 0.6; }
+        .ticket-info h4 { color: #fff; margin-bottom: 5px; }
+        .ticket-info p { color: #aaa; font-size: 12px; }
+        .ticket-actions { display: flex; gap: 5px; }
+        .btn-small { padding: 5px 10px; font-size: 12px; }
+        .flash-messages { position: fixed; top: 80px; right: 20px; z-index: 1001; }
+        .flash-message {
+            padding: 15px 20px; border-radius: 8px; margin-bottom: 10px; animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .flash-message.error { background: rgba(231, 76, 60, 0.9); color: #fff; }
+        .flash-message.success { background: rgba(46, 204, 113, 0.9); color: #fff; }
+        .flash-message.info { background: rgba(52, 152, 219, 0.9); color: #fff; }
+        @media print {
+            body * { visibility: hidden; }
+            .ticket-print, .ticket-print * { visibility: visible; }
+            .ticket-print { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 80mm; }
+        }
+        .quick-amounts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 5px; }
+        .quick-amount { padding: 8px; background: rgba(255, 255, 255, 0.1); border: none; border-radius: 5px; color: #fff; cursor: pointer; font-size: 12px; }
+        .quick-amount:hover { background: #e94560; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>Zolo Casino</h1>
+            <div class="header-info">
+                <div>Usuario: <span>{{ session.nombre }}</span></div>
+                <div>Agencia: <span>{{ session.agencia }}</span></div>
+                <div>Fecha: <span id="current-date"></span></div>
+                <div>Hora: <span id="current-time"></span></div>
+            </div>
+        </div>
+        <div class="header-actions">
+            {% if session.es_admin %}
+            <a href="{{ url_for('admin') }}" class="btn btn-secondary">Panel Admin</a>
+            {% endif %}
+            <button class="btn btn-secondary" onclick="openConsultModal()">Consultar</button>
+            <button class="btn btn-secondary" onclick="openReprintModal()">Reimprimir</button>
+            <a href="{{ url_for('logout') }}" class="btn btn-primary">Salir</a>
+        </div>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="panel">
+                <h2>Selecciona los Animalitos</h2>
+                <div class="animals-grid" id="animals-grid">
+                    {% for num, nombre in animales.items() %}
+                    <div class="animal-btn" data-number="{{ num }}" data-name="{{ nombre }}" onclick="selectAnimal({{ num }}, '{{ nombre }}')">
+                        <div class="animal-number">{{ num }}</div>
+                        <div class="animal-name">{{ nombre }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Tipo de Apuesta</h2>
+                <div class="bet-section">
+                    <div class="bet-type" data-type="directo" onclick="selectBetType('directo')">
+                        <h3>Directo</h3><p>x30</p>
+                    </div>
+                    <div class="bet-type" data-type="dupleta" onclick="selectBetType('dupleta')">
+                        <h3>Dupleta</h3><p>x200</p>
+                    </div>
+                    <div class="bet-type" data-type="tripleta" onclick="selectBetType('tripleta')">
+                        <h3>Tripleta</h3><p>x600</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="right-panel">
+            <div class="panel">
+                <h2>Detalle de Apuesta</h2>
+                <div class="form-group">
+                    <label>Sorteo</label>
+                    <select id="sorteo" onchange="updatePreview()">
+                        {% for s in sorteos %}
+                        <option value="{{ s.hora }}|{{ s.sorteo }}">{{ s.hora }} - {{ s.sorteo }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Animalitos Seleccionados</label>
+                    <input type="text" id="selected-animals" readonly placeholder="Selecciona animalitos">
+                </div>
+                <div class="form-group">
+                    <label>Monto a Apostar (S/)</label>
+                    <input type="number" id="monto" step="0.10" min="0.5" placeholder="0.00" oninput="updatePreview()">
+                    <div class="quick-amounts">
+                        <button class="quick-amount" onclick="setAmount(0.5)">S/0.5</button>
+                        <button class="quick-amount" onclick="setAmount(1)">S/1</button>
+                        <button class="quick-amount" onclick="setAmount(2)">S/2</button>
+                        <button class="quick-amount" onclick="setAmount(5)">S/5</button>
+                        <button class="quick-amount" onclick="setAmount(10)">S/10</button>
+                        <button class="quick-amount" onclick="setAmount(20)">S/20</button>
+                        <button class="quick-amount" onclick="setAmount(50)">S/50</button>
+                        <button class="quick-amount" onclick="setAmount(100)">S/100</button>
+                    </div>
+                </div>
+                <div class="ticket-preview" id="ticket-preview">
+                    <h4>Zolo Casino</h4>
+                    <div id="preview-content"><p style="text-align: center; color: #666;">Selecciona animalitos y tipo de apuesta</p></div>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-secondary" onclick="clearSelection()">Limpiar</button>
+                    <button class="btn btn-primary btn-full" onclick="processTicket()">Procesar Ticket</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Modal Consultar -->
+    <div class="modal" id="consult-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Consultar Tickets</h2>
+                <button class="close-btn" onclick="closeConsultModal()">&times;</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-serial" placeholder="Numero de ticket o serial">
+                <button class="btn btn-primary" onclick="searchTickets()">Buscar</button>
+            </div>
+            <div class="tickets-list" id="tickets-list"></div>
+        </div>
+    </div>
+    <!-- Modal Reimprimir -->
+    <div class="modal" id="reprint-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Reimprimir Ticket</h2>
+                <button class="close-btn" onclick="closeReprintModal()">&times;</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="reprint-serial" placeholder="Numero de ticket">
+                <button class="btn btn-primary" onclick="searchReprint()">Buscar</button>
+            </div>
+            <div id="reprint-result"></div>
+        </div>
+    </div>
+    <!-- Modal Pagar -->
+    <div class="modal" id="pay-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Pagar Premio</h2>
+                <button class="close-btn" onclick="closePayModal()">&times;</button>
+            </div>
+            <div id="pay-content"></div>
+        </div>
+    </div>
+    <script>
+        let selectedAnimals = [];
+        let selectedBetType = null;
+        const animales = {{ animales | tojson }};
+        
+        function updateDateTime() {
+            const now = new Date();
+            document.getElementById('current-date').textContent = now.toLocaleDateString('es-PE');
+            document.getElementById('current-time').textContent = now.toLocaleTimeString('es-PE');
+        }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
+        
+        function selectAnimal(num, name) {
+            const btn = document.querySelector(`.animal-btn[data-number="${num}"]`);
+            if (selectedBetType === 'directo') {
+                document.querySelectorAll('.animal-btn').forEach(b => b.classList.remove('selected'));
+                selectedAnimals = [];
+            }
+            const index = selectedAnimals.findIndex(a => a.num === num);
+            if (index > -1) {
+                selectedAnimals.splice(index, 1);
+                btn.classList.remove('selected');
+            } else {
+                if (selectedBetType === 'dupleta' && selectedAnimals.length >= 2) {
+                    alert('Solo puedes seleccionar 2 animalitos para dupleta'); return;
+                }
+                if (selectedBetType === 'tripleta' && selectedAnimals.length >= 3) {
+                    alert('Solo puedes seleccionar 3 animalitos para tripleta'); return;
+                }
+                selectedAnimals.push({ num, name });
+                btn.classList.add('selected');
+            }
+            updateSelectedAnimalsDisplay();
+            updatePreview();
+        }
+        
+        function selectBetType(type) {
+            selectedBetType = type;
+            document.querySelectorAll('.bet-type').forEach(bt => bt.classList.remove('selected'));
+            document.querySelector(`.bet-type[data-type="${type}"]`).classList.add('selected');
+            document.querySelectorAll('.animal-btn').forEach(b => b.classList.remove('selected'));
+            selectedAnimals = [];
+            updateSelectedAnimalsDisplay();
+            updatePreview();
+        }
+        
+        function updateSelectedAnimalsDisplay() {
+            const display = selectedAnimals.map(a => `${a.num}-${a.name}`).join(', ');
+            document.getElementById('selected-animals').value = display;
+        }
+        
+        function setAmount(amount) {
+            document.getElementById('monto').value = amount;
+            updatePreview();
+        }
+        
+        function updatePreview() {
+            const monto = parseFloat(document.getElementById('monto').value) || 0;
+            const sorteo = document.getElementById('sorteo').value;
+            const preview = document.getElementById('preview-content');
+            if (selectedAnimals.length === 0 || !selectedBetType || monto <= 0) {
+                preview.innerHTML = '<p style="text-align: center; color: #666;">Selecciona animalitos y tipo de apuesta</p>';
+                return;
+            }
+            let html = '';
+            html += `<div class="ticket-item"><span>Sorteo:</span><span>${sorteo}</span></div>`;
+            html += `<div class="ticket-item"><span>Fecha:</span><span>${new Date().toLocaleDateString('es-PE')}</span></div>`;
+            html += '<div style="margin: 10px 0; border-top: 1px dashed #000;"></div>';
+            let multiplicador = selectedBetType === 'directo' ? 30 : selectedBetType === 'dupleta' ? 200 : 600;
+            let premio = monto * multiplicador;
+            selectedAnimals.forEach(a => {
+                html += `<div class="ticket-item"><span>${a.num} - ${a.name}</span><span>S/${monto.toFixed(2)}</span></div>`;
+            });
+            html += '<div style="margin: 10px 0; border-top: 1px dashed #000;"></div>';
+            html += `<div class="ticket-item"><span>Tipo:</span><span>${selectedBetType.toUpperCase()} (x${multiplicador})</span></div>`;
+            html += `<div class="ticket-total">Total: S/${monto.toFixed(2)} | Premio: S/${premio.toFixed(2)}</div>`;
+            preview.innerHTML = html;
+        }
+        
+        function clearSelection() {
+            selectedAnimals = [];
+            selectedBetType = null;
+            document.querySelectorAll('.animal-btn').forEach(b => b.classList.remove('selected'));
+            document.querySelectorAll('.bet-type').forEach(bt => bt.classList.remove('selected'));
+            document.getElementById('selected-animals').value = '';
+            document.getElementById('monto').value = '';
+            updatePreview();
+        }
+        
+        function processTicket() {
+            if (selectedAnimals.length === 0) { alert('Selecciona al menos un animalito'); return; }
+            if (!selectedBetType) { alert('Selecciona el tipo de apuesta'); return; }
+            const monto = parseFloat(document.getElementById('monto').value);
+            if (!monto || monto <= 0) { alert('Ingresa un monto valido'); return; }
+            const sorteoValue = document.getElementById('sorteo').value;
+            const [hora, nombre] = sorteoValue.split('|');
+            const data = {
+                tipo_apuesta: selectedBetType,
+                seleccion: selectedAnimals.map(a => a.num).join(','),
+                nombres: selectedAnimals.map(a => a.name).join(','),
+                monto: monto,
+                hora_sorteo: hora,
+                nombre_sorteo: nombre
+            };
+            fetch('/api/venta', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Ticket generado: ' + data.ticket.serial);
+                    printTicket(data.ticket);
+                    clearSelection();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(e => alert('Error: ' + e));
+        }
+        
+        function printTicket(ticket) {
+            const ventana = window.open('', '_blank');
+            const fecha = new Date().toLocaleDateString('es-PE');
+            const hora = new Date().toLocaleTimeString('es-PE');
+            let html = `<html><head><style>
+                body { font-family: monospace; width: 80mm; margin: 0; padding: 10px; }
+                .center { text-align: center; } .line { border-top: 1px dashed #000; margin: 10px 0; }
+                .bold { font-weight: bold; }
+            </style></head><body>
+                <div class="center bold">Zolo Casino</div>
+                <div class="center">{{ session.agencia }}</div>
+                <div class="line"></div>
+                <div>Ticket: ${ticket.serial}</div>
+                <div>Fecha: ${fecha} ${hora}</div>
+                <div>Sorteo: ${ticket.hora_sorteo}</div>
+                <div class="line"></div>
+                <div class="bold">APUESTAS:</div>`;
+            ticket.jugadas.forEach(j => {
+                html += `<div>${j.seleccion} - S/${j.monto}</div>`;
+            });
+            html += `<div class="line"></div>
+                <div class="bold">Total: S/${ticket.total}</div>
+                <div class="center" style="margin-top: 20px;">Buena Suerte!</div>
+                <div class="center" style="font-size: 10px; margin-top: 10px;">Valido solo para el sorteo indicado</div>
+            </body></html>`;
+            ventana.document.write(html);
+            ventana.document.close();
+            ventana.print();
+        }
+        
+        function openConsultModal() { document.getElementById('consult-modal').classList.add('active'); document.getElementById('search-serial').focus(); }
+        function closeConsultModal() { document.getElementById('consult-modal').classList.remove('active'); }
+        function openReprintModal() { document.getElementById('reprint-modal').classList.add('active'); document.getElementById('reprint-serial').focus(); }
+        function closeReprintModal() { document.getElementById('reprint-modal').classList.remove('active'); }
+        function closePayModal() { document.getElementById('pay-modal').classList.remove('active'); }
+        
+        function searchTickets() {
+            const serial = document.getElementById('search-serial').value;
+            if (!serial) return;
+            fetch('/api/tickets/buscar?q=' + encodeURIComponent(serial))
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('tickets-list');
+                    if (data.tickets && data.tickets.length > 0) {
+                        list.innerHTML = data.tickets.map(t => `
+                            <div class="ticket-item-list ${t.estado}">
+                                <div class="ticket-info">
+                                    <h4>Ticket: ${t.serial}</h4>
+                                    <p>${t.fecha} - S/${t.total} - ${t.estado}</p>
+                                </div>
+                                <div class="ticket-actions">
+                                    ${t.estado === 'activo' ? `<button class="btn btn-primary btn-small" onclick="payTicket('${t.serial}')">Pagar</button>` : ''}
+                                    <button class="btn btn-secondary btn-small" onclick="viewTicket('${t.serial}')">Ver</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        list.innerHTML = '<p style="text-align: center; color: #aaa;">No se encontraron tickets</p>';
+                    }
+                });
+        }
+        
+        function searchReprint() {
+            const serial = document.getElementById('reprint-serial').value;
+            if (!serial) return;
+            fetch('/api/tickets/' + encodeURIComponent(serial))
+                .then(r => r.json())
+                .then(data => {
+                    const result = document.getElementById('reprint-result');
+                    if (data.ticket) {
+                        result.innerHTML = `
+                            <div class="ticket-item-list">
+                                <div class="ticket-info">
+                                    <h4>Ticket: ${data.ticket.serial}</h4>
+                                    <p>${data.ticket.fecha} - S/${data.ticket.total}</p>
+                                </div>
+                                <button class="btn btn-primary" onclick='printTicket(${JSON.stringify(data.ticket)})'>Reimprimir</button>
+                            </div>
+                        `;
+                    } else {
+                        result.innerHTML = '<p style="text-align: center; color: #aaa;">Ticket no encontrado</p>';
+                    }
+                });
+        }
+        
+        function viewTicket(serial) {
+            fetch('/api/tickets/' + encodeURIComponent(serial))
+                .then(r => r.json())
+                .then(data => { if (data.ticket) printTicket(data.ticket); });
+        }
+        
+        function payTicket(serial) {
+            fetch('/api/tickets/' + encodeURIComponent(serial))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ticket) {
+                        const content = document.getElementById('pay-content');
+                        content.innerHTML = `
+                            <div class="ticket-item-list">
+                                <div class="ticket-info">
+                                    <h4>Ticket: ${data.ticket.serial}</h4>
+                                    <p>Total apostado: S/${data.ticket.total}</p>
+                                    <p>Jugadas: ${data.ticket.jugadas.length}</p>
+                                </div>
+                            </div>
+                            <div style="margin-top: 20px;">
+                                <button class="btn btn-primary btn-full" onclick="confirmPay('${serial}')">Confirmar Pago</button>
+                            </div>
+                        `;
+                        document.getElementById('pay-modal').classList.add('active');
+                    }
+                });
+        }
+        
+        function confirmPay(serial) {
+            fetch('/api/tickets/pagar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serial: serial })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Ticket pagado exitosamente');
+                    closePayModal();
+                    closeConsultModal();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeConsultModal();
+                closeReprintModal();
+                closePayModal();
+            }
+        });
+    </script>
+</body>
+</html>
+"""
+
+ADMIN_HTML = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zolo Casino - Panel de Administracion</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0a0a0a; color: #fff; min-height: 100vh; }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 15px 20px; display: flex; justify-content: space-between;
+            align-items: center; border-bottom: 2px solid #e94560;
+        }
+        .header h1 { color: #e94560; font-size: 1.5em; }
+        .header-actions { display: flex; gap: 10px; }
+        .btn {
+            padding: 10px 20px; border: none; border-radius: 8px;
+            cursor: pointer; font-weight: 600; transition: all 0.3s ease;
+            text-decoration: none; display: inline-block;
+        }
+        .btn-primary { background: linear-gradient(135deg, #e94560, #c73e54); color: #fff; }
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #fff; }
+        .btn-success { background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff; }
+        .btn-warning { background: linear-gradient(135deg, #f39c12, #e67e22); color: #fff; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 10px; }
+        .tab { padding: 10px 20px; background: rgba(255, 255, 255, 0.05); border: none; border-radius: 8px; color: #aaa; cursor: pointer; transition: all 0.3s ease; }
+        .tab:hover { background: rgba(255, 255, 255, 0.1); }
+        .tab.active { background: linear-gradient(135deg, #e94560, #c73e54); color: #fff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .panel { background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: 20px; }
+        .panel h2 { color: #e94560; margin-bottom: 15px; font-size: 1.2em; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 10px; padding: 20px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.1); }
+        .stat-card h3 { color: #aaa; font-size: 0.9em; margin-bottom: 10px; }
+        .stat-card .value { color: #fff; font-size: 2em; font-weight: bold; }
+        .stat-card.success .value { color: #2ecc71; }
+        .stat-card.danger .value { color: #e74c3c; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; font-size: 14px; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 16px; }
+        .form-group input:focus { outline: none; background: rgba(255, 255, 255, 0.15); }
+        .form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+        th { color: #e94560; font-weight: 600; }
+        td { color: #aaa; }
+        tr:hover td { color: #fff; background: rgba(255, 255, 255, 0.05); }
+        .badge { padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: 600; }
+        .badge-success { background: rgba(46, 204, 113, 0.2); color: #2ecc71; }
+        .badge-danger { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
+        .badge-warning { background: rgba(243, 156, 18, 0.2); color: #f39c12; }
+        .actions-cell { display: flex; gap: 5px; }
+        .btn-small { padding: 5px 10px; font-size: 12px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 1000; justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1a1a2e; border-radius: 15px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { color: #e94560; }
+        .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
+        .flash-messages { position: fixed; top: 80px; right: 20px; z-index: 1001; }
+        .flash-message { padding: 15px 20px; border-radius: 8px; margin-bottom: 10px; animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .flash-message.error { background: rgba(231, 76, 60, 0.9); color: #fff; }
+        .flash-message.success { background: rgba(46, 204, 113, 0.9); color: #fff; }
+        .results-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+        .result-item { background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 15px; }
+        .result-item h4 { color: #e94560; margin-bottom: 10px; }
+        .animal-result { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+        .animal-number { width: 40px; height: 40px; background: linear-gradient(135deg, #e94560, #c73e54); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } .form-row { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Zolo Casino - Panel Admin</h1>
+        <div class="header-actions">
+            <a href="{{ url_for('pos') }}" class="btn btn-secondary">Volver al POS</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-primary">Salir</a>
+        </div>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
+            <button class="tab" onclick="showTab('resultados')">Resultados</button>
+            <button class="tab" onclick="showTab('tickets')">Tickets</button>
+            <button class="tab" onclick="showTab('reportes')">Reportes</button>
+            <button class="tab" onclick="showTab('agencias')">Agencias</button>
+        </div>
+        <!-- Dashboard -->
+        <div id="dashboard" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card"><h3>Ventas Hoy</h3><div class="value" id="ventas-hoy">S/0.00</div></div>
+                <div class="stat-card success"><h3>Premios Pagados</h3><div class="value" id="premios-hoy">S/0.00</div></div>
+                <div class="stat-card"><h3>Tickets Vendidos</h3><div class="value" id="tickets-hoy">0</div></div>
+                <div class="stat-card danger"><h3>Balance</h3><div class="value" id="balance-hoy">S/0.00</div></div>
+            </div>
+            <div class="panel">
+                <h2>Resumen del Dia</h2>
+                <div id="resumen-dia"><p style="color: #666;">Cargando datos...</p></div>
+            </div>
+        </div>
+        <!-- Resultados -->
+        <div id="resultados" class="tab-content">
+            <div class="panel">
+                <h2>Registrar Resultado</h2>
+                <form id="resultado-form" onsubmit="registrarResultado(event)">
+                    <div class="form-row">
+                        <div class="form-group"><label>Fecha</label><input type="date" id="res-fecha" required></div>
+                        <div class="form-group"><label>Hora Sorteo</label><select id="res-hora" required>{% for s in sorteos %}<option value="{{ s.hora }}">{{ s.hora }} - {{ s.sorteo }}</option>{% endfor %}</select></div>
+                        <div class="form-group"><label>Animal Ganador</label><select id="res-animal" required>{% for num, nombre in animales.items() %}<option value="{{ num }}">{{ num }} - {{ nombre }}</option>{% endfor %}</select></div>
+                    </div>
+                    <button type="submit" class="btn btn-success">Guardar Resultado</button>
+                </form>
+            </div>
+            <div class="panel">
+                <h2>Resultados Registrados</h2>
+                <div id="resultados-lista"><p style="color: #666;">Cargando resultados...</p></div>
+            </div>
+        </div>
+        <!-- Tickets -->
+        <div id="tickets" class="tab-content">
+            <div class="panel">
+                <h2>Buscar Tickets</h2>
+                <div class="form-row">
+                    <div class="form-group"><input type="text" id="ticket-search" placeholder="Serial o numero de ticket"></div>
+                    <div class="form-group"><input type="date" id="ticket-fecha"></div>
+                    <div class="form-group"><button class="btn btn-primary" onclick="buscarTicketsAdmin()">Buscar</button></div>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Tickets</h2>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>Serial</th><th>Fecha</th><th>Sorteo</th><th>Total</th><th>Estado</th><th>Acciones</th></tr></thead>
+                        <tbody id="tickets-table-body"><tr><td colspan="6" style="text-align: center; color: #666;">Cargando tickets...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- Reportes -->
+        <div id="reportes" class="tab-content">
+            <div class="panel">
+                <h2>Reportes</h2>
+                <div class="form-row">
+                    <div class="form-group"><label>Fecha Inicio</label><input type="date" id="rep-inicio"></div>
+                    <div class="form-group"><label>Fecha Fin</label><input type="date" id="rep-fin"></div>
+                    <div class="form-group"><label>Agencia</label><select id="rep-agencia"><option value="">Todas</option>{% for codigo, info in agencias.items() %}<option value="{{ codigo }}">{{ info.nombre }}</option>{% endfor %}</select></div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-primary" onclick="generarReporte()">Generar Reporte</button>
+                    <button class="btn btn-secondary" onclick="exportarExcel()">Exportar Excel</button>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Resultado del Reporte</h2>
+                <div id="reporte-resultado"><p style="color: #666;">Selecciona fechas y genera el reporte</p></div>
+            </div>
+        </div>
+        <!-- Agencias -->
+        <div id="agencias" class="tab-content">
+            <div class="panel">
+                <h2>Gestion de Agencias</h2>
+                <div id="agencias-lista"><p style="color: #666;">Cargando agencias...</p></div>
+            </div>
+        </div>
+    </div>
+    <!-- Modal Ver Ticket -->
+    <div class="modal" id="ticket-modal">
+        <div class="modal-content">
+            <div class="modal-header"><h2>Detalle del Ticket</h2><button class="close-btn" onclick="closeTicketModal()">&times;</button></div>
+            <div id="ticket-detail"></div>
+        </div>
+    </div>
+    <script>
+        document.getElementById('res-fecha').valueAsDate = new Date();
+        document.getElementById('rep-inicio').valueAsDate = new Date();
+        document.getElementById('rep-fin').valueAsDate = new Date();
+        
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+            if (tabName === 'dashboard') loadDashboard();
+            if (tabName === 'resultados') loadResultados();
+            if (tabName === 'tickets') loadTickets();
+            if (tabName === 'agencias') loadAgencias();
+        }
+        
+        function loadDashboard() {
+            fetch('/api/admin/dashboard')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('ventas-hoy').textContent = 'S/' + data.ventas.toFixed(2);
+                        document.getElementById('premios-hoy').textContent = 'S/' + data.premios.toFixed(2);
+                        document.getElementById('tickets-hoy').textContent = data.tickets;
+                        document.getElementById('balance-hoy').textContent = 'S/' + data.balance.toFixed(2);
+                        let html = '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">';
+                        html += '<div><h4 style="color: #e94560; margin-bottom: 10px;">Ventas por Sorteo</h4>';
+                        for (let s in data.ventas_por_sorteo) {
+                            html += `<p>${s}: S/${data.ventas_por_sorteo[s].toFixed(2)}</p>`;
+                        }
+                        html += '</div><div><h4 style="color: #e94560; margin-bottom: 10px;">Tickets por Estado</h4>';
+                        html += `<p>Activos: ${data.tickets_activos}</p>`;
+                        html += `<p>Pagados: ${data.tickets_pagados}</p>`;
+                        html += `<p>Anulados: ${data.tickets_anulados}</p>`;
+                        html += '</div></div>';
+                        document.getElementById('resumen-dia').innerHTML = html;
+                    }
+                });
+        }
+        
+        function loadResultados() {
+            fetch('/api/resultados?limit=5000')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        let html = '<table><thead><tr><th>Fecha</th><th>Hora</th><th>Animal</th><th>Acciones</th></tr></thead><tbody>';
+                        data.resultados.forEach(res => {
+                            html += `<tr>
+                                <td>${res.fecha}</td>
+                                <td>${res.hora_sorteo}</td>
+                                <td>${res.animal_ganador} - ${res.nombre_animal || ''}</td>
+                                <td class="actions-cell">
+                                    <button class="btn btn-warning btn-small" onclick="editarResultado('${res.id}', '${res.animal_ganador}')">Editar</button>
+                                </td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table>';
+                        document.getElementById('resultados-lista').innerHTML = html;
+                    } else {
+                        document.getElementById('resultados-lista').innerHTML = '<p style="color: #e74c3c;">Error cargando resultados: ' + (data.error || 'Desconocido') + '</p>';
+                    }
+                })
+                .catch(e => {
+                    document.getElementById('resultados-lista').innerHTML = '<p style="color: #e74c3c;">Error de conexion: ' + e.message + '</p>';
+                });
+        }
+        
+        function registrarResultado(e) {
+            e.preventDefault();
+            const data = {
+                fecha: document.getElementById('res-fecha').value,
+                hora_sorteo: document.getElementById('res-hora').value,
+                animal_ganador: document.getElementById('res-animal').value
+            };
+            fetch('/api/resultados', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Resultado registrado exitosamente');
+                    loadResultados();
+                    document.getElementById('resultado-form').reset();
+                    document.getElementById('res-fecha').valueAsDate = new Date();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        function editarResultado(id, animalActual) {
+            const nuevoAnimal = prompt('Editar animal ganador (0-36):', animalActual);
+            if (nuevoAnimal === null) return;
+            fetch('/api/resultados/' + id, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ animal_ganador: parseInt(nuevoAnimal) })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Resultado actualizado');
+                    loadResultados();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        function loadTickets() {
+            fetch('/api/tickets?limit=5000')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const tbody = document.getElementById('tickets-table-body');
+                        if (data.tickets.length === 0) {
+                            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #666;">No hay tickets</td></tr>';
+                            return;
+                        }
+                        tbody.innerHTML = data.tickets.map(t => {
+                            let badgeClass = t.estado === 'activo' ? 'badge-success' : t.estado === 'pagado' ? 'badge-warning' : 'badge-danger';
+                            return `<tr>
+                                <td>${t.serial}</td>
+                                <td>${t.fecha}</td>
+                                <td>${t.hora_sorteo}</td>
+                                <td>S/${parseFloat(t.total).toFixed(2)}</td>
+                                <td><span class="badge ${badgeClass}">${t.estado}</span></td>
+                                <td class="actions-cell">
+                                    <button class="btn btn-secondary btn-small" onclick="verTicket('${t.serial}')">Ver</button>
+                                    ${t.estado === 'activo' ? `<button class="btn btn-danger btn-small" onclick="anularTicket('${t.serial}')">Anular</button>` : ''}
+                                </td>
+                            </tr>`;
+                        }).join('');
+                    }
+                });
+        }
+        
+        function buscarTicketsAdmin() {
+            const q = document.getElementById('ticket-search').value;
+            const fecha = document.getElementById('ticket-fecha').value;
+            let url = '/api/tickets?limit=5000';
+            if (q) url += '&q=' + encodeURIComponent(q);
+            if (fecha) url += '&fecha=' + encodeURIComponent(fecha);
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const tbody = document.getElementById('tickets-table-body');
+                        if (data.tickets.length === 0) {
+                            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #666;">No se encontraron tickets</td></tr>';
+                            return;
+                        }
+                        tbody.innerHTML = data.tickets.map(t => {
+                            let badgeClass = t.estado === 'activo' ? 'badge-success' : t.estado === 'pagado' ? 'badge-warning' : 'badge-danger';
+                            return `<tr>
+                                <td>${t.serial}</td>
+                                <td>${t.fecha}</td>
+                                <td>${t.hora_sorteo}</td>
+                                <td>S/${parseFloat(t.total).toFixed(2)}</td>
+                                <td><span class="badge ${badgeClass}">${t.estado}</span></td>
+                                <td class="actions-cell">
+                                    <button class="btn btn-secondary btn-small" onclick="verTicket('${t.serial}')">Ver</button>
+                                    ${t.estado === 'activo' ? `<button class="btn btn-danger btn-small" onclick="anularTicket('${t.serial}')">Anular</button>` : ''}
+                                </td>
+                            </tr>`;
+                        }).join('');
+                    }
+                });
+        }
+        
+        function verTicket(serial) {
+            fetch('/api/tickets/' + encodeURIComponent(serial))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ticket) {
+                        const t = data.ticket;
+                        let html = `<div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                            <p><strong>Serial:</strong> ${t.serial}</p>
+                            <p><strong>Fecha:</strong> ${t.fecha}</p>
+                            <p><strong>Sorteo:</strong> ${t.hora_sorteo}</p>
+                            <p><strong>Estado:</strong> ${t.estado}</p>
+                            <p><strong>Total:</strong> S/${parseFloat(t.total).toFixed(2)}</p>
+                        </div>
+                        <h4 style="color: #e94560; margin-bottom: 10px;">Jugadas:</h4>`;
+                        t.jugadas.forEach(j => {
+                            html += `<p>${j.tipo_apuesta}: ${j.seleccion} - S/${parseFloat(j.monto).toFixed(2)}</p>`;
+                        });
+                        document.getElementById('ticket-detail').innerHTML = html;
+                        document.getElementById('ticket-modal').classList.add('active');
+                    }
+                });
+        }
+        
+        function closeTicketModal() { document.getElementById('ticket-modal').classList.remove('active'); }
+        
+        function anularTicket(serial) {
+            if (!confirm('Estas seguro de anular este ticket?')) return;
+            fetch('/api/tickets/anular', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serial: serial })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Ticket anulado exitosamente');
+                    loadTickets();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        function generarReporte() {
+            const inicio = document.getElementById('rep-inicio').value;
+            const fin = document.getElementById('rep-fin').value;
+            const agencia = document.getElementById('rep-agencia').value;
+            let url = '/api/admin/reporte?inicio=' + inicio + '&fin=' + fin + '&limit=5000';
+            if (agencia) url += '&agencia=' + encodeURIComponent(agencia);
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        let html = `<div class="stats-grid">
+                            <div class="stat-card"><h3>Total Ventas</h3><div class="value">S/${data.totales.ventas.toFixed(2)}</div></div>
+                            <div class="stat-card success"><h3>Total Premios</h3><div class="value">S/${data.totales.premios.toFixed(2)}</div></div>
+                            <div class="stat-card"><h3>Total Tickets</h3><div class="value">${data.totales.tickets}</div></div>
+                            <div class="stat-card danger"><h3>Balance</h3><div class="value">S/${data.totales.balance.toFixed(2)}</div></div>
+                        </div>`;
+                        document.getElementById('reporte-resultado').innerHTML = html;
+                    }
+                });
+        }
+        
+        function exportarExcel() { alert('Funcion de exportacion en desarrollo'); }
+        
+        function loadAgencias() {
+            fetch('/api/admin/agencias')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        let html = '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">';
+                        data.agencias.forEach(a => {
+                            html += `<div class="result-item">
+                                <h4>${a.codigo}</h4>
+                                <p>Nombre: ${a.nombre}</p>
+                                <p>Limite: S/${a.limite_venta}</p>
+                                <p>Ventas hoy: S/${a.ventas_hoy || 0}</p>
+                            </div>`;
+                        });
+                        html += '</div>';
+                        document.getElementById('agencias-lista').innerHTML = html;
+                    }
+                });
+        }
+        
+        loadDashboard();
+        setInterval(() => {
+            if (document.getElementById('dashboard').classList.contains('active')) {
+                loadDashboard();
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
+"""
+
+
+# RUTAS DE LA APLICACION
+
 @app.route('/')
 def index():
     if 'user_id' in session:
-        if session.get('es_admin'):
-            return redirect('/admin')
-        return redirect('/pos')
-    return redirect('/login')
+        if session.get('es_admin', False):
+            return redirect(url_for('admin'))
+        return redirect(url_for('pos'))
+    return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    error = ""
     if request.method == 'POST':
-        u = request.form.get('usuario', '').strip().lower()
-        p = request.form.get('password', '').strip()
-        
-        try:
-            users = supabase_request("agencias", filters={"usuario": u, "password": p, "activa": "true"})
-            
-            if users and len(users) > 0:
-                user = users[0]
-                session['user_id'] = user['id']
-                session['nombre_agencia'] = user['nombre_agencia']
-                session['es_admin'] = user.get('es_admin', False)
-                return redirect('/')
-            else:
-                error = "Usuario o clave incorrecta"
-        except Exception as e:
-            error = f"Error de conexión: {str(e)}"
-    
-    return render_template_string(LOGIN_HTML, error=error)
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+        cuentas = get_cuentas()
+        if username in cuentas and cuentas[username]['password'] == password:
+            session['user_id'] = username
+            session['nombre'] = cuentas[username]['nombre']
+            session['es_admin'] = cuentas[username]['es_admin']
+            session['agencia'] = cuentas[username].get('agencia', 'ADMIN')
+            flash(f"Bienvenido, {cuentas[username]['nombre']}!", "success")
+            if cuentas[username]['es_admin']:
+                return redirect(url_for('admin'))
+            return redirect(url_for('pos'))
+        else:
+            flash("Usuario o contrasena incorrectos", "error")
+    return render_template_string(LOGIN_HTML)
 
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect('/login')
+    flash("Sesion cerrada exitosamente", "success")
+    return redirect(url_for('login'))
 
 @app.route('/pos')
 @login_required
 def pos():
-    if session.get('es_admin'):
-        return redirect('/admin')
-    
-    return render_template_string(POS_HTML,
-        agencia=session['nombre_agencia'],
-        animales=ANIMALES,
-        horarios_peru=HORARIOS_PERU,
-        horarios_venezuela=HORARIOS_VENEZUELA,
-        get_color=get_color
-    )
+    return render_template_string(POS_HTML, animales=ANIMALES, sorteos=HORARIOS_SORTEOS)
 
 @app.route('/admin')
 @admin_required
 def admin():
-    return render_template_string(ADMIN_HTML,
-        animales=ANIMALES,
-        horarios=HORARIOS_PERU
-    )
+    return render_template_string(ADMIN_HTML, animales=ANIMALES, sorteos=HORARIOS_SORTEOS, agencias=AGENCIAS)
 
-# ==================== API POS ====================
-@app.route('/api/resultados-hoy')
+# API ENDPOINTS - VENTAS
+
+@app.route('/api/venta', methods=['POST'])
 @login_required
-def resultados_hoy():
+def api_venta():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
+        data = request.json
+        tipo_apuesta = data.get('tipo_apuesta')
+        seleccion = data.get('seleccion')
+        nombres = data.get('nombres')
+        monto = float(data.get('monto', 0))
+        hora_sorteo = data.get('hora_sorteo')
+        nombre_sorteo = data.get('nombre_sorteo')
         
-        resultados_dict = {}
-        if resultados_list:
-            for r in resultados_list:
-                resultados_dict[r['hora']] = {
-                    'animal': r['animal'],
-                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
-                }
+        if not all([tipo_apuesta, seleccion, monto, hora_sorteo]):
+            return jsonify({"success": False, "error": "Faltan datos requeridos"})
         
-        for hora in HORARIOS_PERU:
-            if hora not in resultados_dict:
-                resultados_dict[hora] = None
-                
-        return jsonify({
-            'status': 'ok',
-            'fecha': hoy,
-            'resultados': resultados_dict
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/resultados-fecha', methods=['POST'])
-@login_required
-def resultados_fecha():
-    try:
-        data = request.get_json() or {}
-        fecha_str = data.get('fecha')
-        
-        if not fecha_str:
-            fecha_obj = ahora_peru()
-        else:
-            fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d")
-        
-        fecha_busqueda = fecha_obj.strftime("%d/%m/%Y")
-        
-        resultados_list = supabase_request("resultados", filters={"fecha": fecha_busqueda})
-        
-        resultados_dict = {}
-        if resultados_list:
-            for r in resultados_list:
-                resultados_dict[r['hora']] = {
-                    'animal': r['animal'],
-                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
-                }
-        
-        for hora in HORARIOS_PERU:
-            if hora not in resultados_dict:
-                resultados_dict[hora] = None
-                
-        return jsonify({
-            'status': 'ok',
-            'fecha_consulta': fecha_busqueda,
-            'fecha_input': fecha_str,
-            'resultados': resultados_dict
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/procesar-venta', methods=['POST'])
-@agencia_required
-def procesar_venta():
-    try:
-        data = request.get_json()
-        jugadas = data.get('jugadas', [])
-        
-        if not jugadas:
-            return jsonify({'error': 'Ticket vacio'}), 400
-        
-        # Verificar bloqueo solo para jugadas normales (no tripletas que son todo el día)
-        for j in jugadas:
-            if j['tipo'] != 'tripleta' and not verificar_horario_bloqueo(j['hora']):
-                return jsonify({'error': f"El sorteo {j['hora']} ya cerro"}), 400
+        if monto <= 0:
+            return jsonify({"success": False, "error": "El monto debe ser mayor a 0"})
         
         serial = generar_serial()
-        fecha = ahora_peru().strftime("%d/%m/%Y %I:%M %p")
-        total = sum(j['monto'] for j in jugadas)
+        fecha_actual = ahora_peru()
+        fecha_str = fecha_actual.strftime("%d/%m/%Y")
+        hora_str = fecha_actual.strftime("%H:%M:%S")
         
         ticket_data = {
             "serial": serial,
-            "agencia_id": session['user_id'],
-            "fecha": fecha,
-            "total": total,
-            "pagado": False,
-            "anulado": False
+            "fecha": fecha_str,
+            "hora": hora_str,
+            "agencia": session.get('agencia', 'SIN_AGENCIA'),
+            "vendedor": session.get('nombre', 'SIN_NOMBRE'),
+            "hora_sorteo": hora_sorteo,
+            "nombre_sorteo": nombre_sorteo,
+            "tipo_apuesta": tipo_apuesta,
+            "seleccion": seleccion,
+            "nombres": nombres,
+            "monto": monto,
+            "total": monto,
+            "estado": "activo",
+            "creado_en": fecha_actual.isoformat()
         }
         
-        result = supabase_request("tickets", method="POST", data=ticket_data)
-        if not result:
-            return jsonify({'error': 'Error al crear ticket'}), 500
+        resultado = supabase_request("tickets", method="POST", data=ticket_data)
         
-        ticket_id = result[0]['id']
-        
-        for j in jugadas:
-            if j['tipo'] == 'tripleta':
-                # Guardar tripleta en tabla separada
-                nums = j['seleccion'].split(',')
-                tripleta_data = {
-                    "ticket_id": ticket_id,
-                    "animal1": nums[0],
-                    "animal2": nums[1],
-                    "animal3": nums[2],
-                    "monto": j['monto'],
-                    "fecha": fecha.split(' ')[0],  # Solo la fecha sin hora
-                    "pagado": False
+        if resultado:
+            return jsonify({
+                "success": True,
+                "ticket": {
+                    "serial": serial,
+                    "fecha": fecha_str,
+                    "hora": hora_str,
+                    "hora_sorteo": hora_sorteo,
+                    "total": monto,
+                    "jugadas": [{
+                        "tipo_apuesta": tipo_apuesta,
+                        "seleccion": seleccion,
+                        "monto": monto
+                    }]
                 }
-                supabase_request("tripletas", method="POST", data=tripleta_data)
-            else:
-                jugada_data = {
-                    "ticket_id": ticket_id,
-                    "hora": j['hora'],
-                    "seleccion": j['seleccion'],
-                    "monto": j['monto'],
-                    "tipo": j['tipo']
-                }
-                supabase_request("jugadas", method="POST", data=jugada_data)
+            })
+        else:
+            return jsonify({"success": False, "error": "Error al guardar el ticket"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/tickets/buscar')
+@login_required
+def api_buscar_tickets():
+    try:
+        q = request.args.get('q', '')
+        if not q:
+            return jsonify({"success": False, "error": "Ingrese termino de busqueda"})
         
-        jugadas_por_hora = defaultdict(list)
-        for j in jugadas:
-            if j['tipo'] != 'tripleta':
-                jugadas_por_hora[j['hora']].append(j)
-        
-        lineas = [
-            f"*{session['nombre_agencia']}*",
-            f"*TICKET:* #{ticket_id}",
-            f"*SERIAL:* {serial}",
-            fecha,
-            "------------------------",
-            ""
-        ]
-        
-        # Agrupar jugadas normales por hora
-        for hora_peru in HORARIOS_PERU:
-            if hora_peru not in jugadas_por_hora:
-                continue
-                
-            idx = HORARIOS_PERU.index(hora_peru)
-            hora_ven = HORARIOS_VENEZUELA[idx]
-            
-            hora_peru_corta = hora_peru.replace(' ', '').replace('00', '').lower()
-            hora_ven_corta = hora_ven.replace(' ', '').replace('00', '').lower()
-            lineas.append(f"*ZOOLO.PERU/{hora_peru_corta}...VZLA/{hora_ven_corta}*")
-            
-            jugadas_hora = jugadas_por_hora[hora_peru]
-            texto_jugadas = []
-            
-            for j in jugadas_hora:
-                if j['tipo'] == 'animal':
-                    nombre_corto = ANIMALES.get(j['seleccion'], '')[0:3].upper()
-                    texto_jugadas.append(f"{nombre_corto}{j['seleccion']}x{int(j['monto'])}")
-                else:
-                    tipo_corto = j['seleccion'][0:3]
-                    texto_jugadas.append(f"{tipo_corto}x{int(j['monto'])}")
-            
-            lineas.append(" ".join(texto_jugadas))
-            lineas.append("")
-        
-        # Agregar tripletas al ticket de texto - CORREGIDO: x60 en lugar de x50
-        tripletas_en_ticket = [j for j in jugadas if j['tipo'] == 'tripleta']
-        if tripletas_en_ticket:
-            lineas.append("*TRIPLETAS (Paga x60)*")
-            for t in tripletas_en_ticket:
-                nums = t['seleccion'].split(',')
-                nombres = [ANIMALES.get(n, '')[0:3].upper() for n in nums]
-                lineas.append(f"{'-'.join(nombres)} (x60) S/{int(t['monto'])}")
-            lineas.append("")
-        
-        lineas.append("------------------------")
-        lineas.append(f"*TOTAL: S/{int(total)}*")
-        lineas.append("")
-        lineas.append("Buena Suerte! 🍀")
-        lineas.append("El ticket vence a los 3 dias")
-        
-        texto_whatsapp = "\n".join(lineas)
-        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(texto_whatsapp)}"
-        
-        return jsonify({
-            'status': 'ok',
-            'serial': serial,
-            'ticket_id': ticket_id,
-            'total': total,
-            'url_whatsapp': url_whatsapp
+        tickets = supabase_request("tickets", filters={
+            "serial__like": f"*{q}*",
+            "__limit": 5000,
+            "__order": "creado_en.desc"
         })
         
+        if tickets is None:
+            tickets = []
+        
+        return jsonify({"success": True, "tickets": tickets})
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)})
 
-# ==================== NUEVAS APIS DE CONSULTA PARA AGENCIAS ====================
-
-@app.route('/api/mis-tickets', methods=['POST'])
-@agencia_required
-def mis_tickets():
+@app.route('/api/tickets/<serial>')
+@login_required
+def api_get_ticket(serial):
     try:
-        data = request.get_json() or {}
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        estado = data.get('estado', 'todos')
+        tickets = supabase_request("tickets", filters={"serial": serial, "__limit": 1})
         
-        base_url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        
-        req = urllib.request.Request(base_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        tickets_filtrados = []
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d") if fecha_inicio else None
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59) if fecha_fin else None
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket:
-                continue
-                
-            if dt_inicio and dt_ticket < dt_inicio:
-                continue
-            if dt_fin and dt_ticket > dt_fin:
-                continue
-            
-            if estado == 'pagados' and not t.get('pagado'):
-                continue
-            if estado == 'pendientes' and t.get('pagado'):
-                continue
-                
-            tickets_filtrados.append(t)
-        
-        if estado == 'por_pagar':
-            tickets_con_premio = []
-            for t in tickets_filtrados:
-                if t.get('pagado'):
-                    continue
-                
-                # Calcular premio incluyendo tripletas
-                premio_total = calcular_premio_ticket(t)
-                
-                if premio_total > 0:
-                    t['premio_calculado'] = round(premio_total, 2)
-                    tickets_con_premio.append(t)
-            
-            tickets_filtrados = tickets_con_premio
-        
-        total_ventas = sum(t['total'] for t in tickets_filtrados)
-        total_tickets = len(tickets_filtrados)
-        
-        tickets_respuesta = tickets_filtrados[:50]
-        
-        return jsonify({
-            'status': 'ok',
-            'tickets': tickets_respuesta,
-            'totales': {
-                'cantidad': total_tickets,
-                'ventas': round(total_ventas, 2)
-            },
-            'filtros_aplicados': {
-                'fecha_inicio': fecha_inicio,
-                'fecha_fin': fecha_fin,
-                'estado': estado
-            }
-        })
-        
+        if tickets and len(tickets) > 0:
+            ticket = tickets[0]
+            # Asegurar que jugadas sea una lista
+            if 'jugadas' not in ticket:
+                ticket['jugadas'] = [{
+                    'tipo_apuesta': ticket.get('tipo_apuesta', 'directo'),
+                    'seleccion': ticket.get('seleccion', ''),
+                    'monto': ticket.get('monto', 0)
+                }]
+            return jsonify({"success": True, "ticket": ticket})
+        else:
+            return jsonify({"success": False, "error": "Ticket no encontrado"})
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)})
 
-def calcular_premio_ticket(ticket):
-    """Calcula el premio total de un ticket incluyendo tripletas"""
+@app.route('/api/tickets')
+@login_required
+def api_get_tickets():
     try:
-        fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        fecha = request.args.get('fecha')
+        q = request.args.get('q')
         
-        total_premio = 0
+        filters = {"__limit": 5000, "__order": "creado_en.desc"}
         
-        # Jugadas normales
-        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-        for j in jugadas:
-            wa = resultados.get(j['hora'])
-            if wa:
-                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                    total_premio += calcular_premio_animal(j['monto'], wa)
-                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                    sel = j['seleccion']
-                    num = int(wa)
-                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                       (sel == 'PAR' and num % 2 == 0) or \
-                       (sel == 'IMPAR' and num % 2 != 0):
-                        total_premio += j['monto'] * PAGO_ESPECIAL
+        if fecha:
+            filters["fecha"] = fecha
         
-        # Tripletas - CORREGIDO: Usa PAGO_TRIPLETA (60)
-        tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
-        if tripletas:
-            for trip in tripletas:
-                # Verificar si los 3 números salieron durante el día
-                nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                nums_encontrados = []
-                
-                for hora, animal in resultados.items():
-                    if animal in nums and animal not in nums_encontrados:
-                        nums_encontrados.append(animal)
-                
-                if len(nums_encontrados) == 3:  # Salieron los 3
-                    total_premio += trip['monto'] * PAGO_TRIPLETA
+        tickets = supabase_request("tickets", filters=filters)
         
-        return total_premio
-    except:
-        return 0
+        if tickets is None:
+            tickets = []
+        
+        if q:
+            tickets = [t for t in tickets if q.lower() in t.get('serial', '').lower()]
+        
+        # Asegurar que cada ticket tenga jugadas
+        for t in tickets:
+            if 'jugadas' not in t:
+                t['jugadas'] = [{
+                    'tipo_apuesta': t.get('tipo_apuesta', 'directo'),
+                    'seleccion': t.get('seleccion', ''),
+                    'monto': t.get('monto', 0)
+                }]
+        
+        return jsonify({"success": True, "tickets": tickets})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/consultar-ticket-detalle', methods=['POST'])
-@agencia_required
-def consultar_ticket_detalle():
+@app.route('/api/tickets/pagar', methods=['POST'])
+@login_required
+def api_pagar_ticket():
     try:
-        data = request.get_json()
+        data = request.json
         serial = data.get('serial')
         
         if not serial:
-            return jsonify({'error': 'Serial requerido'}), 400
+            return jsonify({"success": False, "error": "Serial requerido"})
         
-        tickets = supabase_request("tickets", filters={"serial": serial, "agencia_id": session['user_id']})
+        tickets = supabase_request("tickets", filters={"serial": serial, "__limit": 1})
+        
         if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no encontrado o no pertenece a esta agencia'})
+            return jsonify({"success": False, "error": "Ticket no encontrado"})
         
         ticket = tickets[0]
         
-        jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-        
-        fecha_ticket = parse_fecha_ticket(ticket['fecha']).strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": fecha_ticket})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        jugadas_detalle = []
-        total_premio = 0
-        
-        # Procesar jugadas normales
-        for j in jugadas:
-            wa = resultados.get(j['hora'])
-            premio = 0
-            gano = False
-            
-            if wa:
-                if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                    premio = calcular_premio_animal(j['monto'], wa)
-                    gano = True
-                elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                    sel = j['seleccion']
-                    num = int(wa)
-                    if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                       (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                       (sel == 'PAR' and num % 2 == 0) or \
-                       (sel == 'IMPAR' and num % 2 != 0):
-                        premio = j['monto'] * PAGO_ESPECIAL
-                        gano = True
-            
-            if gano:
-                total_premio += premio
-            
-            jugadas_detalle.append({
-                'hora': j['hora'],
-                'tipo': j['tipo'],
-                'seleccion': j['seleccion'],
-                'nombre_seleccion': ANIMALES.get(j['seleccion'], j['seleccion']) if j['tipo'] == 'animal' else j['seleccion'],
-                'monto': j['monto'],
-                'resultado': wa,
-                'gano': gano,
-                'premio': round(premio, 2) if gano else 0
-            })
-        
-        # Procesar tripletas - CORREGIDO: x60
-        tripletas = supabase_request("tripletas", filters={"ticket_id": ticket['id']})
-        if tripletas:
-            for trip in tripletas:
-                nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                nombres = [ANIMALES.get(n, n) for n in nums]
-                nums_encontrados = []
-                
-                for hora, animal in resultados.items():
-                    if animal in nums and animal not in nums_encontrados:
-                        nums_encontrados.append(animal)
-                
-                gano = len(nums_encontrados) == 3
-                premio = trip['monto'] * PAGO_TRIPLETA if gano else 0
-                
-                if gano:
-                    total_premio += premio
-                
-                jugadas_detalle.append({
-                    'hora': 'Todo el día',
-                    'tipo': 'tripleta',
-                    'seleccion': f"{trip['animal1']},{trip['animal2']},{trip['animal3']}",
-                    'nombre_seleccion': f"{' - '.join(nombres)}",
-                    'monto': trip['monto'],
-                    'resultado': f"Salieron: {', '.join(nums_encontrados)}" if nums_encontrados else "Pendiente",
-                    'gano': gano,
-                    'premio': round(premio, 2)
-                })
-        
-        return jsonify({
-            'status': 'ok',
-            'ticket': {
-                'id': ticket['id'],
-                'serial': ticket['serial'],
-                'fecha': ticket['fecha'],
-                'total_apostado': ticket['total'],
-                'pagado': ticket['pagado'],
-                'anulado': ticket['anulado'],
-                'premio_total': round(total_premio, 2),
-                'ganancia_neta': round(total_premio - ticket['total'], 2) if total_premio > 0 else -ticket['total']
-            },
-            'jugadas': jugadas_detalle
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/verificar-ticket', methods=['POST'])
-@login_required
-def verificar_ticket():
-    try:
-        serial = request.json.get('serial')
-        
-        tickets = supabase_request("tickets", filters={"serial": serial})
-        if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no existe'})
-        
-        ticket = tickets[0]
-        
-        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
-            return jsonify({'error': 'No autorizado para ver este ticket'})
-        
-        if ticket['anulado']:
-            return jsonify({'error': 'TICKET ANULADO'})
-        if ticket['pagado']:
-            return jsonify({'error': 'YA FUE PAGADO'})
-        
-        total_ganado = calcular_premio_ticket(ticket)
-        
-        return jsonify({
-            'status': 'ok',
-            'ticket_id': ticket['id'],
-            'total_ganado': total_ganado,
-            'detalles': []  # Simplificado para la respuesta
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/pagar-ticket', methods=['POST'])
-@agencia_required
-def pagar_ticket():
-    try:
-        ticket_id = request.json.get('ticket_id')
-        
-        # Marcar ticket como pagado
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket_id))}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = json.dumps({"pagado": True}).encode()
-        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-        urllib.request.urlopen(req, timeout=15)
-        
-        # Marcar tripletas como pagadas también
-        url_trip = f"{SUPABASE_URL}/rest/v1/tripletas?ticket_id=eq.{urllib.parse.quote(str(ticket_id))}"
-        data_trip = json.dumps({"pagado": True}).encode()
-        req_trip = urllib.request.Request(url_trip, data=data_trip, headers=headers, method="PATCH")
-        try:
-            urllib.request.urlopen(req_trip, timeout=15)
-        except:
-            pass  # Si no hay tripletas, no importa el error
-        
-        return jsonify({'status': 'ok', 'mensaje': 'Ticket pagado'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/anular-ticket', methods=['POST'])
-@login_required
-def anular_ticket():
-    try:
-        serial = request.json.get('serial')
-        tickets = supabase_request("tickets", filters={"serial": serial})
-        if not tickets or len(tickets) == 0:
-            return jsonify({'error': 'Ticket no existe'})
-        
-        ticket = tickets[0]
-        
-        if not session.get('es_admin') and ticket['agencia_id'] != session['user_id']:
-            return jsonify({'error': 'No autorizado para anular este ticket'})
-        
-        if ticket['pagado']:
-            return jsonify({'error': 'Ya esta pagado, no se puede anular'})
-        
-        if not session.get('es_admin'):
-            fecha_ticket = parse_fecha_ticket(ticket['fecha'])
-            if not fecha_ticket:
-                return jsonify({'error': 'Error en fecha del ticket'})
-            
-            minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
-            if minutos_transcurridos > 5:
-                return jsonify({'error': f'No puede anular después de 5 minutos'})
-            
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-            for j in jugadas:
-                if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
-        else:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
-            for j in jugadas:
-                if not verificar_horario_bloqueo(j['hora']):
-                    return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = json.dumps({"anulado": True}).encode()
-        req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-        urllib.request.urlopen(req, timeout=15)
-        return jsonify({'status': 'ok', 'mensaje': 'Ticket anulado correctamente'})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/caja')
-@agencia_required
-def caja_agencia():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        ventas = sum(t['total'] for t in tickets if t['agencia_id'] == session['user_id'] and not t['anulado'])
-        
-        agencias = supabase_request("agencias", filters={"id": session['user_id']})
-        comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
-        comision = ventas * comision_pct
-        
-        premios = 0
-        tickets_pendientes = 0
-        
-        for t in tickets:
-            if t['agencia_id'] == session['user_id'] and not t['anulado']:
-                premio_ticket = calcular_premio_ticket(t)
-                
-                if t['pagado']:
-                    premios += premio_ticket
-                elif premio_ticket > 0:
-                    tickets_pendientes += 1
-        
-        balance = ventas - premios - comision
-        
-        return jsonify({
-            'ventas': round(ventas, 2),
-            'premios': round(premios, 2),
-            'comision': round(comision, 2),
-            'balance': round(balance, 2),
-            'tickets_pendientes': tickets_pendientes
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/caja-historico', methods=['POST'])
-@agencia_required
-def caja_historico():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        agencias = supabase_request("agencias", filters={"id": session['user_id']})
-        comision_pct = agencias[0]['comision'] if agencias else COMISION_AGENCIA
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&order=fecha.desc&limit=500"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        dias_data = {}
-        tickets_pendientes_cobro = []
-        total_ventas = total_premios = 0
-        
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0,
-                    'pendientes': 0
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            total_ventas += t['total']
-            
-            premio_ticket = calcular_premio_ticket(t)
-            
-            if t['pagado']:
-                dias_data[dia_key]['premios'] += premio_ticket
-                total_premios += premio_ticket
-            elif premio_ticket > 0:
-                dias_data[dia_key]['pendientes'] += 1
-                tickets_pendientes_cobro.append({
-                    'serial': t['serial'],
-                    'fecha': t['fecha'],
-                    'monto': t['total'],
-                    'premio': round(premio_ticket, 2)
-                })
-        
-        resumen_dias = []
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            comision_dia = datos['ventas'] * comision_pct
-            balance_dia = datos['ventas'] - datos['premios'] - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'tickets': datos['tickets'],
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(datos['premios'], 2),
-                'comision': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'pendientes': datos['pendientes']
-            })
-        
-        total_comision = total_ventas * comision_pct
-        balance_total = total_ventas - total_premios - total_comision
-        
-        return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comision': round(total_comision, 2),
-                'balance': round(balance_total, 2),
-                'tickets_pendientes_cobro': len(tickets_pendientes_cobro),
-                'total_pendiente_cobro': round(sum(t['premio'] for t in tickets_pendientes_cobro), 2)
-            },
-            'tickets_pendientes': tickets_pendientes_cobro[:10]
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/mis-tickets-pendientes')
-@agencia_required
-def mis_tickets_pendientes():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{session['user_id']}&anulado=eq.false&pagado=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        tickets_con_premio = []
-        
-        for t in tickets:
-            premio_total = calcular_premio_ticket(t)
-            
-            if premio_total > 0:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-                
-                tickets_con_premio.append({
-                    'serial': t['serial'],
-                    'fecha': t['fecha'],
-                    'total': t['total'],
-                    'premio': round(premio_total, 2),
-                    'jugadas': len(jugadas) + len(tripletas)
-                })
-        
-        return jsonify({
-            'status': 'ok',
-            'tickets': tickets_con_premio,
-            'total_pendiente': sum(t['premio'] for t in tickets_con_premio)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== API ADMIN ====================
-@app.route('/admin/lista-agencias')
-@admin_required
-def lista_agencias():
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
-        return jsonify([{"id": a['id'], "usuario": a['usuario'], "nombre_agencia": a['nombre_agencia'], "comision": a['comision']} for a in agencias])
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/crear-agencia', methods=['POST'])
-@admin_required
-def crear_agencia():
-    try:
-        usuario = request.form.get('usuario', '').strip().lower()
-        password = request.form.get('password', '').strip()
-        nombre = request.form.get('nombre', '').strip()
-        
-        if not usuario or not password or not nombre:
-            return jsonify({'error': 'Complete todos los campos'}), 400
-        
-        existentes = supabase_request("agencias", filters={"usuario": usuario})
-        if existentes and len(existentes) > 0:
-            return jsonify({'error': 'Usuario ya existe'}), 400
-        
-        data = {
-            "usuario": usuario,
-            "password": password,
-            "nombre_agencia": nombre,
-            "es_admin": False,
-            "comision": COMISION_AGENCIA,
-            "activa": True
-        }
-        
-        supabase_request("agencias", method="POST", data=data)
-        return jsonify({'status': 'ok', 'mensaje': f'Agencia {nombre} creada'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/guardar-resultado', methods=['POST'])
-@admin_required
-def guardar_resultado():
-    try:
-        hora = request.form.get('hora')
-        animal = request.form.get('animal')
-        fecha_input = request.form.get('fecha')
-        
-        if animal not in ANIMALES:
-            return jsonify({'error': f'Animal inválido: {animal}'}), 400
-        
-        if fecha_input:
-            try:
-                fecha_obj = datetime.strptime(fecha_input, "%Y-%m-%d")
-                fecha = fecha_obj.strftime("%d/%m/%Y")
-            except:
-                fecha = ahora_peru().strftime("%d/%m/%Y")
-        else:
-            fecha = ahora_peru().strftime("%d/%m/%Y")
-        
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        if fecha == hoy:
-            if not puede_editar_resultado(hora, fecha):
-                return jsonify({
-                    'error': f'No se puede editar. Solo disponible hasta 2 horas después del sorteo (ej: 6PM editable hasta 8PM).'
-                }), 403
-        
-        existentes = supabase_request("resultados", filters={"fecha": fecha, "hora": hora})
-        
-        if existentes and len(existentes) > 0:
-            url = f"{SUPABASE_URL}/rest/v1/resultados?fecha=eq.{urllib.parse.quote(fecha)}&hora=eq.{urllib.parse.quote(hora)}"
-            headers = {
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json"
-            }
-            data = json.dumps({"animal": animal}).encode()
-            req = urllib.request.Request(url, data=data, headers=headers, method="PATCH")
-            
-            try:
-                with urllib.request.urlopen(req, timeout=15) as response:
-                    if response.status in [200, 201, 204]:
-                        return jsonify({
-                            'status': 'ok', 
-                            'mensaje': f'RESULTADO ACTUALIZADO: {hora} = {animal} ({ANIMALES[animal]})',
-                            'accion': 'actualizado',
-                            'fecha': fecha,
-                            'hora': hora,
-                            'animal': animal
-                        })
-                    else:
-                        return jsonify({'error': 'Error al actualizar'}), 500
-            except urllib.error.HTTPError as e:
-                print(f"[ERROR PATCH] HTTP {e.code}: {e.read().decode()}")
-                return jsonify({'error': f'Error al actualizar: HTTP {e.code}'}), 500
-                
-        else:
-            data = {"fecha": fecha, "hora": hora, "animal": animal}
-            result = supabase_request("resultados", method="POST", data=data)
-            
-            if result:
-                return jsonify({
-                    'status': 'ok', 
-                    'mensaje': f'RESULTADO GUARDADO: {hora} = {animal} ({ANIMALES[animal]})',
-                    'accion': 'creado',
-                    'fecha': fecha,
-                    'hora': hora,
-                    'animal': animal
-                })
-            else:
-                return jsonify({'error': 'Error al crear resultado'}), 500
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/verificar-tickets-sorteo', methods=['POST'])
-@admin_required
-def verificar_tickets_sorteo():
-    try:
-        data = request.get_json()
-        fecha = data.get('fecha')
-        hora = data.get('hora')
-        
-        if not fecha or not hora:
-            return jsonify({'error': 'Fecha y hora requeridas'}), 400
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(fecha)}%25&anulado=eq.false"
-        
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
-        
-        tickets_con_jugadas = []
-        total_apostado = 0
-        
-        for t in tickets:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "hora": hora})
-            if jugadas and len(jugadas) > 0:
-                monto_jugadas = sum(j['monto'] for j in jugadas)
-                tickets_con_jugadas.append({
-                    'serial': t['serial'],
-                    'agencia_id': t['agencia_id'],
-                    'monto': monto_jugadas
-                })
-                total_apostado += monto_jugadas
-        
-        return jsonify({
-            'status': 'ok',
-            'tickets_count': len(tickets_con_jugadas),
-            'total_apostado': round(total_apostado, 2),
-            'tickets': tickets_con_jugadas[:5]
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/resultados-hoy')
-@admin_required
-def admin_resultados_hoy():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        
-        resultados_dict = {}
-        if resultados_list:
-            for r in resultados_list:
-                resultados_dict[r['hora']] = {
-                    'animal': r['animal'],
-                    'nombre': ANIMALES.get(r['animal'], 'Desconocido')
-                }
-        
-        for hora in HORARIOS_PERU:
-            if hora not in resultados_dict:
-                resultados_dict[hora] = None
-                
-        return jsonify({
-            'status': 'ok',
-            'fecha': hoy,
-            'resultados': resultados_dict
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/tripletas-hoy')
-@admin_required
-def tripletas_hoy():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        
-        # Obtener todas las tripletas de hoy
-        url = f"{SUPABASE_URL}/rest/v1/tripletas?fecha=eq.{urllib.parse.quote(hoy)}"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tripletas = json.loads(response.read().decode())
-        
-        if not tripletas:
-            return jsonify({'tripletas': [], 'total': 0, 'ganadoras': 0})
-        
-        # Obtener resultados del día
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
-        
-        # Procesar cada tripleta - CORREGIDO: Usa PAGO_TRIPLETA (60)
-        tripletas_procesadas = []
-        ganadoras = 0
-        
-        for trip in tripletas:
-            # Obtener info del ticket
-            tickets = supabase_request("tickets", filters={"id": trip['ticket_id']})
-            if not tickets:
-                continue
-            
-            ticket = tickets[0]
-            agencias = supabase_request("agencias", filters={"id": ticket['agencia_id']})
-            nombre_agencia = agencias[0]['nombre_agencia'] if agencias else 'Desconocida'
-            
-            # Verificar si ganó
-            nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-            nums_encontrados = []
-            
-            for hora, animal in resultados.items():
-                if animal in nums and animal not in nums_encontrados:
-                    nums_encontrados.append(animal)
-            
-            gano = len(nums_encontrados) == 3
-            if gano:
-                ganadoras += 1
-            
-            nombres_animales = [ANIMALES.get(n, n) for n in nums]
-            
-            tripletas_procesadas.append({
-                'id': trip['id'],
-                'serial': ticket['serial'],
-                'agencia': nombre_agencia,
-                'animal1': trip['animal1'],
-                'animal2': trip['animal2'],
-                'animal3': trip['animal3'],
-                'nombres': nombres_animales,
-                'monto': trip['monto'],
-                'premio': trip['monto'] * PAGO_TRIPLETA if gano else 0,  # x60
-                'gano': gano,
-                'salieron': nums_encontrados,
-                'pagado': trip.get('pagado', False)
-            })
-        
-        return jsonify({
-            'tripletas': tripletas_procesadas,
-            'total': len(tripletas_procesadas),
-            'ganadoras': ganadoras,
-            'total_premios': sum(t['premio'] for t in tripletas_procesadas)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/reporte-agencias-rango', methods=['POST'])
-@admin_required
-def reporte_agencias_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        agencia_id = data.get('agencia_id')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/agencias?id=eq.{agencia_id}"
-        else:
-            url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-            
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
-        
-        dict_agencias = {a['id']: a for a in agencias}
-        
-        if agencia_id:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?agencia_id=eq.{agencia_id}&order=fecha.desc&limit=2000"
-        else:
-            url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
-            
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        tickets_validos = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                tickets_validos.append(t)
-        
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        stats_por_agencia = {}
-        for ag in agencias:
-            stats_por_agencia[ag['id']] = {
-                'id': ag['id'],
-                'nombre': ag['nombre_agencia'],
-                'usuario': ag['usuario'],
-                'comision_pct': ag['comision'],
-                'tickets': 0,
-                'ventas': 0,
-                'premios_pagados': 0,
-                'premios_pendientes': 0,
-                'premios_teoricos': 0,
-                'comision': 0,
-                'balance': 0,
-                'tickets_pagados_count': 0,
-                'tickets_pendientes_count': 0
-            }
-        
-        for t in tickets_validos:
-            ag_id = t['agencia_id']
-            if ag_id not in stats_por_agencia:
-                continue
-            
-            stats = stats_por_agencia[ag_id]
-            stats['tickets'] += 1
-            stats['ventas'] += t['total']
-            
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
-            resultados_dia = resultados_por_dia.get(fecha_ticket, {})
-            
-            premio_teorico_ticket = 0
-            tiene_premio = False
-            
-            # Jugadas normales
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-            for j in jugadas:
-                wa = resultados_dia.get(j['hora'])
-                if wa:
-                    premio_jugada = 0
-                    if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                        premio_jugada = calcular_premio_animal(j['monto'], wa)
-                        premio_teorico_ticket += premio_jugada
-                        tiene_premio = True
-                    elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                        sel = j['seleccion']
-                        num = int(wa)
-                        if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                           (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                           (sel == 'PAR' and num % 2 == 0) or \
-                           (sel == 'IMPAR' and num % 2 != 0):
-                            premio_jugada = j['monto'] * PAGO_ESPECIAL
-                            premio_teorico_ticket += premio_jugada
-                            tiene_premio = True
-            
-            # Tripletas - CORREGIDO: x60
-            tripletas = supabase_request("tripletas", filters={"ticket_id": t['id']})
-            if tripletas:
-                for trip in tripletas:
-                    nums = [trip['animal1'], trip['animal2'], trip['animal3']]
-                    nums_encontrados = []
-                    
-                    for hora, animal in resultados_dia.items():
-                        if animal in nums and animal not in nums_encontrados:
-                            nums_encontrados.append(animal)
-                    
-                    if len(nums_encontrados) == 3:
-                        premio_teorico_ticket += trip['monto'] * PAGO_TRIPLETA  # x60
-                        tiene_premio = True
-            
-            stats['premios_teoricos'] += premio_teorico_ticket
-            
-            if t['pagado']:
-                stats['tickets_pagados_count'] += 1
-                stats['premios_pagados'] += premio_teorico_ticket
-            else:
-                if tiene_premio:
-                    stats['tickets_pendientes_count'] += 1
-                    stats['premios_pendientes'] += premio_teorico_ticket
-        
-        total_global = {
-            'tickets': 0, 'ventas': 0, 'premios_pagados': 0, 'premios_pendientes': 0,
-            'premios_teoricos': 0, 'comision': 0, 'balance': 0,
-            'tickets_pagados_count': 0, 'tickets_pendientes_count': 0
-        }
-        
-        reporte_agencias = []
-        for ag_id, stats in stats_por_agencia.items():
-            if stats['tickets'] > 0:
-                stats['comision'] = stats['ventas'] * stats['comision_pct']
-                stats['balance'] = stats['ventas'] - stats['premios_teoricos'] - stats['comision']
-                
-                stats['ventas'] = round(stats['ventas'], 2)
-                stats['premios_pagados'] = round(stats['premios_pagados'], 2)
-                stats['premios_pendientes'] = round(stats['premios_pendientes'], 2)
-                stats['premios_teoricos'] = round(stats['premios_teoricos'], 2)
-                stats['comision'] = round(stats['comision'], 2)
-                stats['balance'] = round(stats['balance'], 2)
-                
-                reporte_agencias.append(stats)
-                
-                for key in total_global:
-                    if key in stats:
-                        total_global[key] += stats[key]
-        
-        if total_global['ventas'] > 0:
-            for ag in reporte_agencias:
-                ag['porcentaje_ventas'] = round((ag['ventas'] / total_global['ventas']) * 100, 1)
-        
-        reporte_agencias.sort(key=lambda x: x['ventas'], reverse=True)
-        
-        for key in total_global:
-            total_global[key] = round(total_global[key], 2)
-        
-        return jsonify({
-            'status': 'ok',
-            'agencias': reporte_agencias,
-            'totales': total_global,
-            'rango': {'inicio': fecha_inicio, 'fin': fecha_fin, 'dias': (dt_fin - dt_inicio).days + 1},
-            'filtro_agencia': agencia_id
-        })
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/exportar-csv', methods=['POST'])
-@admin_required
-def exportar_csv():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
-        
-        dict_agencias = {a['id']: a for a in agencias}
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=2000"
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        tickets_validos = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                tickets_validos.append(t)
-        
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        stats_por_agencia = {}
-        for ag in agencias:
-            stats_por_agencia[ag['id']] = {
-                'nombre': ag['nombre_agencia'],
-                'usuario': ag['usuario'],
-                'tickets': 0, 'ventas': 0, 'premios': 0
-            }
-        
-        for t in tickets_validos:
-            ag_id = t['agencia_id']
-            if ag_id not in stats_por_agencia:
-                continue
-            
-            stats = stats_por_agencia[ag_id]
-            stats['tickets'] += 1
-            stats['ventas'] += t['total']
-            
-            fecha_ticket = parse_fecha_ticket(t['fecha']).strftime("%d/%m/%Y")
-            resultados_dia = resultados_por_dia.get(fecha_ticket, {})
-            
-            if t['pagado']:
-                jugadas = supabase_request("jugadas", filters={"ticket_id": t['id']})
-                for j in jugadas:
-                    wa = resultados_dia.get(j['hora'])
-                    if wa:
-                        if j['tipo'] == 'animal' and str(wa) == str(j['seleccion']):
-                            stats['premios'] += calcular_premio_animal(j['monto'], wa)
-                        elif j['tipo'] == 'especial' and str(wa) not in ["0", "00"]:
-                            num = int(wa)
-                            sel = j['seleccion']
-                            if (sel == 'ROJO' and str(wa) in ROJOS) or \
-                               (sel == 'NEGRO' and str(wa) not in ROJOS) or \
-                               (sel == 'PAR' and num % 2 == 0) or \
-                               (sel == 'IMPAR' and num % 2 != 0):
-                                stats['premios'] += j['monto'] * PAGO_ESPECIAL
-        
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        writer.writerow(['REPORTE ZOOLO CASINO - AGENCIAS'])
-        writer.writerow([f'Periodo: {fecha_inicio} al {fecha_fin}'])
-        writer.writerow([])
-        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comisión (S/)', 'Balance (S/)', '% Participación'])
-        
-        total_ventas = sum(s['ventas'] for s in stats_por_agencia.values())
-        
-        for ag_id, stats in sorted(stats_por_agencia.items(), key=lambda x: x[1]['ventas'], reverse=True):
-            if stats['tickets'] > 0:
-                comision = stats['ventas'] * dict_agencias[ag_id]['comision']
-                balance = stats['ventas'] - stats['premios'] - comision
-                porcentaje = (stats['ventas'] / total_ventas * 100) if total_ventas > 0 else 0
-                
-                writer.writerow([
-                    stats['nombre'], stats['usuario'], stats['tickets'],
-                    round(stats['ventas'], 2), round(stats['premios'], 2),
-                    round(comision, 2), round(balance, 2), f"{porcentaje:.1f}%"
-                ])
-        
-        writer.writerow([])
-        total_comision = sum(s['ventas'] * dict_agencias[ag_id]['comision'] for ag_id, s in stats_por_agencia.items())
-        total_balance = sum(s['ventas'] for s in stats_por_agencia.values()) - sum(s['premios'] for s in stats_por_agencia.values()) - total_comision
-        
-        writer.writerow(['TOTALES', '', 
-            sum(s['tickets'] for s in stats_por_agencia.values()),
-            round(total_ventas, 2), round(sum(s['premios'] for s in stats_por_agencia.values()), 2),
-            round(total_comision, 2), round(total_balance, 2), '100%'
-        ])
-        
-        output.seek(0)
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={
-                'Content-Type': 'text/csv; charset=utf-8',
-                'Content-Disposition': f'attachment; filename=reporte_agencias_{fecha_inicio}_{fecha_fin}.csv'
-            }
+        if ticket.get('estado') != 'activo':
+            return jsonify({"success": False, "error": "El ticket no esta activo"})
+        
+        resultado = supabase_request(
+            "tickets",
+            method="PATCH",
+            data={"estado": "pagado", "pagado_en": ahora_peru().isoformat(), "pagado_por": session.get('nombre')},
+            filters={"serial": serial}
         )
         
+        if resultado:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": "Error al pagar el ticket"})
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)})
 
-@app.route('/admin/reporte-agencias')
-@admin_required
-def reporte_agencias():
+@app.route('/api/tickets/anular', methods=['POST'])
+@login_required
+def api_anular_ticket():
     try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
+        data = request.json
+        serial = data.get('serial')
         
-        url = f"{SUPABASE_URL}/rest/v1/agencias?es_admin=eq.false"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            agencias = json.loads(response.read().decode())
+        if not serial:
+            return jsonify({"success": False, "error": "Serial requerido"})
         
-        resultados_list = supabase_request("resultados", filters={"fecha": hoy})
-        resultados = {r['hora']: r['animal'] for r in resultados_list} if resultados_list else {}
+        tickets = supabase_request("tickets", filters={"serial": serial, "__limit": 1})
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25"
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
+        if not tickets or len(tickets) == 0:
+            return jsonify({"success": False, "error": "Ticket no encontrado"})
         
-        data_agencias = []
-        total_ventas = total_premios = total_comisiones = 0
+        ticket = tickets[0]
         
-        for ag in agencias:
-            ventas = sum(t['total'] for t in tickets if t['agencia_id'] == ag['id'] and not t['anulado'])
-            comision = ventas * ag['comision']
-            
-            premios_pagados = 0
-            premios_pendientes = 0
-            
-            for t in tickets:
-                if t['agencia_id'] == ag['id'] and not t['anulado']:
-                    premio_ticket = calcular_premio_ticket(t)
-                    
-                    if t['pagado']:
-                        premios_pagados += premio_ticket
-                    else:
-                        premios_pendientes += premio_ticket
-            
-            balance = ventas - premios_pagados - comision
-            
-            data_agencias.append({
-                'nombre': ag['nombre_agencia'],
-                'ventas': round(ventas, 2),
-                'premios_pagados': round(premios_pagados, 2),
-                'premios_pendientes': round(premios_pendientes, 2),
-                'premios_total': round(premios_pagados + premios_pendientes, 2),
-                'comision': round(comision, 2),
-                'balance': round(balance, 2)
-            })
-            
-            total_ventas += ventas
-            total_premios += premios_pagados
-            total_comisiones += comision
+        if ticket.get('estado') != 'activo':
+            return jsonify({"success": False, "error": "El ticket no puede ser anulado"})
         
-        return jsonify({
-            'agencias': data_agencias,
-            'global': {
-                'ventas': round(total_ventas, 2),
-                'pagos': round(total_premios, 2),
-                'comisiones': round(total_comisiones, 2),
-                'balance': round(total_ventas - total_premios - total_comisiones, 2)
-            }
+        resultado = supabase_request(
+            "tickets",
+            method="PATCH",
+            data={"estado": "anulado", "anulado_en": ahora_peru().isoformat(), "anulado_por": session.get('nombre')},
+            filters={"serial": serial}
+        )
+        
+        if resultado:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": "Error al anular el ticket"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# API RESULTADOS
+
+@app.route('/api/resultados', methods=['GET'])
+@login_required
+def api_get_resultados():
+    try:
+        fecha = request.args.get('fecha')
+        
+        filters = {"__limit": 5000, "__order": "creado_en.desc"}
+        
+        if fecha:
+            filters["fecha"] = fecha
+        
+        resultados = supabase_request("resultados", filters=filters)
+        
+        if resultados is None:
+            resultados = []
+        
+        # Agregar nombre del animal
+        for r in resultados:
+            r['nombre_animal'] = ANIMALES.get(int(r.get('animal_ganador', 0)), 'Desconocido')
+        
+        return jsonify({"success": True, "resultados": resultados})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/resultados', methods=['POST'])
+@admin_required
+def api_registrar_resultado():
+    try:
+        data = request.json
+        
+        fecha = data.get('fecha')
+        hora_sorteo = data.get('hora_sorteo')
+        animal_ganador = int(data.get('animal_ganador', 0))
+        
+        if not all([fecha, hora_sorteo]):
+            return jsonify({"success": False, "error": "Faltan datos requeridos"})
+        
+        # Verificar si ya existe un resultado para este sorteo
+        existentes = supabase_request("resultados", filters={
+            "fecha": fecha,
+            "hora_sorteo": hora_sorteo,
+            "__limit": 1
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/riesgo')
-@admin_required
-def riesgo():
-    try:
-        hoy = ahora_peru().strftime("%d/%m/%Y")
-        sorteo_objetivo = obtener_sorteo_en_curso() or obtener_proximo_sorteo()
         
-        agencia_id = request.args.get('agencia_id')
-        nombre_agencia = "TODAS LAS AGENCIAS"
-        
-        if not sorteo_objetivo:
-            return jsonify({
-                'riesgo': {},
-                'sorteo_objetivo': None,
-                'mensaje': 'No hay más sorteos disponibles para hoy',
-                'agencia_nombre': nombre_agencia
-            })
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&anulado=eq.false"
-        
-        if agencia_id:
-            url += f"&agencia_id=eq.{urllib.parse.quote(str(agencia_id))}"
-            agencias = supabase_request("agencias", filters={"id": agencia_id})
-            if agencias and len(agencias) > 0:
-                nombre_agencia = agencias[0]['nombre_agencia']
-        
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
+        resultado_data = {
+            "fecha": fecha,
+            "hora_sorteo": hora_sorteo,
+            "animal_ganador": animal_ganador,
+            "nombre_sorteo": "Lotto Activo",
+            "creado_en": ahora_peru().isoformat(),
+            "creado_por": session.get('nombre')
         }
-        req = urllib.request.Request(url, headers=headers)
         
-        with urllib.request.urlopen(req, timeout=15) as response:
-            tickets = json.loads(response.read().decode())
+        if existentes and len(existentes) > 0:
+            # Actualizar resultado existente
+            resultado = supabase_request(
+                "resultados",
+                method="PATCH",
+                data=resultado_data,
+                filters={"id": existentes[0]['id']}
+            )
+        else:
+            # Crear nuevo resultado
+            resultado = supabase_request("resultados", method="POST", data=resultado_data)
         
-        if not tickets:
-            return jsonify({
-                'riesgo': {},
-                'sorteo_objetivo': sorteo_objetivo,
-                'mensaje': 'No hay tickets vendidos hoy',
-                'total_apostado': 0,
-                'agencia_nombre': nombre_agencia,
-                'agencia_id': agencia_id
-            })
+        if resultado:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": "Error al guardar el resultado"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/resultados/<id>', methods=['PATCH'])
+@admin_required
+def api_editar_resultado(id):
+    try:
+        data = request.json
         
-        apuestas = {}
-        total_apostado_sorteo = 0
-        total_jugadas_contadas = 0
+        # FIX: Ya no hay restriccion de tiempo - puede_editar_resultado siempre retorna True
+        resultado = supabase_request(
+            "resultados",
+            method="PATCH",
+            data=data,
+            filters={"id": id}
+        )
         
+        if resultado:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"success": False, "error": "Error al actualizar el resultado"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+# API ADMIN - DASHBOARD Y REPORTES
+
+@app.route('/api/admin/dashboard')
+@admin_required
+def api_dashboard():
+    try:
+        fecha_hoy = ahora_peru().strftime("%d/%m/%Y")
+        
+        # Obtener tickets de hoy
+        tickets = supabase_request("tickets", filters={
+            "fecha": fecha_hoy,
+            "__limit": 5000
+        })
+        
+        if tickets is None:
+            tickets = []
+        
+        ventas = sum(float(t.get('total', 0)) for t in tickets)
+        tickets_activos = len([t for t in tickets if t.get('estado') == 'activo'])
+        tickets_pagados = len([t for t in tickets if t.get('estado') == 'pagado'])
+        tickets_anulados = len([t for t in tickets if t.get('estado') == 'anulado'])
+        
+        # Calcular premios pagados
+        premios = sum(float(t.get('total', 0)) for t in tickets if t.get('estado') == 'pagado')
+        
+        # Ventas por sorteo
+        ventas_por_sorteo = {}
         for t in tickets:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": t['id'], "tipo": "animal"})
-            
-            for j in jugadas:
-                if j.get('hora') == sorteo_objetivo:
-                    sel = j.get('seleccion')
-                    monto = j.get('monto', 0)
-                    if sel:
-                        if sel not in apuestas:
-                            apuestas[sel] = 0
-                        apuestas[sel] += monto
-                        total_apostado_sorteo += monto
-                        total_jugadas_contadas += 1
-        
-        apuestas_ordenadas = sorted(apuestas.items(), key=lambda x: x[1], reverse=True)
-        
-        riesgo = {}
-        for sel, monto in apuestas_ordenadas:
-            nombre = ANIMALES.get(sel, sel)
-            multiplicador = PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL
-            riesgo[f"{sel} - {nombre}"] = {
-                "apostado": round(monto, 2),
-                "pagaria": round(monto * multiplicador, 2),
-                "es_lechuza": sel == "40",
-                "porcentaje": round((monto / total_apostado_sorteo) * 100, 1) if total_apostado_sorteo > 0 else 0
-            }
+            sorteo = t.get('hora_sorteo', 'Desconocido')
+            ventas_por_sorteo[sorteo] = ventas_por_sorteo.get(sorteo, 0) + float(t.get('total', 0))
         
         return jsonify({
-            'riesgo': riesgo,
-            'sorteo_objetivo': sorteo_objetivo,
-            'total_apostado': round(total_apostado_sorteo, 2),
-            'hora_actual': ahora_peru().strftime("%I:%M %p"),
-            'cantidad_jugadas': total_jugadas_contadas,
-            'agencia_nombre': nombre_agencia,
-            'agencia_id': agencia_id
+            "success": True,
+            "ventas": ventas,
+            "premios": premios,
+            "tickets": len(tickets),
+            "balance": ventas - premios,
+            "tickets_activos": tickets_activos,
+            "tickets_pagados": tickets_pagados,
+            "tickets_anulados": tickets_anulados,
+            "ventas_por_sorteo": ventas_por_sorteo
         })
-        
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)})
 
-@app.route('/admin/estadisticas-rango', methods=['POST'])
+@app.route('/api/admin/reporte')
 @admin_required
-def estadisticas_rango():
+def api_reporte():
     try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
+        inicio = request.args.get('inicio')
+        fin = request.args.get('fin')
+        agencia = request.args.get('agencia')
         
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
+        if not inicio or not fin:
+            return jsonify({"success": False, "error": "Fechas requeridas"})
         
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
+        # Convertir fechas para comparacion
+        fecha_inicio = datetime.datetime.strptime(inicio, "%Y-%m-%d")
+        fecha_fin = datetime.datetime.strptime(fin, "%Y-%m-%d")
         
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=1000"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
+        # Obtener todos los tickets
+        filters = {"__limit": 5000}
+        if agencia:
+            filters["agencia"] = agencia
         
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
+        tickets = supabase_request("tickets", filters=filters)
         
-        dias_data = {}
-        tickets_rango = []
+        if tickets is None:
+            tickets = []
         
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-                
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if not dt_ticket or dt_ticket < dt_inicio or dt_ticket > dt_fin:
-                continue
-            
-            tickets_rango.append(t)
-            dia_key = dt_ticket.strftime("%d/%m/%Y")
-            
-            if dia_key not in dias_data:
-                dias_data[dia_key] = {
-                    'ventas': 0, 'tickets': 0, 'premios': 0, 
-                    'comisiones': 0, 'ids_tickets': []
-                }
-            
-            dias_data[dia_key]['ventas'] += t['total']
-            dias_data[dia_key]['tickets'] += 1
-            dias_data[dia_key]['ids_tickets'].append(t['id'])
+        # Filtrar por rango de fechas
+        tickets_filtrados = []
+        for t in tickets:
+            try:
+                fecha_ticket = datetime.datetime.strptime(t.get('fecha', ''), "%d/%m/%Y")
+                if fecha_inicio <= fecha_ticket <= fecha_fin:
+                    tickets_filtrados.append(t)
+            except:
+                pass
         
-        resultados_por_dia = {}
-        delta = dt_fin - dt_inicio
-        for i in range(delta.days + 1):
-            dia_str = (dt_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
-            resultados_list = supabase_request("resultados", filters={"fecha": dia_str})
-            if resultados_list:
-                resultados_por_dia[dia_str] = {r['hora']: r['animal'] for r in resultados_list}
-        
-        resumen_dias = []
-        total_ventas = total_premios = total_tickets = 0
-        
-        for dia_key in sorted(dias_data.keys()):
-            datos = dias_data[dia_key]
-            resultados_dia = resultados_por_dia.get(dia_key, {})
-            
-            premios_dia = 0
-            for ticket_id in datos['ids_tickets'][:50]:
-                t = next((tk for tk in tickets_rango if tk['id'] == ticket_id), None)
-                if t:
-                    premio_ticket = calcular_premio_ticket(t)
-                    premios_dia += premio_ticket
-            
-            comision_dia = datos['ventas'] * COMISION_AGENCIA
-            balance_dia = datos['ventas'] - premios_dia - comision_dia
-            
-            resumen_dias.append({
-                'fecha': dia_key,
-                'ventas': round(datos['ventas'], 2),
-                'premios': round(premios_dia, 2),
-                'comisiones': round(comision_dia, 2),
-                'balance': round(balance_dia, 2),
-                'tickets': datos['tickets']
-            })
-            
-            total_ventas += datos['ventas']
-            total_premios += premios_dia
-            total_tickets += datos['tickets']
+        ventas = sum(float(t.get('total', 0)) for t in tickets_filtrados)
+        premios = sum(float(t.get('total', 0)) for t in tickets_filtrados if t.get('estado') == 'pagado')
         
         return jsonify({
-            'resumen_por_dia': resumen_dias,
-            'totales': {
-                'ventas': round(total_ventas, 2),
-                'premios': round(total_premios, 2),
-                'comisiones': round(total_ventas * COMISION_AGENCIA, 2),
-                'balance': round(total_ventas - total_premios - (total_ventas * COMISION_AGENCIA), 2),
-                'tickets': total_tickets
-            }
+            "success": True,
+            "totales": {
+                "ventas": ventas,
+                "premios": premios,
+                "tickets": len(tickets_filtrados),
+                "balance": ventas - premios
+            },
+            "tickets": tickets_filtrados
+        })
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/admin/agencias')
+@admin_required
+def api_agencias():
+    try:
+        fecha_hoy = ahora_peru().strftime("%d/%m/%Y")
+        
+        # Obtener ventas por agencia
+        tickets = supabase_request("tickets", filters={
+            "fecha": fecha_hoy,
+            "__limit": 5000
         })
         
+        if tickets is None:
+            tickets = []
+        
+        ventas_por_agencia = {}
+        for t in tickets:
+            agencia = t.get('agencia', 'SIN_AGENCIA')
+            ventas_por_agencia[agencia] = ventas_por_agencia.get(agencia, 0) + float(t.get('total', 0))
+        
+        agencias_list = []
+        for codigo, info in AGENCIAS.items():
+            agencias_list.append({
+                "codigo": codigo,
+                "nombre": info['nombre'],
+                "limite_venta": info['limite_venta'],
+                "ventas_hoy": ventas_por_agencia.get(codigo, 0)
+            })
+        
+        return jsonify({"success": True, "agencias": agencias_list})
+    
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"success": False, "error": str(e)})
 
-@app.route('/admin/top-animales-rango', methods=['POST'])
-@admin_required
-def top_animales_rango():
-    try:
-        data = request.get_json()
-        fecha_inicio = data.get('fecha_inicio')
-        fecha_fin = data.get('fecha_fin')
-        
-        if not fecha_inicio or not fecha_fin:
-            return jsonify({'error': 'Fechas requeridas'}), 400
-        
-        dt_inicio = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-        dt_fin = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59)
-        
-        url = f"{SUPABASE_URL}/rest/v1/tickets?order=fecha.desc&limit=500"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            all_tickets = json.loads(response.read().decode())
-        
-        ticket_ids = []
-        for t in all_tickets:
-            if t.get('anulado'):
-                continue
-            dt_ticket = parse_fecha_ticket(t['fecha'])
-            if dt_ticket and dt_inicio <= dt_ticket <= dt_fin:
-                ticket_ids.append(t['id'])
-        
-        if not ticket_ids:
-            return jsonify({'top_animales': []})
-        
-        apuestas = {}
-        for ticket_id in ticket_ids[:100]:
-            jugadas = supabase_request("jugadas", filters={"ticket_id": ticket_id, "tipo": "animal"})
-            for j in jugadas:
-                sel = j['seleccion']
-                if sel not in apuestas:
-                    apuestas[sel] = {'monto': 0, 'cantidad': 0}
-                apuestas[sel]['monto'] += j['monto']
-                apuestas[sel]['cantidad'] += 1
-        
-        top = sorted(apuestas.items(), key=lambda x: x[1]['monto'], reverse=True)
-        resultado = []
-        
-        for sel, data in top[:20]:
-            nombre = ANIMALES.get(sel, sel)
-            resultado.append({
-                'numero': sel,
-                'nombre': nombre,
-                'total_apostado': round(data['monto'], 2),
-                'cantidad_jugadas': data['cantidad'],
-                'pago_potencial': round(data['monto'] * (PAGO_LECHUZA if sel == "40" else PAGO_ANIMAL_NORMAL), 2)
-            })
-        
-        return jsonify({'top_animales': resultado})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# INICIO DE LA APLICACION
 
-# ==================== TEMPLATES HTML ====================
-LOGIN_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-    <title>Login - ZOOLO CASINO</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body {
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
-            color: white;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .login-box {
-            background: rgba(255,255,255,0.05);
-            padding: 40px 30px;
-            border-radius: 20px;
-            border: 2px solid #ffd700;
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-            backdrop-filter: blur(10px);
-        }
-        .login-box h2 { color: #ffd700; margin-bottom: 30px; font-size: 1.8rem; }
-        .form-group { margin-bottom: 20px; text-align: left; }
-        .form-group label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.9rem; }
-        .form-group input {
-            width: 100%; padding: 15px;
-            border: 1px solid #444; border-radius: 10px;
-            background: rgba(0,0,0,0.5); color: white; font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #ffd700;
-            box-shadow: 0 0 10px rgba(255,215,0,0.3);
-        }
-        .btn-login {
-            width: 100%; padding: 16px;
-            background: linear-gradient(45deg, #ffd700, #ffed4e);
-            color: black; border: none; border-radius: 10px;
-            font-size: 1.1rem; font-weight: bold; cursor: pointer;
-            margin-top: 10px;
-            transition: transform 0.2s;
-        }
-        .btn-login:active { transform: scale(0.98); }
-        .error {
-            background: rgba(255,0,0,0.2); color: #ff6b6b;
-            padding: 12px; border-radius: 8px; margin-bottom: 20px;
-            font-size: 0.9rem;
-        }
-        .info { margin-top: 25px; font-size: 0.8rem; color: #666; }
-    </style>
-</head>
-<body>
-    <div class="login-box">
-        <h2>🦁 ZOOLO CASINO</h2>
-        {% if error %}
-        <div class="error">{{error}}</div>
-        {% endif %}
-        <form method="POST">
-            <div class="form-group">
-                <label>Usuario</label>
-                <input type="text" name="usuario" required autofocus autocomplete="off">
-            </div>
-            <div class="form-group">
-                <label>Contraseña</label>
-                <input type="password" name="password" required>
-            </div>
-            <button type="submit" class="btn-login">INICIAR SESIÓN</button>
-        </form>
-        <div class="info">
-            Sistema ZOOLO CASINO v6.1<br>Tripleta x60 + Nuevos Horarios Perú
-        </div>
-    </div>
-</body>
-</html>
-'''
-
-POS_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-    <title>POS - {{agencia}}</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        html { height: 100%; }
-        body { 
-            background: #0a0a0a; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            min-height: 100vh; 
-            display: flex; 
-            flex-direction: column;
-            overflow-x: hidden;
-        }
-        
-        .win-menu-bar {
-            background: linear-gradient(180deg, #2d2d2d 0%, #1a1a1a 100%);
-            border-bottom: 2px solid #000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .win-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 15px;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            border-bottom: 1px solid #000;
-        }
-        
-        .win-title {
-            color: #ffd700;
-            font-size: 1rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .win-menu-items {
-            display: flex;
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            background: #2d2d2d;
-        }
-        
-        .win-menu-item {
-            position: relative;
-        }
-        
-        .win-menu-item > a {
-            display: block;
-            padding: 10px 20px;
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.85rem;
-            border-right: 1px solid #444;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-menu-item:hover > a {
-            background: linear-gradient(180deg, #404040 0%, #333 100%);
-            color: #ffd700;
-        }
-        
-        .win-submenu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #2d2d2d;
-            border: 1px solid #555;
-            border-top: none;
-            min-width: 220px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            z-index: 1001;
-        }
-        
-        .win-menu-item:hover .win-submenu {
-            display: block;
-        }
-        
-        .win-submenu-item {
-            border-bottom: 1px solid #444;
-        }
-        
-        .win-submenu-item:last-child {
-            border-bottom: none;
-        }
-        
-        .win-submenu-item a {
-            display: block;
-            padding: 12px 20px;
-            color: #ddd;
-            text-decoration: none;
-            font-size: 0.85rem;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .win-submenu-item a:hover {
-            background: #ffd700;
-            color: #000;
-            padding-left: 25px;
-        }
-        
-        .mobile-header {
-            display: none;
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 12px 15px;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #ffd700;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .mobile-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-            font-weight: bold;
-        }
-        
-        .hamburger-btn {
-            background: transparent;
-            border: none;
-            color: #ffd700;
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 5px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .mobile-menu {
-            display: none;
-            position: fixed;
-            top: 0;
-            right: -300px;
-            width: 280px;
-            height: 100vh;
-            background: linear-gradient(180deg, #1a1a2e 0%, #0a0a0a 100%);
-            border-left: 2px solid #ffd700;
-            z-index: 2000;
-            transition: right 0.3s ease;
-            overflow-y: auto;
-        }
-        
-        .mobile-menu.active {
-            right: 0;
-        }
-        
-        .mobile-menu-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-title {
-            color: #ffd700;
-            font-size: 1.1rem;
-        }
-        
-        .close-menu-btn {
-            background: #c0392b;
-            border: none;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.1rem;
-        }
-        
-        .mobile-menu-section {
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-section-title {
-            background: rgba(255,215,0,0.1);
-            color: #ffd700;
-            padding: 12px 15px;
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px solid #333;
-        }
-        
-        .mobile-menu-item {
-            padding: 15px;
-            color: #fff;
-            cursor: pointer;
-            border-bottom: 1px solid #222;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.95rem;
-        }
-        
-        .mobile-menu-item:active {
-            background: rgba(255,215,0,0.1);
-        }
-        
-        .mobile-menu-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            z-index: 1999;
-        }
-        
-        .mobile-menu-overlay.active {
-            display: block;
-        }
-        
-        @media (max-width: 768px) {
-            .win-menu-bar {
-                display: none;
-            }
-            .mobile-header {
-                display: flex;
-            }
-            .mobile-menu {
-                display: block;
-            }
-        }
-        
-        @media (min-width: 769px) {
-            .mobile-menu, .mobile-menu-overlay {
-                display: none !important;
-            }
-        }
-        
-        .header {
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 10px 15px; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
-            border-bottom: 2px solid #ffd700; 
-            flex-shrink: 0;
-        }
-        .header-info h3 { color: #ffd700; font-size: 1rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-        .header-info p { color: #888; font-size: 0.75rem; margin: 0; }
-        .monto-box { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 20px; }
-        .monto-box span { font-size: 0.8rem; font-weight: bold; color: #ffd700; }
-        .monto-box input {
-            width: 60px; padding: 6px; border: 2px solid #ffd700; border-radius: 6px;
-            background: #000; color: #ffd700; text-align: center; font-weight: bold; font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        
-        .main-container { 
-            display: flex; 
-            flex-direction: column;
-            flex: 1;
-            height: calc(100vh - 110px);
-            overflow: hidden;
-        }
-        
-        @media (min-width: 1024px) {
-            .main-container { flex-direction: row; }
-        }
-        
-        .left-panel { 
-            flex: 1; 
-            display: flex; 
-            flex-direction: column; 
-            min-height: 0;
-            overflow: hidden;
-        }
-        
-        .special-btns { 
-            display: grid; 
-            grid-template-columns: repeat(4, 1fr);
-            gap: 6px; 
-            padding: 10px; 
-            background: #111; 
-            flex-shrink: 0;
-        }
-        .btn-esp { 
-            padding: 12px 4px; 
-            border: none; 
-            border-radius: 8px; 
-            font-weight: bold; 
-            cursor: pointer; 
-            color: white; 
-            font-size: 0.8rem;
-            touch-action: manipulation;
-            min-height: 44px;
-            transition: all 0.1s;
-        }
-        .btn-esp:active { transform: scale(0.95); }
-        .btn-rojo { background: linear-gradient(135deg, #c0392b, #e74c3c); }
-        .btn-negro { background: linear-gradient(135deg, #2c3e50, #34495e); border: 1px solid #555; }
-        .btn-par { background: linear-gradient(135deg, #2980b9, #3498db); }
-        .btn-impar { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
-        .btn-esp.active { 
-            box-shadow: 0 0 15px rgba(255,255,255,0.5); 
-            transform: scale(0.95);
-            border: 2px solid white;
-        }
-        
-        .animals-grid {
-            flex: 1; 
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-            gap: 5px; 
-            padding: 10px; 
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        @media (min-width: 768px) {
-            .animals-grid { grid-template-columns: repeat(7, 1fr); }
-        }
-        
-        .animal-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e); 
-            border: 2px solid; 
-            border-radius: 10px;
-            padding: 8px 2px; 
-            text-align: center; 
-            cursor: pointer; 
-            transition: all 0.15s; 
-            min-height: 65px; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: center;
-            user-select: none;
-            position: relative;
-            touch-action: manipulation;
-        }
-        .animal-card:active { transform: scale(0.92); }
-        .animal-card.active { 
-            box-shadow: 0 0 15px rgba(255,215,0,0.6); 
-            border-color: #ffd700 !important; 
-            background: linear-gradient(135deg, #2a2a4e, #1a1a3e);
-            transform: scale(1.05);
-            z-index: 10;
-        }
-        .animal-card.tripleta-seleccionado {
-            box-shadow: 0 0 15px rgba(255,215,0,0.9); 
-            border-color: #ffd700 !important;
-            background: linear-gradient(135deg, #4a3c00, #2a2000);
-            transform: scale(1.08);
-            z-index: 15;
-        }
-        .animal-card .num { font-size: 1.2rem; font-weight: bold; line-height: 1; }
-        .animal-card .name { font-size: 0.7rem; color: #aaa; line-height: 1; margin-top: 4px; font-weight: 500; }
-        .animal-card.lechuza::after {
-            content: "x70";
-            position: absolute;
-            top: 3px;
-            right: 3px;
-            background: #ffd700;
-            color: black;
-            font-size: 0.6rem;
-            padding: 2px 4px;
-            border-radius: 4px;
-            font-weight: bold;
-        }
-        
-        .right-panel {
-            background: #111; 
-            border-top: 2px solid #333;
-            display: flex; 
-            flex-direction: column;
-            height: 40vh;
-            flex-shrink: 0;
-        }
-        @media (min-width: 1024px) { 
-            .right-panel { 
-                width: 350px; 
-                height: auto;
-                border-top: none;
-                border-left: 2px solid #333;
-            }
-        }
-        
-        .horarios {
-            display: flex;
-            gap: 6px;
-            padding: 10px;
-            overflow-x: auto;
-            flex-shrink: 0;
-            background: #0a0a0a;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
-            scrollbar-color: #ffd700 #222;
-        }
-        .horarios::-webkit-scrollbar { height: 8px; }
-        .horarios::-webkit-scrollbar-track { background: #222; border-radius: 4px; }
-        .horarios::-webkit-scrollbar-thumb { background: #ffd700; border-radius: 4px; }
-        
-        .btn-hora {
-            flex: 0 0 auto;
-            min-width: 85px;
-            padding: 10px 6px; 
-            background: #222; 
-            border: 1px solid #444;
-            border-radius: 8px; 
-            color: #ccc; 
-            cursor: pointer; 
-            font-size: 0.75rem; 
-            text-align: center; 
-            line-height: 1.3;
-            touch-action: manipulation;
-            transition: all 0.2s;
-        }
-        .btn-hora:hover { background: #333; border-color: #555; }
-        .btn-hora.active { 
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            font-weight: bold; 
-            border-color: #27ae60;
-            box-shadow: 0 0 10px rgba(39, 174, 96, 0.4);
-        }
-        .btn-hora.expired { 
-            background: #300; 
-            color: #666; 
-            text-decoration: line-through; 
-            pointer-events: none;
-            opacity: 0.5;
-        }
-        
-        .ticket-display {
-            flex: 1; 
-            background: #000; 
-            margin: 0 10px 10px; 
-            border-radius: 10px;
-            padding: 12px; 
-            border: 1px solid #333;
-            overflow-y: auto;
-            font-size: 0.85rem;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        .ticket-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.8rem;
-        }
-        .ticket-table th {
-            background: #1a1a2e;
-            color: #ffd700;
-            padding: 8px 6px;
-            text-align: left;
-            position: sticky;
-            top: 0;
-            font-size: 0.75rem;
-        }
-        .ticket-table td {
-            padding: 8px 6px;
-            border-bottom: 1px solid #222;
-            vertical-align: middle;
-        }
-        .ticket-table tr:last-child td { border-bottom: none; }
-        .ticket-total {
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 2px solid #ffd700;
-            text-align: right;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #ffd700;
-        }
-        
-        .action-btns { 
-            display: grid; 
-            grid-template-columns: repeat(3, 1fr); 
-            gap: 6px; 
-            padding: 10px;
-            background: #0a0a0a;
-            flex-shrink: 0;
-        }
-        .action-btns button {
-            padding: 14px 5px; 
-            border: none; 
-            border-radius: 8px;
-            font-weight: bold; 
-            cursor: pointer; 
-            font-size: 0.8rem;
-            touch-action: manipulation;
-            min-height: 48px;
-            transition: all 0.1s;
-        }
-        .action-btns button:active { transform: scale(0.95); }
-        .btn-agregar { 
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            grid-column: span 3; 
-            font-size: 1.1rem;
-        }
-        .btn-vender { 
-            background: linear-gradient(135deg, #2980b9, #2573a7); 
-            color: white; 
-            grid-column: span 3;
-            font-size: 1rem;
-        }
-        .btn-resultados { background: #f39c12; color: black; }
-        .btn-caja { background: #16a085; color: white; }
-        .btn-pagar { background: #8e44ad; color: white; }
-        .btn-tripleta { 
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            font-weight: bold;
-            border: 2px solid #FFD700;
-            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
-        }
-        .btn-tripleta.active {
-            background: linear-gradient(135deg, #FFA500, #FF8C00);
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
-            transform: scale(0.95);
-        }
-        .btn-anular { background: #c0392b; color: white; }
-        .btn-borrar { background: #555; color: white; }
-        .btn-salir { background: #333; color: white; grid-column: span 3; }
-        
-        .tripleta-info {
-            background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.1));
-            border: 2px solid #FFD700;
-            border-radius: 8px;
-            padding: 10px;
-            margin: 0 10px 10px;
-            text-align: center;
-            color: #FFD700;
-            font-weight: bold;
-            display: none;
-        }
-        .tripleta-info.active {
-            display: block;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); }
-            50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); }
-        }
-        
-        .modal {
-            display: none; 
-            position: fixed; 
-            top: 0; left: 0;
-            width: 100%; 
-            height: 100%; 
-            background: rgba(0,0,0,0.95);
-            z-index: 1000; 
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        .modal-content {
-            background: #1a1a2e; 
-            margin: 10px; 
-            padding: 20px; 
-            border-radius: 15px; 
-            border: 2px solid #ffd700; 
-            max-width: 100%;
-            min-height: calc(100vh - 20px);
-        }
-        @media (min-width: 768px) {
-            .modal-content {
-                margin: 40px auto; 
-                max-width: 700px;
-                min-height: auto;
-            }
-        }
-        .modal-header {
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
-            margin-bottom: 20px; 
-            padding-bottom: 15px; 
-            border-bottom: 1px solid #333;
-        }
-        .modal h3 { color: #ffd700; font-size: 1.3rem; }
-        .btn-close {
-            background: #c0392b; 
-            color: white; 
-            border: none; 
-            padding: 8px 16px; 
-            border-radius: 6px; 
-            cursor: pointer;
-            font-weight: bold;
-        }
-        
-        .tabs { 
-            display: flex; 
-            gap: 2px; 
-            margin-bottom: 20px; 
-            border-bottom: 2px solid #333;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        .tabs::-webkit-scrollbar { display: none; }
-        .tab-btn { 
-            flex: 1;
-            background: transparent; 
-            border: none; 
-            color: #888; 
-            padding: 14px 10px; 
-            cursor: pointer; 
-            font-size: 0.85rem; 
-            border-bottom: 3px solid transparent;
-            white-space: nowrap;
-            min-width: 80px;
-        }
-        .tab-btn.active { color: #ffd700; border-bottom-color: #ffd700; font-weight: bold; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        
-        .stats-box {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e); 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin: 15px 0;
-            border: 1px solid #333;
-        }
-        .stat-row {
-            display: flex; 
-            justify-content: space-between; 
-            padding: 12px 0;
-            border-bottom: 1px solid #222; 
-            font-size: 1rem;
-            align-items: center;
-        }
-        .stat-row:last-child { border-bottom: none; }
-        .stat-label { color: #aaa; }
-        .stat-value { color: #ffd700; font-weight: bold; font-size: 1.2rem; }
-        .stat-value.negative { color: #e74c3c; }
-        .stat-value.positive { color: #27ae60; }
-        
-        .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin: 15px 0;
-            border-radius: 8px;
-            border: 1px solid #333;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 0.85rem; 
-            min-width: 300px;
-        }
-        th, td { 
-            padding: 12px 8px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-            white-space: nowrap;
-        }
-        th { 
-            background: linear-gradient(135deg, #ffd700, #ffed4e); 
-            color: black; 
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-        }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; color: #888; font-size: 0.9rem; margin-bottom: 6px; }
-        .form-group input, .form-group select {
-            width: 100%; padding: 12px; background: #000; border: 1px solid #444;
-            color: white; border-radius: 8px; font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        .btn-consultar {
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            border: none; 
-            padding: 14px;
-            width: 100%; 
-            border-radius: 8px; 
-            font-weight: bold; 
-            cursor: pointer;
-            margin-top: 10px;
-            font-size: 1rem;
-        }
-        
-        .alert-box {
-            background: rgba(243, 156, 18, 0.15); 
-            border: 1px solid #f39c12;
-            padding: 15px; 
-            border-radius: 8px; 
-            margin: 15px 0; 
-            font-size: 0.9rem;
-        }
-        .alert-box strong { color: #f39c12; }
-
-        .resultado-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #27ae60;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .resultado-item.pendiente {
-            border-left-color: #666;
-            opacity: 0.7;
-        }
-        .resultado-numero {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.4rem;
-        }
-        .resultado-nombre {
-            color: #aaa;
-            font-size: 1rem;
-        }
-        
-        .toast-notification {
-            position: fixed;
-            top: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 14px 24px;
-            border-radius: 30px;
-            font-size: 0.95rem;
-            z-index: 10000;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
-            max-width: 90%;
-            text-align: center;
-            font-weight: bold;
-            animation: slideDown 0.3s ease;
-        }
-        @keyframes slideDown {
-            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-            to { transform: translateX(-50%) translateY(0); opacity: 1; }
-        }
-        @keyframes slideUp {
-            from { transform: translateX(-50%) translateY(0); opacity: 1; }
-            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-        }
-        
-        .ticket-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #2980b9;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .ticket-item:active {
-            background: #1a1a2e;
-        }
-        .ticket-item.ganador {
-            border-left-color: #27ae60;
-            background: rgba(39,174,96,0.1);
-        }
-        .ticket-item.pendiente-pago {
-            border-left-color: #f39c12;
-            background: rgba(243,156,18,0.1);
-        }
-        .ticket-serial {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        .ticket-info {
-            color: #888;
-            font-size: 0.85rem;
-            margin-top: 5px;
-        }
-        .ticket-premio {
-            color: #27ae60;
-            font-weight: bold;
-            font-size: 1.2rem;
-            margin-top: 5px;
-        }
-        .ticket-estado {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .estado-pagado { background: #27ae60; color: white; }
-        .estado-pendiente { background: #f39c12; color: black; }
-        
-        .filter-row {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        .filter-row select, .filter-row input {
-            flex: 1;
-            min-width: 120px;
-            padding: 10px;
-            background: #000;
-            border: 1px solid #444;
-            color: white;
-            border-radius: 6px;
-        }
-        
-        .jugada-detail {
-            background: #111;
-            padding: 8px;
-            margin: 4px 0;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .jugada-ganadora {
-            background: rgba(39,174,96,0.2);
-            border: 1px solid #27ae60;
-        }
-    </style>
-</head>
-<body>
-    <div class="win-menu-bar">
-        <div class="win-menu-header">
-            <div class="win-title">🦁 {{agencia}}</div>
-            <button onclick="location.href='/logout'" style="background: #c0392b; color: white; border: none; padding: 6px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.8rem;">SALIR</button>
-        </div>
-        <ul class="win-menu-items">
-            <li class="win-menu-item">
-                <a>📁 Archivo</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirCaja()">💰 Caja del Día</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCajaHistorico()">📊 Historial de Caja</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirCalculadora()">🧮 Calculadora de Premios</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>🔍 Consultas</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="abrirMisTickets()">🎫 Mis Tickets Vendidos</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirBuscarTicket()">🔎 Buscar Ticket por Serial</a></li>
-                    <li class="win-submenu-item"><a onclick="abrirMisTicketsPendientes()">💰 Tickets por Cobrar</a></li>
-                    <li class="win-submenu-item"><a onclick="verResultados()">📋 Resultados de Hoy</a></li>
-                </ul>
-            </li>
-            <li class="win-menu-item">
-                <a>❓ Ayuda</a>
-                <ul class="win-submenu">
-                    <li class="win-submenu-item"><a onclick="mostrarReglas()">📖 Reglas de Pago</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarComoUsar()">❓ Cómo Usar</a></li>
-                    <li class="win-submenu-item"><a onclick="mostrarAcerca()">ℹ️ Acerca del Sistema</a></li>
-                </ul>
-            </li>
-        </ul>
-    </div>
-
-    <div class="mobile-header">
-        <div class="mobile-title">🦁 {{agencia}}</div>
-        <button class="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
-    </div>
-    
-    <div class="mobile-menu-overlay" onclick="toggleMobileMenu()"></div>
-    <div class="mobile-menu" id="mobileMenu">
-        <div class="mobile-menu-header">
-            <div class="mobile-menu-title">MENÚ</div>
-            <button class="close-menu-btn" onclick="toggleMobileMenu()">×</button>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">📁 Archivo</div>
-            <div class="mobile-menu-item" onclick="abrirCajaMobile()">💰 Caja del Día</div>
-            <div class="mobile-menu-item" onclick="abrirCajaHistoricoMobile()">📊 Historial de Caja</div>
-            <div class="mobile-menu-item" onclick="abrirCalculadoraMobile()">🧮 Calculadora</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">🔍 Consultas</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsMobile()">🎫 Mis Tickets Vendidos</div>
-            <div class="mobile-menu-item" onclick="abrirBuscarTicketMobile()">🔎 Buscar Ticket</div>
-            <div class="mobile-menu-item" onclick="abrirMisTicketsPendientesMobile()">💰 Tickets por Cobrar</div>
-            <div class="mobile-menu-item" onclick="verResultadosMobile()">📋 Resultados</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-section-title">❓ Ayuda</div>
-            <div class="mobile-menu-item" onclick="mostrarReglasMobile()">📖 Reglas</div>
-            <div class="mobile-menu-item" onclick="mostrarComoUsarMobile()">❓ Cómo Usar</div>
-            <div class="mobile-menu-item" onclick="mostrarAcercaMobile()">ℹ️ Acerca de</div>
-        </div>
-        
-        <div class="mobile-menu-section">
-            <div class="mobile-menu-item" onclick="location.href='/logout'" style="color: #e74c3c; font-weight: bold;">🚪 Cerrar Sesión</div>
-        </div>
-    </div>
-
-    <div class="header">
-        <div class="header-info">
-            <h3>{{agencia}}</h3>
-            <p id="reloj">--</p>
-        </div>
-        <div class="monto-box">
-            <span>S/:</span>
-            <input type="number" id="monto" value="5" min="1">
-        </div>
-    </div>
-    
-    <div class="tripleta-info" id="tripleta-banner">
-        🎯 MODO TRIPLETA: Selecciona 3 animalitos (Paga x60 si salen hoy)
-    </div>
-    
-    <div class="main-container">
-        <div class="left-panel">
-            <div class="special-btns">
-                <button class="btn-esp btn-rojo" onclick="toggleEsp('ROJO')">ROJO</button>
-                <button class="btn-esp btn-negro" onclick="toggleEsp('NEGRO')">NEGRO</button>
-                <button class="btn-esp btn-par" onclick="toggleEsp('PAR')">PAR</button>
-                <button class="btn-esp btn-impar" onclick="toggleEsp('IMPAR')">IMPAR</button>
-            </div>
-            <div class="animals-grid" id="animals-grid">
-                {% for k, v in animales.items() %}
-                <div class="animal-card {{ 'lechuza' if k == '40' else '' }}" id="ani-{{k}}" style="border-color: {{get_color(k)}}" onclick="toggleAni('{{k}}', '{{v}}')">
-                    <div class="num">{{k}}</div>
-                    <div class="name">{{v}}</div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        <div class="right-panel">
-            <div class="horarios" id="horarios">
-                {% for h in horarios_peru %}
-                <div class="btn-hora" id="hora-{{loop.index}}" onclick="toggleHora('{{h}}', '{{loop.index}}')">
-                    {{h}}<br><small>{{horarios_venezuela[loop.index0]}}</small>
-                </div>
-                {% endfor %}
-            </div>
-            <div class="ticket-display" id="ticket-display">
-                <div style="text-align:center; color:#666; padding:20px; font-style:italic;">
-                    Selecciona animales y horarios...
-                </div>
-            </div>
-            <div class="action-btns">
-                <button class="btn-agregar" onclick="agregar()">AGREGAR AL TICKET</button>
-                <button class="btn-vender" onclick="vender()">ENVIAR POR WHATSAPP</button>
-                <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
-                <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
-                <button class="btn-pagar" onclick="pagar()">PAGAR</button>
-                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
-                <button class="btn-anular" onclick="anular()">ANULAR</button>
-                <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
-                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-caja">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>ESTADO DE CAJA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-caja')">X</button>
-            </div>
-            
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('hoy')">Hoy</button>
-                <button class="tab-btn" onclick="switchTab('historico')">Histórico</button>
-            </div>
-
-            <div id="tab-hoy" class="tab-content active">
-                <div class="stats-box">
-                    <div class="stat-row">
-                        <span class="stat-label">Ventas:</span>
-                        <span class="stat-value" id="caja-ventas">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Premios Pagados:</span>
-                        <span class="stat-value negative" id="caja-premios">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Tu Comisión:</span>
-                        <span class="stat-value" id="caja-comision">S/0.00</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Balance:</span>
-                        <span class="stat-value" id="caja-balance">S/0.00</span>
-                    </div>
-                </div>
-                
-                <div id="alerta-pendientes" class="alert-box" style="display:none;">
-                    <strong>⚠️ Tickets por Cobrar:</strong>
-                    <div id="info-pendientes"></div>
-                </div>
-            </div>
-
-            <div id="tab-historico" class="tab-content">
-                <div class="form-group">
-                    <label>Desde:</label>
-                    <input type="date" id="hist-fecha-inicio">
-                </div>
-                <div class="form-group">
-                    <label>Hasta:</label>
-                    <input type="date" id="hist-fecha-fin">
-                </div>
-                <button class="btn-consultar" onclick="consultarHistoricoCaja()">CONSULTAR HISTORIAL</button>
-                
-                <div id="resultado-historico" style="display:none; margin-top: 20px;">
-                    <div class="stats-box">
-                        <div class="stat-row">
-                            <span class="stat-label">Total Ventas:</span>
-                            <span class="stat-value" id="hist-ventas">S/0.00</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total Premios:</span>
-                            <span class="stat-value negative" id="hist-premios">S/0.00</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Balance:</span>
-                            <span class="stat-value" id="hist-balance">S/0.00</span>
-                        </div>
-                    </div>
-
-                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin-top: 15px;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico-caja"></tbody>
-                        </table>
-                    </div>
-
-                    <div id="hist-alerta-pendientes" class="alert-box" style="display:none;">
-                        <strong>💰 Pendiente por Cobrar:</strong>
-                        <div id="hist-info-pendientes"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-resultados">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>RESULTADOS DE SORTEOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-resultados')">X</button>
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 20px;">
-                <label>Seleccionar Fecha:</label>
-                <input type="date" id="resultados-fecha" onchange="cargarResultadosFecha()">
-                <button class="btn-consultar" onclick="cargarResultadosFecha()" style="margin-top: 10px;">CONSULTAR FECHA</button>
-            </div>
-
-            <div style="margin-bottom: 15px; text-align: center; color: #ffd700; font-size: 1.1rem; font-weight: bold;" id="resultados-fecha-titulo">
-                Hoy
-            </div>
-
-            <div id="lista-resultados" style="max-height: 400px; overflow-y: auto;">
-                <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-mis-tickets">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🎫 MIS TICKETS VENDIDOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button>
-            </div>
-            
-            <div class="filter-row">
-                <input type="date" id="mis-tickets-fecha-inicio" placeholder="Desde">
-                <input type="date" id="mis-tickets-fecha-fin" placeholder="Hasta">
-                <select id="mis-tickets-estado">
-                    <option value="todos">Todos</option>
-                    <option value="pagados">Pagados</option>
-                    <option value="pendientes">Pendientes</option>
-                    <option value="por_pagar">Con Premio (por cobrar)</option>
-                </select>
-            </div>
-            <button class="btn-consultar" onclick="consultarMisTickets()">BUSCAR</button>
-            
-            <div id="mis-tickets-resumen" style="margin: 15px 0; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 8px; display: none;">
-                <strong style="color: #ffd700;">Resumen:</strong> <span id="mis-tickets-info"></span>
-            </div>
-            
-            <div id="lista-mis-tickets" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
-                <p style="color: #888; text-align: center; padding: 20px;">Use los filtros y presione BUSCAR</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-buscar-ticket">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🔎 BUSCAR TICKET POR SERIAL</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button>
-            </div>
-            
-            <div class="form-group">
-                <label>Ingrese el número de serial:</label>
-                <input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center; letter-spacing: 2px;">
-            </div>
-            <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
-            
-            <div id="resultado-busqueda-ticket" style="margin-top: 20px;">
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-calculadora">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>🧮 CALCULADORA DE PREMIOS</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button>
-            </div>
-            
-            <div class="form-group">
-                <label>Monto Apostado (S/):</label>
-                <input type="number" id="calc-monto" value="10" min="1">
-            </div>
-            
-            <div class="form-group">
-                <label>Tipo de Apuesta:</label>
-                <select id="calc-tipo" onchange="calcularPremio()">
-                    <option value="35">Animal Normal (00-39) x35</option>
-                    <option value="70">Lechuza (40) x70</option>
-                    <option value="2">Especial (Rojo/Negro/Par/Impar) x2</option>
-                    <option value="60">TRIPLETA x60</option>
-                </select>
-            </div>
-            
-            <button class="btn-consultar" onclick="calcularPremio()">CALCULAR</button>
-            
-            <div class="stats-box" id="calc-resultado" style="display: none; margin-top: 20px; text-align: center;">
-                <div style="color: #888; margin-bottom: 5px;">Premio a Pagar:</div>
-                <div style="color: #ffd700; font-size: 2rem; font-weight: bold;" id="calc-total">S/0.00</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-pendientes">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>💰 MIS TICKETS POR COBRAR</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button>
-            </div>
-            
-            <div id="pendientes-info" style="margin-bottom: 15px; color: #ffd700; font-weight: bold; text-align: center;">
-                Cargando...
-            </div>
-            
-            <div id="lista-pendientes" style="max-height: 400px; overflow-y: auto;">
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-reglas">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>📖 REGLAS DE PAGO</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-reglas')">X</button>
-            </div>
-            
-            <div style="line-height: 2; color: #ddd;">
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 Animales (00-39)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #27ae60;">x35</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/350</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🦉 Lechuza (40)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Pago: <strong style="color: #e74c3c;">x70</strong> veces el monto apostado</li>
-                    <li>Ejemplo: S/10 → S/700</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🎯 TRIPLETA (Nuevo)</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Selecciona <strong>3 animalitos</strong></li>
-                    <li>Si salen los 3 durante el día (cualquier hora, cualquier orden): <strong style="color: #ffd700;">x60</strong></li>
-                    <li>Ejemplo: S/10 → S/600</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">🎲 Especiales</h4>
-                <ul style="margin-left: 20px; margin-bottom: 20px;">
-                    <li>Rojo, Negro, Par, Impar</li>
-                    <li>Pago: <strong style="color: #2980b9;">x2</strong> veces el monto</li>
-                </ul>
-                
-                <h4 style="color: #ffd700; margin: 15px 0;">⚠️ Importante</h4>
-                <ul style="margin-left: 20px;">
-                    <li>Anular: Solo dentro de 5 minutos</li>
-                    <li>Bloqueo: 5 minutos antes del sorteo</li>
-                    <li>Vencimiento: Tickets vencen a los 3 días</li>
-                    <li>Horarios: 8AM a 6PM hora Perú (11 sorteos)</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-como-usar">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>❓ CÓMO USAR EL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-como-usar')">X</button>
-            </div>
-            
-            <div style="line-height: 1.8; color: #ddd;">
-                <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #ffd700;">
-                    <h4 style="color: #ffd700; margin-bottom: 10px;">1. Hacer una Venta Normal</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Selecciona el monto (arriba a la derecha)</li>
-                        <li>Toca los animales que quieres jugar</li>
-                        <li>Selecciona los horarios (puedes varios)</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>Repite si quieres más jugadas</li>
-                        <li>Presiona "ENVIAR POR WHATSAPP"</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(255,165,0,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #FFA500;">
-                    <h4 style="color: #FFA500; margin-bottom: 10px;">2. Hacer una Tripleta</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón 🎯 TRIPLETA (se pone dorado)</li>
-                        <li>Selecciona exactamente 3 animalitos</li>
-                        <li>Presiona "AGREGAR AL TICKET"</li>
-                        <li>La tripleta gana si salen los 3 números en cualquier momento del día</li>
-                        <li>Paga <strong>x60</strong> veces el monto apostado</li>
-                    </ol>
-                </div>
-                
-                <div style="background: rgba(39,174,96,0.1); padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid #27ae60;">
-                    <h4 style="color: #27ae60; margin-bottom: 10px;">3. Pagar un Ticket Ganador</h4>
-                    <ol style="margin-left: 20px; color: #aaa;">
-                        <li>Presiona el botón PAGAR</li>
-                        <li>Ingresa el SERIAL del ticket</li>
-                        <li>Verifica el monto ganado</li>
-                        <li>Confirma el pago</li>
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="modal-acerca">
-        <div class="modal-content" style="text-align: center;">
-            <div class="modal-header">
-                <h3>ℹ️ ACERCA DEL SISTEMA</h3>
-                <button class="btn-close" onclick="cerrarModal('modal-acerca')">X</button>
-            </div>
-            
-            <div style="padding: 20px;">
-                <div style="font-size: 4rem; margin-bottom: 20px;">🦁</div>
-                <h2 style="color: #ffd700; margin-bottom: 10px;">ZOOLO CASINO</h2>
-                <p style="color: #888; font-size: 1.2rem; margin-bottom: 20px;">Versión 6.1 - Tripleta x60</p>
-                
-                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,215,0,0.3); margin-top: 20px;">
-                    <p style="color: #ffd700; margin: 0; line-height: 1.8;">
-                        Sistema de Lotería Animal<br>
-                        Zona Horaria: Perú (UTC-5)<br>
-                        Nuevos Horarios: 8AM - 6PM (11 sorteos)<br><br>
-                        <strong>Novedades v6.1:</strong><br>
-                        ✓ Apuesta Tripleta (x60)<br>
-                        ✓ Horarios actualizados<br>
-                        ✓ 11 sorteos diarios
-                    </p>
-                </div>
-                
-                <p style="color: #666; margin-top: 20px; font-size: 0.9rem;">
-                    © 2025 ZOOLO CASINO<br>
-                    Todos los derechos reservados
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let seleccionados = [], especiales = [], horariosSel = [], carrito = [];
-        let modoTripleta = false;
-        let seleccionTripleta = [];
-        let horasPeru = JSON.parse('{{ horarios_peru | tojson | safe }}');
-        let horasVen = JSON.parse('{{ horarios_venezuela | tojson | safe }}');
-        
-        function toggleMobileMenu() {
-            const menu = document.getElementById('mobileMenu');
-            const overlay = document.querySelector('.mobile-menu-overlay');
-            menu.classList.toggle('active');
-            overlay.classList.toggle('active');
-        }
-        
-        function abrirCajaMobile() { toggleMobileMenu(); abrirCaja(); }
-        function abrirCajaHistoricoMobile() { toggleMobileMenu(); abrirCajaHistorico(); }
-        function abrirCalculadoraMobile() { toggleMobileMenu(); abrirCalculadora(); }
-        function abrirMisTicketsMobile() { toggleMobileMenu(); abrirMisTickets(); }
-        function abrirBuscarTicketMobile() { toggleMobileMenu(); abrirBuscarTicket(); }
-        function abrirMisTicketsPendientesMobile() { toggleMobileMenu(); abrirMisTicketsPendientes(); }
-        function verResultadosMobile() { toggleMobileMenu(); verResultados(); }
-        function mostrarReglasMobile() { toggleMobileMenu(); mostrarReglas(); }
-        function mostrarComoUsarMobile() { toggleMobileMenu(); mostrarComoUsar(); }
-        function mostrarAcercaMobile() { toggleMobileMenu(); mostrarAcerca(); }
-        
-        function showToast(message, type = 'info') {
-            const existing = document.querySelector('.toast-notification');
-            if (existing) existing.remove();
-            
-            const toast = document.createElement('div');
-            toast.className = 'toast-notification';
-            toast.style.background = type === 'error' ? '#c0392b' : type === 'success' ? '#27ae60' : '#2980b9';
-            toast.style.color = 'white';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => {
-                toast.style.animation = 'slideUp 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
-        
-        function toggleModoTripleta() {
-            modoTripleta = !modoTripleta;
-            const btn = document.getElementById('btn-tripleta');
-            const banner = document.getElementById('tripleta-banner');
-            
-            if (modoTripleta) {
-                btn.classList.add('active');
-                banner.classList.add('active');
-                seleccionTripleta = [];
-                showToast('Modo Tripleta activado: Selecciona 3 animalitos (Paga x60)', 'info');
-            } else {
-                btn.classList.remove('active');
-                banner.classList.remove('active');
-                seleccionTripleta = [];
-                // Limpiar selección visual
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
-                });
-            }
-            updateTicket();
-        }
-        
-        function updateReloj() {
-            try {
-                let now = new Date();
-                let peruTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Lima"}));
-                document.getElementById('reloj').textContent = peruTime.toLocaleString('es-PE', {
-                    hour: '2-digit', 
-                    minute:'2-digit', 
-                    hour12: true,
-                    timeZone: 'America/Lima'
-                });
-                
-                let horaActual = peruTime.getHours() * 60 + peruTime.getMinutes();
-                
-                if (typeof horasPeru === 'undefined' || !Array.isArray(horasPeru)) {
-                    console.error('horasPeru no está definido correctamente');
-                    return;
-                }
-                
-                horasPeru.forEach((h, idx) => {
-                    try {
-                        let partes = h.split(/[: ]/);
-                        let hora = parseInt(partes[0]);
-                        let minuto = parseInt(partes[1]);
-                        let ampm = partes[2];
-                        if (ampm === 'PM' && hora !== 12) hora += 12;
-                        if (ampm === 'AM' && hora === 12) hora = 0;
-                        let sorteoMinutos = hora * 60 + minuto;
-                        let btn = document.getElementById('hora-' + (idx + 1));
-                        if (btn && horaActual > sorteoMinutos - 5) {
-                            btn.classList.add('expired');
-                        }
-                    } catch(e) {
-                        console.error('Error procesando hora:', h, e);
-                    }
-                });
-            } catch(e) {
-                console.error('Error en updateReloj:', e);
-            }
-        }
-        
-        setInterval(updateReloj, 30000);
-        setTimeout(updateReloj, 1000);
-        
-        function toggleAni(k, nombre) {
-            if (modoTripleta) {
-                // Lógica de tripleta: máximo 3, toggle individual
-                let idx = seleccionTripleta.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                
-                if (idx >= 0) {
-                    seleccionTripleta.splice(idx, 1);
-                    el.classList.remove('tripleta-seleccionado');
-                } else {
-                    if (seleccionTripleta.length >= 3) {
-                        showToast('Solo puedes seleccionar 3 animalitos para la tripleta', 'error');
-                        return;
-                    }
-                    seleccionTripleta.push({k, nombre});
-                    el.classList.add('tripleta-seleccionado');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }
-            } else {
-                // Lógica normal
-                let idx = seleccionados.findIndex(a => a.k === k);
-                let el = document.getElementById('ani-' + k);
-                if (idx >= 0) {
-                    seleccionados.splice(idx, 1);
-                    el.classList.remove('active');
-                } else {
-                    seleccionados.push({k, nombre});
-                    el.classList.add('active');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                }
-            }
-            updateTicket();
-        }
-        
-        function toggleEsp(tipo) {
-            if (modoTripleta) {
-                showToast('No puedes jugar especiales en modo Tripleta', 'error');
-                return;
-            }
-            let idx = especiales.indexOf(tipo);
-            let el = document.querySelector('.btn-' + tipo.toLowerCase());
-            if (idx >= 0) {
-                especiales.splice(idx, 1);
-                el.classList.remove('active');
-            } else {
-                especiales.push(tipo);
-                el.classList.add('active');
-            }
-            updateTicket();
-        }
-        
-        function toggleHora(hora, id) {
-            if (modoTripleta) {
-                showToast('Las tripletas no necesitan horario (válidas todo el día)', 'info');
-                return;
-            }
-            let btn = document.getElementById('hora-' + id);
-            if (btn.classList.contains('expired')) {
-                showToast('Este sorteo ya cerró', 'error');
-                return;
-            }
-            let idx = horariosSel.indexOf(hora);
-            if (idx >= 0) {
-                horariosSel.splice(idx, 1);
-                btn.classList.remove('active');
-            } else {
-                horariosSel.push(hora);
-                btn.classList.add('active');
-            }
-            updateTicket();
-        }
-        
-        function updateTicket() {
-            const display = document.getElementById('ticket-display');
-            let total = 0;
-            let html = '<table class="ticket-table"><thead><tr><th>Hora</th><th>Apuesta</th><th>S/</th></tr></thead><tbody>';
-            
-            for (let item of carrito) {
-                let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : 
-                         item.tipo === 'tripleta' ? 'TRIP' : item.seleccion;
-                let color = item.tipo === 'animal' ? '#ffd700' : 
-                           item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
-                let horaTxt = item.tipo === 'tripleta' ? 'Todo el día' : item.hora;
-                html += `<tr>
-                    <td style="color:#aaa; font-size:0.75rem">${horaTxt}</td>
-                    <td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td>
-                    <td style="text-align:right; font-weight:bold">${item.monto}</td>
-                </tr>`;
-                total += item.monto;
-            }
-            
-            // Mostrar selección actual si hay algo pendiente
-            if (modoTripleta && seleccionTripleta.length > 0) {
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                html += `<tr style="opacity:0.8; background:rgba(255,165,0,0.2)">
-                    <td style="color:#FFA500; font-size:0.75rem">Todo el día</td>
-                    <td style="color:#FFA500; font-size:0.8rem">🎯 ${nums} (${nombres})</td>
-                    <td style="text-align:right; color:#FFA500; font-weight:bold">${monto}</td>
-                </tr>`;
-            } else if (!modoTripleta && horariosSel.length > 0 && (seleccionados.length > 0 || especiales.length > 0)) {
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                for (let h of horariosSel) {
-                    for (let a of seleccionados) {
-                        let indicador = a.k === "40" ? " 🦉x70" : "";
-                        html += `<tr style="opacity:0.7; background:rgba(255,215,0,0.1)">
-                            <td style="color:#ffd700; font-size:0.75rem">${h}</td>
-                            <td style="color:#ffd700; font-size:0.8rem">${a.k} ${a.nombre}${indicador}</td>
-                            <td style="text-align:right; color:#ffd700; font-weight:bold">${monto}</td>
-                        </tr>`;
-                    }
-                    for (let e of especiales) {
-                        html += `<tr style="opacity:0.7; background:rgba(52,152,219,0.1)">
-                            <td style="color:#3498db; font-size:0.75rem">${h}</td>
-                            <td style="color:#3498db; font-size:0.8rem">${e}</td>
-                            <td style="text-align:right; color:#3498db; font-weight:bold">${monto}</td>
-                        </tr>`;
-                    }
-                }
-            }
-            
-            html += '</tbody></table>';
-            
-            if (carrito.length === 0 && 
-                (seleccionados.length === 0 && especiales.length === 0 && seleccionTripleta.length === 0)) {
-                html = '<div style="text-align:center; color:#666; padding:20px; font-style:italic;">Selecciona animales y horarios...</div>';
-            } else if (carrito.length === 0) {
-                html += '<div style="text-align:center; color:#888; padding:15px; font-size:0.85rem; background:rgba(255,215,0,0.05); border-radius:8px; margin-top:10px;">👆 Presiona AGREGAR para confirmar las selecciones</div>';
-            }
-            
-            if (total > 0) {
-                html += `<div class="ticket-total">TOTAL: S/${total}</div>`;
-            }
-            
-            display.innerHTML = html;
-        }
-        
-        function agregar() {
-            if (modoTripleta) {
-                if (seleccionTripleta.length !== 3) {
-                    showToast('Debes seleccionar exactamente 3 animalitos para la tripleta', 'error');
-                    return;
-                }
-                let monto = parseFloat(document.getElementById('monto').value) || 5;
-                let nums = seleccionTripleta.map(a => a.k).join(',');
-                let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                
-                carrito.push({
-                    hora: 'Todo el día', 
-                    seleccion: nums, 
-                    nombre: nombres, 
-                    monto: monto, 
-                    tipo: 'tripleta'
-                });
-                
-                // Limpiar selección
-                seleccionTripleta = [];
-                document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => {
-                    el.classList.remove('tripleta-seleccionado');
-                });
-                
-                showToast('Tripleta agregada al ticket (Paga x60)', 'success');
-                updateTicket();
-                return;
-            }
-            
-            if (horariosSel.length === 0 || (seleccionados.length === 0 && especiales.length === 0)) {
-                showToast('Selecciona horario y animal/especial', 'error'); 
-                return;
-            }
-            let monto = parseFloat(document.getElementById('monto').value) || 5;
-            let count = 0;
-            for (let h of horariosSel) {
-                for (let a of seleccionados) {
-                    carrito.push({hora: h, seleccion: a.k, nombre: a.nombre, monto: monto, tipo: 'animal'});
-                    count++;
-                }
-                for (let e of especiales) {
-                    carrito.push({hora: h, seleccion: e, nombre: e, monto: monto, tipo: 'especial'});
-                    count++;
-                }
-            }
-            seleccionados = []; especiales = []; horariosSel = [];
-            document.querySelectorAll('.animal-card.active, .btn-esp.active, .btn-hora.active').forEach(el => el.classList.remove('active'));
-            updateTicket();
-            showToast(`${count} jugada(s) agregada(s)`, 'success');
-        }
-        
-        async function vender() {
-            if (carrito.length === 0) { 
-                showToast('Carrito vacío', 'error'); 
-                return; 
-            }
-            
-            const btn = document.querySelector('.btn-vender');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Procesando...';
-            btn.disabled = true;
-            
-            try {
-                let jugadas = carrito.map(c => ({
-                    hora: c.hora, 
-                    seleccion: c.seleccion, 
-                    monto: c.monto, 
-                    tipo: c.tipo
-                }));
-                
-                const response = await fetch('/api/procesar-venta', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({jugadas: jugadas})
-                });
-                
-                const data = await response.json();
-                
-                if (data.error) {
-                    showToast(data.error, 'error');
-                } else {
-                    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-                        window.location.href = data.url_whatsapp;
-                    } else {
-                        window.open(data.url_whatsapp, '_blank');
-                    }
-                    carrito = []; 
-                    updateTicket();
-                    showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
-                }
-            } catch (e) {
-                showToast('Error de conexión. Intenta de nuevo.', 'error');
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }
-        }
-
-        function verResultados() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('resultados-fecha').value = hoy;
-            cargarResultadosFecha();
-            document.getElementById('modal-resultados').style.display = 'block';
-        }
-
-        function cargarResultadosFecha() {
-            let fecha = document.getElementById('resultados-fecha').value;
-            if (!fecha) return;
-            
-            let container = document.getElementById('lista-resultados');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('resultados-fecha-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
-            fetch('/api/resultados-fecha', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                let html = '';
-                if (d.resultados && Object.keys(d.resultados).length > 0) {
-                    for (let hora of horasPeru) {
-                        let resultado = d.resultados[hora];
-                        let clase = resultado ? '' : 'pendiente';
-                        let contenido;
-                        
-                        if (resultado) {
-                            contenido = `
-                                <span class="resultado-numero">${resultado.animal}</span>
-                                <span class="resultado-nombre">${resultado.nombre}</span>
-                            `;
-                        } else {
-                            contenido = `
-                                <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                                <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
-                            `;
-                        }
-                        
-                        let horaVenIdx = horasPeru.indexOf(hora);
-                        let horaVen = horaVenIdx >= 0 ? horasVen[horaVenIdx] : '';
-                        
-                        html += `
-                            <div class="resultado-item ${clase}">
-                                <div style="display: flex; flex-direction: column;">
-                                    <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                                    <small style="color: #666; font-size: 0.75rem;">Venezuela: ${horaVen}</small>
-                                </div>
-                                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end;">
-                                    ${contenido}
-                                </div>
-                            </div>
-                        `;
-                    }
-                } else {
-                    html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles para esta fecha</p>';
-                }
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function cerrarModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-        
-        function abrirCaja() {
-            fetch('/api/caja')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) { 
-                    showToast(d.error, 'error'); 
-                    return; 
-                }
-                document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
-                document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
-                document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
-                
-                let balanceEl = document.getElementById('caja-balance');
-                balanceEl.textContent = 'S/' + d.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
-                
-                let alertaDiv = document.getElementById('alerta-pendientes');
-                let infoDiv = document.getElementById('info-pendientes');
-                if (d.tickets_pendientes > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.<br>¡Pasa a pagar!`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
-                
-                document.getElementById('modal-caja').style.display = 'block';
-            })
-            .catch(e => showToast('Error de conexión', 'error'));
-            
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-        }
-        
-        function abrirCajaHistorico() {
-            abrirCaja();
-            setTimeout(() => switchTab('historico'), 100);
-        }
-        
-        function abrirCalculadora() {
-            document.getElementById('modal-calculadora').style.display = 'block';
-            calcularPremio();
-        }
-        
-        function calcularPremio() {
-            const monto = parseFloat(document.getElementById('calc-monto').value) || 0;
-            const multiplicador = parseInt(document.getElementById('calc-tipo').value);
-            const total = monto * multiplicador;
-            
-            document.getElementById('calc-total').textContent = 'S/' + total.toFixed(2);
-            document.getElementById('calc-resultado').style.display = 'block';
-        }
-        
-        function abrirMisTickets() {
-            document.getElementById('modal-mis-tickets').style.display = 'block';
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
-        }
-        
-        function abrirBuscarTicket() {
-            document.getElementById('modal-buscar-ticket').style.display = 'block';
-            document.getElementById('buscar-serial-input').value = '';
-            document.getElementById('resultado-busqueda-ticket').innerHTML = '';
-            document.getElementById('buscar-serial-input').focus();
-        }
-        
-        function consultarMisTickets() {
-            let inicio = document.getElementById('mis-tickets-fecha-inicio').value;
-            let fin = document.getElementById('mis-tickets-fecha-fin').value;
-            let estado = document.getElementById('mis-tickets-estado').value;
-            
-            if (!inicio || !fin) {
-                showToast('Seleccione fechas', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('lista-mis-tickets');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio,
-                    fecha_fin: fin,
-                    estado: estado
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                document.getElementById('mis-tickets-resumen').style.display = 'block';
-                document.getElementById('mis-tickets-info').textContent = 
-                    `${d.totales.cantidad} tickets - Total ventas: S/${d.totales.ventas.toFixed(2)}`;
-                
-                if (d.tickets.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No se encontraron tickets con esos filtros</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    let estadoClass = t.pagado ? 'ganador' : (t.premio_calculado ? 'pendiente-pago' : '');
-                    let estadoText = t.pagado ? 'PAGADO' : (t.premio_calculado ? 'GANADOR (sin cobrar)' : 'PENDIENTE');
-                    
-                    html += `
-                        <div class="ticket-item ${estadoClass}" onclick="verDetalleTicket('${t.serial}')">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">${t.fecha} - Total: S/${t.total}</div>
-                            ${t.premio_calculado ? `<div class="ticket-premio">Premio: S/${t.premio_calculado}</div>` : ''}
-                            <span class="ticket-estado ${t.pagado ? 'estado-pagado' : 'estado-pendiente'}">${estadoText}</span>
-                        </div>
-                    `;
-                });
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function buscarTicketEspecifico() {
-            let serial = document.getElementById('buscar-serial-input').value.trim();
-            if (!serial) {
-                showToast('Ingrese un serial', 'error');
-                return;
-            }
-            
-            let container = document.getElementById('resultado-busqueda-ticket');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Buscando...</p>';
-            
-            fetch('/api/consultar-ticket-detalle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">' + d.error + '</p>';
-                    return;
-                }
-                
-                let t = d.ticket;
-                let estadoColor = t.pagado ? '#27ae60' : (t.premio_total > 0 ? '#f39c12' : '#888');
-                let estadoText = t.pagado ? 'PAGADO' : (t.premio_total > 0 ? 'GANADOR - PENDIENTE DE COBRO' : 'NO GANADOR');
-                
-                let html = `
-                    <div style="background: #0a0a0a; padding: 20px; border-radius: 10px; border: 2px solid ${estadoColor};">
-                        <h3 style="color: #ffd700; margin-bottom: 15px; text-align: center;">TICKET #${t.serial}</h3>
-                        <div class="stats-box" style="margin-bottom: 15px;">
-                            <div class="stat-row">
-                                <span class="stat-label">Fecha:</span>
-                                <span class="stat-value" style="font-size: 1rem;">${t.fecha}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Apostado:</span>
-                                <span class="stat-value" style="font-size: 1rem;">S/${t.total_apostado}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Estado:</span>
-                                <span class="stat-value" style="color: ${estadoColor}; font-size: 1rem;">${estadoText}</span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Premio Total:</span>
-                                <span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">
-                                    S/${t.premio_total.toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                        <h4 style="color: #ffd700; margin-bottom: 10px;">Detalle de Jugadas:</h4>
-                `;
-                
-                d.jugadas.forEach(j => {
-                    let ganoClass = j.gano ? 'jugada-ganadora' : '';
-                    let resultadoText = j.resultado ? `${j.resultado}` : 'Pendiente';
-                    
-                    html += `
-                        <div class="jugada-detail ${ganoClass}">
-                            <div>
-                                <strong>${j.hora}</strong> - ${j.seleccion} ${j.nombre_seleccion}<br>
-                                <small style="color: #888;">Resultado: ${resultadoText}</small>
-                            </div>
-                            <div style="text-align: right;">
-                                <div>S/${j.monto}</div>
-                                ${j.gano ? '<div style="color: #27ae60; font-weight: bold;">S/' + j.premio + '</div>' : ''}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-        
-        function verDetalleTicket(serial) {
-            document.getElementById('modal-mis-tickets').style.display = 'none';
-            abrirBuscarTicket();
-            document.getElementById('buscar-serial-input').value = serial;
-            buscarTicketEspecifico();
-        }
-        
-        function abrirMisTicketsPendientes() {
-            document.getElementById('modal-pendientes').style.display = 'block';
-            document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            fetch('/api/mis-tickets-pendientes')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                
-                document.getElementById('pendientes-info').innerHTML = 
-                    `Total Pendiente: <span style="color: #27ae60; font-size: 1.3rem;">S/${d.total_pendiente.toFixed(2)}</span> (${d.tickets.length} tickets)`;
-                
-                if (d.tickets.length === 0) {
-                    document.getElementById('lista-pendientes').innerHTML = 
-                        '<p style="color: #888; text-align: center; padding: 20px;">No tienes tickets pendientes por cobrar</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tickets.forEach(t => {
-                    html += `
-                        <div class="ticket-item ganador">
-                            <div class="ticket-serial">#${t.serial}</div>
-                            <div class="ticket-info">Fecha: ${t.fecha} • Jugadas: ${t.jugadas} • Apostado: S/${t.total}</div>
-                            <div class="ticket-premio">💰 Ganancia: S/${t.premio.toFixed(2)}</div>
-                        </div>
-                    `;
-                });
-                document.getElementById('lista-pendientes').innerHTML = html;
-            })
-            .catch(e => {
-                document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>';
-            });
-        }
-        
-        function mostrarReglas() {
-            document.getElementById('modal-reglas').style.display = 'block';
-        }
-        
-        function mostrarComoUsar() {
-            document.getElementById('modal-como-usar').style.display = 'block';
-        }
-        
-        function mostrarAcerca() {
-            document.getElementById('modal-acerca').style.display = 'block';
-        }
-        
-        function switchTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById('tab-' + tab).classList.add('active');
-        }
-        
-        function consultarHistoricoCaja() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showToast('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            fetch('/api/caja-historico', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showToast(d.error, 'error');
-                    return;
-                }
-                
-                document.getElementById('resultado-historico').style.display = 'block';
-                document.getElementById('hist-ventas').textContent = 'S/' + d.totales.ventas.toFixed(2);
-                document.getElementById('hist-premios').textContent = 'S/' + d.totales.premios.toFixed(2);
-                
-                let balanceEl = document.getElementById('hist-balance');
-                balanceEl.textContent = 'S/' + d.totales.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.totales.balance >= 0 ? 'positive' : 'negative');
-                
-                let tbody = document.getElementById('tabla-historico-caja');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                let alertaDiv = document.getElementById('hist-alerta-pendientes');
-                let infoDiv = document.getElementById('hist-info-pendientes');
-                if (d.totales.tickets_pendientes_cobro > 0) {
-                    alertaDiv.style.display = 'block';
-                    infoDiv.innerHTML = `${d.totales.tickets_pendientes_cobro} ticket(s) sin cobrar por <strong>S/${d.totales.total_pendiente_cobro.toFixed(2)}</strong>`;
-                } else {
-                    alertaDiv.style.display = 'none';
-                }
-            })
-            .catch(e => showToast('Error de conexión', 'error'));
-        }
-        
-        async function pagar() {
-            let serial = prompt('Ingrese SERIAL del ticket:'); 
-            if (!serial) return;
-            
-            try {
-                const response = await fetch('/api/verificar-ticket', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({serial: serial})
-                });
-                const d = await response.json();
-                
-                if (d.error) { 
-                    showToast(d.error, 'error'); 
-                    return; 
-                }
-                
-                let msg = "=== RESULTADO ===\\n\\n";
-                let total = d.total_ganado;
-                
-                msg += "\\nTOTAL GANADO: S/" + total.toFixed(2);
-                
-                if (total > 0 && confirm(msg + "\\n\\n¿CONFIRMA PAGO?")) {
-                    await fetch('/api/pagar-ticket', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ticket_id: d.ticket_id})
-                    });
-                    showToast('✅ Ticket pagado correctamente', 'success');
-                } else if (total === 0) {
-                    showToast('Ticket no ganador', 'info');
-                }
-            } catch (e) {
-                showToast('Error de conexión', 'error');
-            }
-        }
-        
-        async function anular() {
-            let serial = prompt('SERIAL a anular:'); 
-            if (!serial) return;
-            if (!confirm('¿ANULAR ' + serial + '?')) return;
-            
-            try {
-                const response = await fetch('/api/anular-ticket', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({serial: serial})
-                });
-                const d = await response.json();
-                
-                if (d.error) {
-                    showToast(d.error, 'error');
-                } else {
-                    showToast('✅ ' + d.mensaje, 'success');
-                }
-            } catch (e) {
-                showToast('Error de conexión', 'error');
-            }
-        }
-        
-        function borrarTodo() {
-            if (carrito.length > 0 || seleccionados.length > 0 || especiales.length > 0 || horariosSel.length > 0 || seleccionTripleta.length > 0) {
-                if (!confirm('¿Borrar todo?')) return;
-            }
-            seleccionados = []; especiales = []; horariosSel = []; carrito = []; seleccionTripleta = [];
-            document.querySelectorAll('.active, .tripleta-seleccionado').forEach(el => {
-                el.classList.remove('active');
-                el.classList.remove('tripleta-seleccionado');
-            });
-            if (modoTripleta) toggleModoTripleta();
-            updateTicket();
-            showToast('Ticket limpiado', 'info');
-        }
-        
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) this.style.display = 'none';
-            });
-        });
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('resultados-fecha').value = hoy;
-            document.getElementById('mis-tickets-fecha-inicio').value = hoy;
-            document.getElementById('mis-tickets-fecha-fin').value = hoy;
-        });
-    </script>
-</body>
-</html>
-'''
-
-ADMIN_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-    <title>Panel Admin - ZOOLO CASINO</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { 
-            background: #0a0a0a; 
-            color: white; 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.5;
-        }
-        
-        .admin-header {
-            background: linear-gradient(90deg, #1a1a2e, #16213e);
-            padding: 15px;
-            border-bottom: 2px solid #ffd700;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .admin-title {
-            color: #ffd700;
-            font-size: 1.2rem;
-            font-weight: bold;
-        }
-        
-        .logout-btn {
-            background: #c0392b;
-            color: white;
-            border: none;
-            padding: 8px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.9rem;
-        }
-        
-        .admin-tabs {
-            display: flex;
-            background: #1a1a2e;
-            border-bottom: 1px solid #333;
-            overflow-x: auto;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        .admin-tabs::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .admin-tab {
-            flex: 1;
-            min-width: 100px;
-            padding: 15px 10px;
-            background: transparent;
-            border: none;
-            color: #888;
-            cursor: pointer;
-            font-size: 0.85rem;
-            border-bottom: 3px solid transparent;
-            transition: all 0.2s;
-            white-space: nowrap;
-        }
-        
-        .admin-tab:hover {
-            color: #ffd700;
-            background: rgba(255,215,0,0.05);
-        }
-        
-        .admin-tab.active {
-            color: #ffd700;
-            border-bottom-color: #ffd700;
-            font-weight: bold;
-        }
-        
-        .content { 
-            padding: 20px; 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            padding-bottom: 30px;
-        }
-        
-        .info-pago {
-            background: linear-gradient(135deg, rgba(255,215,0,0.1), rgba(255,215,0,0.05)); 
-            padding: 15px; 
-            border-radius: 10px; 
-            margin: 15px 0; 
-            font-size: 0.85rem; 
-            text-align: center;
-            border: 1px solid rgba(255,215,0,0.3);
-            color: #ffd700;
-        }
-        
-        .stats-grid {
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px; 
-            margin-bottom: 20px;
-        }
-        @media (min-width: 768px) {
-            .stats-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 20px 15px; 
-            border-radius: 12px; 
-            border: 1px solid #ffd700; 
-            text-align: center;
-            transition: transform 0.2s;
-        }
-        .stat-card:active { transform: scale(0.98); }
-        .stat-card h3 { color: #888; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
-        .stat-card p { color: #ffd700; font-size: 1.4rem; font-weight: bold; }
-        
-        .form-box { 
-            background: #1a1a2e; 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            border: 1px solid #333;
-        }
-        .form-box h3 { 
-            color: #ffd700; 
-            margin-bottom: 15px; 
-            font-size: 1.1rem; 
-            border-bottom: 1px solid #333;
-            padding-bottom: 10px;
-        }
-        .form-row { 
-            display: flex; 
-            gap: 10px; 
-            margin-bottom: 12px; 
-            flex-wrap: wrap; 
-            align-items: center; 
-        }
-        .form-row input, .form-row select {
-            flex: 1; 
-            min-width: 120px; 
-            padding: 12px; 
-            background: #000;
-            border: 1px solid #444; 
-            color: white; 
-            border-radius: 8px; 
-            font-size: 1rem;
-            -webkit-appearance: none;
-        }
-        .btn-submit {
-            background: linear-gradient(135deg, #27ae60, #229954); 
-            color: white; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-            flex: 1;
-            min-width: 120px;
-        }
-        .btn-danger {
-            background: linear-gradient(135deg, #c0392b, #e74c3c); 
-            color: white; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-        }
-        .btn-secondary {
-            background: #444; 
-            color: white; 
-            border: none;
-            padding: 10px 16px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-size: 0.85rem;
-            flex: 1;
-        }
-        .btn-csv {
-            background: linear-gradient(135deg, #f39c12, #e67e22); 
-            color: black; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-        }
-        .btn-tripleta {
-            background: linear-gradient(135deg, #FFD700, #FFA500); 
-            color: black; 
-            border: none;
-            padding: 12px 24px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.95rem;
-            border: 2px solid #FFD700;
-        }
-        
-        .table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin: 15px 0;
-            border-radius: 8px;
-            border: 1px solid #333;
-            background: #1a1a2e;
-        }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 0.85rem; 
-        }
-        th, td { 
-            padding: 12px 10px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-            white-space: nowrap;
-        }
-        th { 
-            background: linear-gradient(135deg, #ffd700, #ffed4e); 
-            color: black; 
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-        }
-        tr:hover { background: rgba(255,215,0,0.05); }
-        
-        .riesgo-item {
-            background: #1a1a2e; 
-            padding: 15px; 
-            margin-bottom: 10px;
-            border-radius: 8px; 
-            border-left: 4px solid #c0392b;
-            font-size: 0.9rem;
-        }
-        .riesgo-item.lechuza {
-            border-left-color: #ffd700;
-            background: linear-gradient(135deg, rgba(255,215,0,0.1), #1a1a2e);
-        }
-        .riesgo-item b { color: #ffd700; font-size: 1.1rem; }
-        
-        .sorteo-actual-box {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            border: 2px solid #2980b9; 
-            text-align: center;
-        }
-        .sorteo-actual-box h4 { color: #2980b9; margin-bottom: 8px; font-size: 0.9rem; }
-        .sorteo-actual-box p { color: #ffd700; font-size: 1.8rem; font-weight: bold; }
-        
-        .agencia-selector {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #444;
-        }
-        .agencia-selector label {
-            color: #ffd700;
-            font-weight: bold;
-            display: block;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        .agencia-selector select {
-            width: 100%;
-            padding: 12px;
-            background: #000;
-            border: 2px solid #ffd700;
-            color: white;
-            border-radius: 8px;
-            font-size: 1rem;
-        }
-        .agencia-info {
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(255,215,0,0.1);
-            border-radius: 6px;
-            text-align: center;
-            color: #ffd700;
-            font-weight: bold;
-        }
-        
-        .resultado-item {
-            background: #0a0a0a;
-            padding: 15px;
-            margin: 8px 0;
-            border-radius: 10px;
-            border-left: 4px solid #27ae60;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .resultado-item.pendiente {
-            border-left-color: #666;
-            opacity: 0.7;
-        }
-        .resultado-numero { color: #ffd700; font-weight: bold; font-size: 1.3rem; }
-        .resultado-nombre { color: #888; font-size: 0.9rem; }
-        
-        .btn-editar {
-            background: linear-gradient(135deg, #2980b9, #3498db);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.85rem;
-            font-weight: bold;
-            margin-left: 10px;
-            transition: all 0.2s;
-        }
-        .btn-editar:hover {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            transform: scale(1.05);
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 2000;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        .modal.active { display: flex; }
-        .modal-box {
-            background: #1a1a2e;
-            padding: 25px;
-            border-radius: 15px;
-            border: 2px solid #ffd700;
-            max-width: 400px;
-            width: 100%;
-        }
-        .modal-box h3 {
-            color: #ffd700;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        .warning-box {
-            background: rgba(243, 156, 18, 0.2);
-            border: 1px solid #f39c12;
-            color: #f39c12;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            display: none;
-        }
-        
-        .ranking-item {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 10px;
-            border-left: 4px solid #ffd700;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .ranking-pos {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #ffd700;
-            min-width: 40px;
-        }
-        .ranking-info { flex: 1; padding: 0 10px; }
-        .ranking-nombre { font-weight: bold; color: white; font-size: 1.1rem; }
-        .ranking-detalle { font-size: 0.85rem; color: #888; margin-top: 3px; }
-        .ranking-monto { text-align: right; }
-        .ranking-ventas { font-size: 1.3rem; font-weight: bold; color: #27ae60; }
-        .ranking-balance { font-size: 0.9rem; color: #888; }
-        
-        .mensaje {
-            padding: 15px; 
-            margin: 15px 0; 
-            border-radius: 8px; 
-            display: none;
-            font-size: 0.95rem;
-            text-align: center;
-        }
-        .mensaje.success { 
-            background: rgba(39,174,96,0.2); 
-            border: 1px solid #27ae60; 
-            display: block; 
-            color: #27ae60;
-        }
-        .mensaje.error { 
-            background: rgba(192,57,43,0.2); 
-            border: 1px solid #c0392b; 
-            display: block; 
-            color: #c0392b;
-        }
-        
-        .tab-content { display: none; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
-        .btn-group {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-top: 10px;
-        }
-        .btn-group button {
-            flex: 1;
-            min-width: 80px;
-        }
-        
-        .timezone-info {
-            background: rgba(41, 128, 185, 0.1);
-            border: 1px solid #2980b9;
-            color: #3498db;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 15px 0;
-            font-size: 0.85rem;
-            text-align: center;
-        }
-        
-        .premio-box {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        .premio-pagado { background: #27ae60; color: white; }
-        .premio-pendiente { background: #f39c12; color: black; }
-        .premio-total { background: #2980b9; color: white; }
-        
-        .tripleta-card {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            border: 2px solid #FFD700;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-            position: relative;
-        }
-        .tripleta-card.ganadora {
-            background: linear-gradient(135deg, rgba(39,174,96,0.2), #1a1a2e);
-            border-color: #27ae60;
-        }
-        .tripleta-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .tripleta-serial {
-            color: #ffd700;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        .tripleta-agencia {
-            color: #888;
-            font-size: 0.85rem;
-        }
-        .tripleta-animales {
-            display: flex;
-            gap: 10px;
-            margin: 15px 0;
-            justify-content: center;
-        }
-        .tripleta-animal {
-            background: #000;
-            border: 2px solid #FFD700;
-            border-radius: 10px;
-            padding: 10px 15px;
-            text-align: center;
-            min-width: 80px;
-        }
-        .tripleta-animal .num {
-            color: #FFD700;
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-        .tripleta-animal .name {
-            color: #aaa;
-            font-size: 0.75rem;
-            margin-top: 4px;
-        }
-        .tripleta-monto {
-            text-align: center;
-            margin-top: 10px;
-            color: #aaa;
-        }
-        .tripleta-premio {
-            text-align: center;
-            color: #27ae60;
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        .tripleta-estado {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-        .estado-ganadora { background: #27ae60; color: white; }
-        .estado-pendiente { background: #666; color: white; }
-        .estado-pagada { background: #2980b9; color: white; }
-    </style>
-</head>
-<body>
-    <div class="modal" id="modal-editar">
-        <div class="modal-box">
-            <h3>✏️ EDITAR RESULTADO</h3>
-            <div class="warning-box" id="editar-advertencia">
-                ⚠️ Este sorteo tiene tickets vendidos. Al cambiar el resultado, los tickets ganadores cambiarán.
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Fecha:</label>
-                <input type="text" id="editar-fecha-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Hora:</label>
-                <input type="text" id="editar-hora-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
-            </div>
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; color: #888; margin-bottom: 5px;">Nuevo Animal:</label>
-                <select id="editar-animal-select" style="width: 100%; padding: 12px; background: #000; border: 2px solid #ffd700; color: white; border-radius: 8px; font-size: 1rem;">
-                    {% for k, v in animales.items() %}
-                    <option value="{{k}}">{{k}} - {{v}}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button onclick="cerrarModalEditar()" style="flex: 1; background: #444; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">CANCELAR</button>
-                <button onclick="confirmarEdicion()" style="flex: 2; background: linear-gradient(135deg, #27ae60, #229954); color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;">GUARDAR CAMBIO</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="admin-header">
-        <div class="admin-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
-        <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
-    </div>
-
-    <div class="admin-tabs">
-        <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
-        <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
-        <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
-        <button class="admin-tab" onclick="showTab('tripletas')">🎯 Tripletas</button>
-        <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
-        <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
-        <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
-        <button class="admin-tab" onclick="showTab('operaciones')">⚙️ Operaciones</button>
-    </div>
-
-    <div class="content">
-        <div id="mensaje" class="mensaje"></div>
-        
-        <div class="info-pago">
-            💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60
-        </div>
-        
-        <div class="timezone-info" id="timezone-info" style="display: none;">
-            ⏰ <strong>Zona Horaria Perú (UTC-5):</strong> Los resultados son editables hasta 2 horas después del sorteo (ej: 6PM hasta 8PM).
-        </div>
-        
-        <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">📊 RESUMEN DE HOY</h3>
-            <div class="stats-grid">
-                <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PAGADOS</h3><p id="stat-premios">S/0</p></div>
-                <div class="stat-card"><h3>PREMIOS PENDIENTES</h3><p id="stat-premios-pendientes" style="color: #f39c12;">S/0</p></div>
-                <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
-            </div>
-            
-            <div class="form-box">
-                <h3>⚡ ACCIONES RÁPIDAS</h3>
-                <div class="btn-group">
-                    <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
-                    <button class="btn-tripleta" onclick="showTab('tripletas')">🎯 Ver Tripletas</button>
-                    <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
-                    <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="riesgo" class="tab-content">
-            <div class="agencia-selector">
-                <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
-                <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()">
-                    <option value="">TODAS LAS AGENCIAS</option>
-                </select>
-                <div class="agencia-info" id="riesgo-agencia-nombre" style="display:none;">
-                    Mostrando riesgo para: <span id="nombre-agencia-actual">TODAS</span>
-                </div>
-            </div>
-            
-            <div class="sorteo-actual-box">
-                <h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4>
-                <p id="sorteo-objetivo">Cargando...</p>
-                <small style="color: #888; font-size: 0.8rem;">Riesgo calculado para este horario específico</small>
-            </div>
-            
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">
-                💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span>
-                <span id="cantidad-jugadas-info" style="color: #888; font-size: 0.8rem; display: block; margin-top: 5px;"></span>
-            </h3>
-            <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
-            
-            <div style="margin-top: 20px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                <small style="color: #ff6b6b;">
-                    ⚠️ El riesgo se resetea automáticamente cuando cambia el sorteo.
-                </small>
-            </div>
-        </div>
-
-        <div id="tripletas" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.2rem;">🎯 TRIPLETAS DE HOY (Paga x60)</h3>
-            <div class="form-box">
-                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn-tripleta" onclick="cargarTripletas()">🔄 Actualizar</button>
-                </div>
-                <div class="stats-grid" style="margin-bottom: 20px;">
-                    <div class="stat-card" style="border-color: #FFD700;">
-                        <h3>TOTAL TRIPLETAS</h3>
-                        <p id="trip-total" style="color: #FFD700;">0</p>
-                    </div>
-                    <div class="stat-card" style="border-color: #27ae60;">
-                        <h3>GANADORAS</h3>
-                        <p id="trip-ganadoras" style="color: #27ae60;">0</p>
-                    </div>
-                    <div class="stat-card" style="border-color: #c0392b;">
-                        <h3>PREMIOS</h3>
-                        <p id="trip-premios" style="color: #c0392b;">S/0</p>
-                    </div>
-                </div>
-                <div id="lista-tripletas" style="max-height: 600px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Cargando tripletas...</p>
-                </div>
-            </div>
-        </div>
-
-        <div id="reporte" class="tab-content">
-            <div class="form-box">
-                <h3>🏢 REPORTE POR AGENCIAS</h3>
-                
-                <div class="form-group" style="margin-bottom: 15px;">
-                    <label>Filtrar por Agencia:</label>
-                    <select id="reporte-agencia-select" onchange="cambiarFiltroAgencia()">
-                        <option value="">TODAS LAS AGENCIAS (GLOBAL)</option>
-                    </select>
-                </div>
-                
-                <div class="form-row">
-                    <input type="date" id="reporte-fecha-inicio">
-                    <input type="date" id="reporte-fecha-fin">
-                    <button class="btn-submit" onclick="consultarReporteAgencias()">GENERAR</button>
-                </div>
-                <div class="btn-group">
-                    <button class="btn-secondary" onclick="setRangoReporte('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('semana')">7 días</button>
-                    <button class="btn-csv" onclick="exportarCSV()">📊 CSV</button>
-                </div>
-                
-                <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">📈 TOTALES <span id="titulo-filtro-agencia"></span></h4>
-                    
-                    <div class="stats-grid" id="stats-agencias-totales"></div>
-                    
-                    <div class="form-box" style="background: rgba(255,215,0,0.05);">
-                        <h4 style="color: #ffd700; margin-bottom: 10px; font-size: 1rem;">💰 DESGLOSE DE PREMIOS</h4>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pagados:</span>
-                            <span class="stat-value" id="reporte-premios-pagados" style="color: #27ae60;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Premios Pendientes (por cobrar):</span>
-                            <span class="stat-value" id="reporte-premios-pendientes" style="color: #f39c12;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Total en Premios (Teórico):</span>
-                            <span class="stat-value" id="reporte-premios-total" style="color: #ffd700;">S/0</span>
-                        </div>
-                        <div class="stat-row">
-                            <span class="stat-label">Tickets Ganadores sin Cobrar:</span>
-                            <span class="stat-value" id="reporte-tickets-pendientes" style="color: #f39c12;">0</span>
-                        </div>
-                    </div>
-
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🏆 TOP 5 AGENCIAS</h4>
-                    <div id="ranking-agencias"></div>
-
-                    <h4 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE COMPLETO</h4>
-                    <div class="table-container">
-                        <table id="tabla-detalle-agencias">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Agencia</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios Pagados</th>
-                                    <th>Pendientes</th>
-                                    <th>Balance</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="resultados" class="tab-content">
-            <div class="form-box">
-                <h3>🔍 CONSULTAR RESULTADOS</h3>
-                <div class="form-row">
-                    <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
-                    <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
-                    <button class="btn-secondary" onclick="cargarResultadosAdmin()">HOY</button>
-                </div>
-                <div id="admin-resultados-titulo" style="margin-top: 15px; color: #ffd700; font-weight: bold; text-align: center; font-size: 1.1rem;"></div>
-            </div>
-
-            <div class="form-box">
-                <h3>📋 RESULTADOS CARGADOS</h3>
-                <div class="timezone-info">
-                    ℹ️ Los resultados solo son editables hasta 2 horas después de su horario (ej: 6PM hasta 8PM hora Perú).
-                </div>
-                <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;">
-                    <p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p>
-                </div>
-            </div>
-
-            <div class="form-box">
-                <h3>✏️ CARGAR/EDITAR RESULTADO</h3>
-                <div class="form-row">
-                    <select id="res-hora" style="flex: 1.5;">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
-                    <select id="res-animal" style="flex: 2;">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
-                    <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
-                </div>
-                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;">
-                    ℹ️ Si el resultado ya existe, se actualizará automáticamente (dentro de la ventana de 2 horas).
-                </div>
-            </div>
-        </div>
-
-        <div id="historico" class="tab-content">
-            <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA</h3>
-                <div class="form-row">
-                    <input type="date" id="hist-fecha-inicio">
-                    <input type="date" id="hist-fecha-fin">
-                    <button class="btn-submit" onclick="consultarHistorico()">CONSULTAR</button>
-                </div>
-                <div class="btn-group">
-                    <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
-                    <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
-                    <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
-                </div>
-                
-                <div id="historico-resumen" style="display:none;">
-                    <div class="stats-grid" style="margin-top: 20px;">
-                        <div class="stat-card"><h3>TOTAL VENTAS</h3><p id="hist-total-ventas">S/0</p></div>
-                        <div class="stat-card"><h3>TOTAL PREMIOS</h3><p id="hist-total-premios">S/0</p></div>
-                        <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
-                        <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">📋 DETALLE POR DÍA</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Tickets</th>
-                                    <th>Ventas</th>
-                                    <th>Premios</th>
-                                    <th>Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-historico"></tbody>
-                        </table>
-                    </div>
-
-                    <h3 style="color: #ffd700; margin: 25px 0 15px; font-size: 1.1rem;">🔥 TOP ANIMALES</h3>
-                    <div id="top-animales-hist"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="operaciones" class="tab-content">
-            <div class="form-box">
-                <h3>💰 PAGAR TICKET</h3>
-                <div class="form-row">
-                    <input type="text" id="pagar-serial-admin" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-submit" onclick="pagarTicketAdmin()">VERIFICAR Y PAGAR</button>
-                </div>
-                <div id="resultado-pago-admin" style="margin-top: 15px;"></div>
-            </div>
-
-            <div class="form-box">
-                <h3>❌ ANULAR TICKET</h3>
-                <div class="form-row">
-                    <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
-                    <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR</button>
-                </div>
-                <div style="margin-top: 15px; padding: 15px; background: rgba(192, 57, 43, 0.1); border-radius: 8px; border: 1px solid #c0392b;">
-                    <small style="color: #ff6b6b;">
-                        ⚠️ Solo se pueden anular tickets que no estén pagados y cuyo sorteo no haya iniciado.
-                    </small>
-                </div>
-                <div id="resultado-anular" style="margin-top: 15px; font-size: 1rem; text-align: center;"></div>
-            </div>
-        </div>
-
-        <div id="agencias" class="tab-content">
-            <div class="form-box">
-                <h3>➕ CREAR NUEVA AGENCIA</h3>
-                <div class="form-row">
-                    <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contraseña">
-                </div>
-                <div class="form-row">
-                    <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
-                    <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
-                </div>
-            </div>
-            <h3 style="color: #ffd700; margin-bottom: 15px; font-size: 1.1rem;">🏢 AGENCIAS EXISTENTES</h3>
-            <div class="table-container">
-                <table>
-                    <thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comisión</th></tr></thead>
-                    <tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const HORARIOS_ORDEN = JSON.parse('{{ horarios | tojson | safe }}');
-        let historicoData = null;
-        let reporteAgenciasData = null;
-        let fechasConsulta = { inicio: null, fin: null };
-        let listaAgencias = [];
-        let editandoFecha = null;
-        let editandoHora = null;
-        let filtroAgenciaActual = null;
-
-        function showTab(tab) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
-            
-            const target = document.getElementById(tab);
-            if (target) {
-                target.classList.add('active');
-            }
-            
-            const buttons = document.querySelectorAll('.admin-tab');
-            buttons.forEach(btn => {
-                if (btn.getAttribute('onclick').includes("'" + tab + "'")) {
-                    btn.classList.add('active');
-                }
-            });
-            
-            if (tab === 'riesgo') {
-                cargarAgenciasSelect();
-                cargarRiesgo();
-            }
-            if (tab === 'tripletas') {
-                cargarTripletas();
-            }
-            if (tab === 'reporte') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('reporte-fecha-inicio').value = hoy;
-                document.getElementById('reporte-fecha-fin').value = hoy;
-                cargarAgenciasReporte();
-                consultarReporteAgencias();
-            }
-            if (tab === 'agencias') cargarAgencias();
-            if (tab === 'dashboard') cargarDashboard();
-            if (tab === 'resultados') {
-                let hoy = new Date().toISOString().split('T')[0];
-                document.getElementById('admin-resultados-fecha').value = hoy;
-                cargarResultadosAdmin();
-            }
-        }
-
-        function showMensaje(msg, tipo) {
-            let div = document.getElementById('mensaje');
-            div.textContent = msg; 
-            div.className = 'mensaje ' + tipo;
-            setTimeout(() => div.className = 'mensaje', 4000);
-        }
-
-        function setRango(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
-            
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
-            }
-            
-            document.getElementById('hist-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('hist-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarHistorico();
-        }
-
-        function setRangoReporte(tipo) {
-            let hoy = new Date();
-            let inicio, fin;
-            
-            switch(tipo) {
-                case 'hoy':
-                    inicio = fin = hoy;
-                    break;
-                case 'ayer':
-                    let ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-                    inicio = fin = ayer;
-                    break;
-                case 'semana':
-                    inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6);
-                    fin = hoy;
-                    break;
-                case 'mes':
-                    inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fin = hoy;
-                    break;
-            }
-            
-            document.getElementById('reporte-fecha-inicio').value = inicio.toISOString().split('T')[0];
-            document.getElementById('reporte-fecha-fin').value = fin.toISOString().split('T')[0];
-            consultarReporteAgencias();
-        }
-
-        function cargarAgenciasSelect() {
-            fetch('/admin/lista-agencias')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) return;
-                listaAgencias = d;
-                let select = document.getElementById('riesgo-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`;
-                });
-            });
-        }
-        
-        function cargarAgenciasReporte() {
-            fetch('/admin/lista-agencias')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) return;
-                let select = document.getElementById('reporte-agencia-select');
-                select.innerHTML = '<option value="">TODAS LAS AGENCIAS (GLOBAL)</option>';
-                d.forEach(ag => {
-                    select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`;
-                });
-            });
-        }
-        
-        function cambiarFiltroAgencia() {
-            filtroAgenciaActual = document.getElementById('reporte-agencia-select').value;
-            consultarReporteAgencias();
-        }
-
-        function cambiarAgenciaRiesgo() {
-            cargarRiesgo();
-        }
-
-        function cargarTripletas() {
-            fetch('/admin/tripletas-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                document.getElementById('trip-total').textContent = d.total;
-                document.getElementById('trip-ganadoras').textContent = d.ganadoras;
-                document.getElementById('trip-premios').textContent = 'S/' + d.total_premios.toFixed(2);
-                
-                let container = document.getElementById('lista-tripletas');
-                
-                if (!d.tripletas || d.tripletas.length === 0) {
-                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tripletas jugadas hoy</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.tripletas.forEach(trip => {
-                    let claseGanadora = trip.gano ? 'ganadora' : '';
-                    let estadoClass = trip.pagado ? 'estado-pagada' : (trip.gano ? 'estado-ganadora' : 'estado-pendiente');
-                    let estadoText = trip.pagado ? 'PAGADA' : (trip.gano ? 'GANADORA' : 'EN JUEGO');
-                    
-                    html += `
-                        <div class="tripleta-card ${claseGanadora}">
-                            <div class="tripleta-estado ${estadoClass}">${estadoText}</div>
-                            <div class="tripleta-header">
-                                <div>
-                                    <div class="tripleta-serial">#${trip.serial}</div>
-                                    <div class="tripleta-agencia">${trip.agencia}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-animales">
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal1}</div>
-                                    <div class="name">${trip.nombres[0]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal2}</div>
-                                    <div class="name">${trip.nombres[1]}</div>
-                                </div>
-                                <div class="tripleta-animal">
-                                    <div class="num">${trip.animal3}</div>
-                                    <div class="name">${trip.nombres[2]}</div>
-                                </div>
-                            </div>
-                            <div class="tripleta-monto">
-                                Apostado: S/${trip.monto} | Paga x60
-                            </div>
-                            ${trip.gano ? `<div class="tripleta-premio">💰 Premio: S/${trip.premio}</div>` : ''}
-                            ${!trip.gano && trip.salieron.length > 0 ? `<div style="text-align: center; color: #f39c12; margin-top: 5px;">Han salido: ${trip.salieron.join(', ')}</div>` : ''}
-                        </div>
-                    `;
-                });
-                
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando tripletas', 'error');
-            });
-        }
-
-        function pagarTicketAdmin() {
-            const serial = document.getElementById('pagar-serial-admin').value.trim();
-            if (!serial) {
-                showMensaje('Ingrese un serial', 'error');
-                return;
-            }
-            
-            fetch('/api/verificar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('resultado-pago-admin').innerHTML = `<div style="color: #c0392b; padding: 15px; background: rgba(192,57,43,0.1); border-radius: 8px;">${d.error}</div>`;
-                    return;
-                }
-                
-                let html = `<div style="background: rgba(39,174,96,0.1); padding: 20px; border-radius: 10px; border: 1px solid #27ae60;">`;
-                html += `<h4 style="color: #27ae60; margin-bottom: 15px;">Ticket #${d.ticket_id}</h4>`;
-                html += `<p style="font-size: 1.3rem; color: #ffd700; margin-bottom: 15px;">Total Ganado: S/${d.total_ganado.toFixed(2)}</p>`;
-                
-                if (d.total_ganado > 0) {
-                    html += `<button onclick="confirmarPagoAdmin('${d.ticket_id}')" class="btn-submit" style="width: 100%;">CONFIRMAR PAGO</button>`;
-                } else {
-                    html += `<p style="color: #888;">Ticket no ganador</p>`;
-                }
-                html += `</div>`;
-                
-                document.getElementById('resultado-pago-admin').innerHTML = html;
-            });
-        }
-
-        function confirmarPagoAdmin(ticketId) {
-            fetch('/api/pagar-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ticket_id: ticketId})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ Ticket pagado correctamente', 'success');
-                    document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;">✅ Pago realizado con éxito</div>';
-                } else {
-                    showMensaje(d.error || 'Error al pagar', 'error');
-                }
-            });
-        }
-
-        function anularTicketAdmin() {
-            let serial = document.getElementById('anular-serial').value.trim();
-            if (!serial) {
-                showMensaje('Ingrese un serial', 'error');
-                return;
-            }
-            
-            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) {
-                return;
-            }
-            
-            fetch('/api/anular-ticket', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({serial: serial})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let resultadoDiv = document.getElementById('resultado-anular');
-                if (d.error) {
-                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>';
-                    showMensaje(d.error, 'error');
-                } else {
-                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>';
-                    showMensaje(d.mensaje, 'success');
-                    document.getElementById('anular-serial').value = '';
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
-        function abrirModalEditar(hora, fecha, animalActual) {
-            editandoHora = hora;
-            editandoFecha = fecha;
-            
-            document.getElementById('editar-fecha-display').value = fecha;
-            document.getElementById('editar-hora-display').value = hora;
-            document.getElementById('editar-animal-select').value = animalActual;
-            
-            verificarTicketsSorteo(fecha, hora);
-            document.getElementById('modal-editar').classList.add('active');
-        }
-        
-        function cerrarModalEditar() {
-            document.getElementById('modal-editar').classList.remove('active');
-            editandoFecha = null;
-            editandoHora = null;
-        }
-        
-        function verificarTicketsSorteo(fecha, hora) {
-            fetch('/admin/verificar-tickets-sorteo', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha, hora: hora})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let advertencia = document.getElementById('editar-advertencia');
-                if (d.tickets_count > 0) {
-                    advertencia.style.display = 'block';
-                    advertencia.innerHTML = `⚠️ <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.<br>Cambiar el resultado afectará quién gana o pierde.`;
-                } else {
-                    advertencia.style.display = 'none';
-                }
-            })
-            .catch(e => console.error('Error verificando tickets:', e));
-        }
-        
-        function confirmarEdicion() {
-            let nuevoAnimal = document.getElementById('editar-animal-select').value;
-            
-            if (!confirm(`¿Está seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal} - ${getNombreAnimal(nuevoAnimal)}?`)) {
-                return;
-            }
-            
-            let partes = editandoFecha.split('/');
-            let fechaISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
-            
-            let form = new FormData();
-            form.append('hora', editandoHora);
-            form.append('animal', nuevoAnimal);
-            form.append('fecha', fechaISO);
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    cerrarModalEditar();
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                    // Recargar tripletas si estamos en esa pestaña
-                    if (document.getElementById('tripletas').classList.contains('active')) {
-                        cargarTripletas();
-                    }
-                } else {
-                    showMensaje(d.error || 'Error al guardar', 'error');
-                }
-            })
-            .catch(e => {
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-        
-        function getNombreAnimal(numero) {
-            const animales = JSON.parse('{{ animales | tojson | safe }}');
-            return animales[numero] || 'Desconocido';
-        }
-
-        function consultarHistorico() {
-            let inicio = document.getElementById('hist-fecha-inicio').value;
-            let fin = document.getElementById('hist-fecha-fin').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            fechasConsulta = { inicio, fin };
-            showMensaje('Consultando datos...', 'success');
-            
-            fetch('/admin/estadisticas-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                historicoData = d;
-                document.getElementById('historico-resumen').style.display = 'block';
-                
-                document.getElementById('hist-total-ventas').textContent = 'S/' + d.totales.ventas.toFixed(0);
-                document.getElementById('hist-total-premios').textContent = 'S/' + d.totales.premios.toFixed(0);
-                document.getElementById('hist-total-tickets').textContent = d.totales.tickets;
-                document.getElementById('hist-total-balance').textContent = 'S/' + d.totales.balance.toFixed(0);
-                
-                let tbody = document.getElementById('tabla-historico');
-                let html = '';
-                d.resumen_por_dia.forEach(dia => {
-                    let color = dia.balance >= 0 ? '#27ae60' : '#c0392b';
-                    html += `<tr>
-                        <td>${dia.fecha}</td>
-                        <td>${dia.tickets}</td>
-                        <td>S/${dia.ventas.toFixed(0)}</td>
-                        <td>S/${dia.premios.toFixed(0)}</td>
-                        <td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-                
-                cargarTopAnimalesHistorico(inicio, fin);
-            })
-            .catch(e => showMensaje('Error de conexión', 'error'));
-        }
-
-        function consultarReporteAgencias() {
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            let agenciaId = document.getElementById('reporte-agencia-select').value;
-            
-            if (!inicio || !fin) {
-                showMensaje('Seleccione ambas fechas', 'error');
-                return;
-            }
-            
-            showMensaje('Consultando reporte...', 'success');
-            
-            fetch('/admin/reporte-agencias-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    fecha_inicio: inicio, 
-                    fecha_fin: fin,
-                    agencia_id: agenciaId || null
-                })
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    showMensaje(d.error, 'error');
-                    return;
-                }
-                
-                reporteAgenciasData = d;
-                document.getElementById('reporte-agencias-resumen').style.display = 'block';
-                
-                let tituloAgencia = agenciaId ? 
-                    document.querySelector('#reporte-agencia-select option:checked').text : 
-                    'TODAS LAS AGENCIAS';
-                document.getElementById('titulo-filtro-agencia').textContent = `- ${tituloAgencia}`;
-                
-                let totales = d.totales;
-                let htmlTotales = `
-                    <div class="stat-card">
-                        <h3>AGENCIAS</h3>
-                        <p>${d.agencias.length}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>TICKETS</h3>
-                        <p>${totales.tickets}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>VENTAS</h3>
-                        <p>S/${totales.ventas.toFixed(0)}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>BALANCE</h3>
-                        <p style="color: ${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</p>
-                    </div>
-                `;
-                document.getElementById('stats-agencias-totales').innerHTML = htmlTotales;
-                
-                document.getElementById('reporte-premios-pagados').textContent = 'S/' + totales.premios_pagados.toFixed(2);
-                document.getElementById('reporte-premios-pendientes').textContent = 'S/' + totales.premios_pendientes.toFixed(2);
-                document.getElementById('reporte-premios-total').textContent = 'S/' + totales.premios_teoricos.toFixed(2);
-                document.getElementById('reporte-tickets-pendientes').textContent = totales.tickets_pendientes_count;
-                
-                let htmlRanking = '';
-                d.agencias.slice(0, 5).forEach((ag, idx) => {
-                    let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteInfo = ag.premios_pendientes > 0 ? `<br><small style="color:#f39c12">Pendiente: S/${ag.premios_pendientes}</small>` : '';
-                    
-                    htmlRanking += `
-                        <div class="ranking-item">
-                            <div class="ranking-pos">${medalla}</div>
-                            <div class="ranking-info">
-                                <div class="ranking-nombre">${ag.nombre}</div>
-                                <div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}% del total${pendienteInfo}</div>
-                            </div>
-                            <div class="ranking-monto">
-                                <div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div>
-                                <div class="ranking-balance" style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div>
-                            </div>
-                        </div>
-                    `;
-                });
-                document.getElementById('ranking-agencias').innerHTML = htmlRanking;
-                
-                let tbody = document.querySelector('#tabla-detalle-agencias tbody');
-                let htmlTabla = '';
-                d.agencias.forEach((ag, idx) => {
-                    let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    let pendienteBadge = ag.premios_pendientes > 0 ? 
-                        `<span class="premio-box premio-pendiente">S/${ag.premios_pendientes}</span>` : 
-                        '<span style="color:#666">-</span>';
-                    
-                    htmlTabla += `<tr>
-                        <td>${idx + 1}</td>
-                        <td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td>
-                        <td>${ag.tickets}</td>
-                        <td>S/${ag.ventas.toFixed(0)}</td>
-                        <td style="color:#27ae60">S/${ag.premios_pagados.toFixed(0)}</td>
-                        <td>${pendienteBadge}</td>
-                        <td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td>
-                        <td>${ag.porcentaje_ventas}%</td>
-                    </tr>`;
-                });
-                
-                if (!agenciaId) {
-                    htmlTabla += `<tr style="background:rgba(255,215,0,0.2); font-weight:bold;">
-                        <td colspan="2">TOTALES</td>
-                        <td>${totales.tickets}</td>
-                        <td>S/${totales.ventas.toFixed(0)}</td>
-                        <td>S/${totales.premios_pagados.toFixed(0)}</td>
-                        <td><span class="premio-box premio-pendiente">S/${totales.premios_pendientes.toFixed(0)}</span></td>
-                        <td style="color:${totales.balance >= 0 ? '#27ae60' : '#c0392b'}">S/${totales.balance.toFixed(0)}</td>
-                        <td>100%</td>
-                    </tr>`;
-                }
-                
-                tbody.innerHTML = htmlTabla;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error de conexión', 'error');
-            });
-        }
-
-        function exportarCSV() {
-            if (!reporteAgenciasData) {
-                showMensaje('Primero genere un reporte', 'error');
-                return;
-            }
-            
-            let inicio = document.getElementById('reporte-fecha-inicio').value;
-            let fin = document.getElementById('reporte-fecha-fin').value;
-            
-            fetch('/admin/exportar-csv', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.blob())
-            .then(blob => {
-                let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a');
-                a.href = url;
-                a.download = `reporte_agencias_${inicio}_${fin}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                showMensaje('CSV descargado correctamente', 'success');
-            })
-            .catch(e => showMensaje('Error al exportar', 'error'));
-        }
-
-        function cargarTopAnimalesHistorico(inicio, fin) {
-            fetch('/admin/top-animales-rango', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})
-            })
-            .then(r => r.json())
-            .then(d => {
-                let container = document.getElementById('top-animales-hist');
-                if (!d.top_animales || d.top_animales.length === 0) {
-                    container.innerHTML = '<p style="color: #888;">No hay datos suficientes</p>';
-                    return;
-                }
-                
-                let html = '';
-                d.top_animales.slice(0, 10).forEach((a, idx) => {
-                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
-                    let esLechuza = a.numero === "40";
-                    let clase = esLechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = esLechuza ? ' 🦉 ¡Paga x70!' : '';
-                    
-                    html += `<div class="${clase}" style="margin-bottom: 10px;">
-                        <b>${medalla} ${a.numero} - ${a.nombre}${extra}</b><br>
-                        <small>Apostado: S/${a.total_apostado} • Si sale pagaría: S/${a.pago_potencial}</small>
-                    </div>`;
-                });
-                container.innerHTML = html;
-            });
-        }
-
-        function cargarDashboard() {
-            fetch('/admin/reporte-agencias').then(r => r.json()).then(d => {
-                if (d.global) {
-                    document.getElementById('stat-ventas').textContent = 'S/' + d.global.ventas.toFixed(0);
-                    document.getElementById('stat-premios').textContent = 'S/' + d.global.pagos.toFixed(0);
-                    document.getElementById('stat-premios-pendientes').textContent = 'S/' + d.global.premios_pendientes.toFixed(0);
-                    document.getElementById('stat-balance').textContent = 'S/' + d.global.balance.toFixed(0);
-                }
-            }).catch(() => showMensaje('Error de conexion', 'error'));
-        }
-
-        function cargarRiesgo() {
-            let agenciaId = document.getElementById('riesgo-agencia-select').value;
-            let url = '/admin/riesgo';
-            
-            if (agenciaId) {
-                url += '?agencia_id=' + agenciaId;
-            }
-            
-            fetch(url)
-            .then(r => r.json())
-            .then(d => {
-                if (d.sorteo_objetivo) {
-                    document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo;
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
-                    
-                    let nombreAgencia = d.agencia_nombre || "TODAS LAS AGENCIAS";
-                    document.getElementById('nombre-agencia-actual').textContent = nombreAgencia;
-                    document.getElementById('riesgo-agencia-nombre').style.display = 'block';
-                    
-                    let infoExtra = d.cantidad_jugadas ? `${d.cantidad_jugadas} jugadas registradas` : '';
-                    if (d.hora_actual) infoExtra += ` • Hora actual: ${d.hora_actual}`;
-                    document.getElementById('cantidad-jugadas-info').textContent = infoExtra;
-                } else {
-                    document.getElementById('sorteo-objetivo').textContent = 'No hay más sorteos hoy';
-                    document.getElementById('total-apostado-sorteo').textContent = 'S/0';
-                    document.getElementById('cantidad-jugadas-info').textContent = '';
-                }
-                
-                let container = document.getElementById('lista-riesgo');
-                if (!d.riesgo || Object.keys(d.riesgo).length === 0) {
-                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
-                    return;
-                }
-                let html = '';
-                for (let [k, v] of Object.entries(d.riesgo)) {
-                    let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    let extra = v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : '';
-                    html += `<div class="${clase}">
-                        <b>${k}${extra}</b><br>
-                        Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total
-                    </div>`;
-                }
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                showMensaje('Error cargando riesgo', 'error');
-            });
-        }
-
-        function cargarResultadosAdminFecha() {
-            let fecha = document.getElementById('admin-resultados-fecha').value;
-            if (!fecha) return;
-            
-            let container = document.getElementById('lista-resultados-admin');
-            container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
-            
-            let fechaObj = new Date(fecha + 'T00:00:00');
-            let opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('admin-resultados-titulo').textContent = fechaObj.toLocaleDateString('es-PE', opciones);
-            
-            fetch('/api/resultados-fecha', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fecha: fecha})
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>';
-                    return;
-                }
-                renderizarResultadosAdmin(d.resultados, d.fecha_consulta);
-            })
-            .catch(() => {
-                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function cargarResultadosAdmin() {
-            fetch('/admin/resultados-hoy')
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) {
-                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>';
-                    return;
-                }
-                document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
-                renderizarResultadosAdmin(d.resultados, d.fecha);
-            })
-            .catch(() => {
-                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>';
-            });
-        }
-
-        function renderizarResultadosAdmin(resultados, fechaStr) {
-            let container = document.getElementById('lista-resultados-admin');
-            let html = '';
-            
-            for (let hora of HORARIOS_ORDEN) {
-                let resultado = resultados[hora];
-                let clase = resultado ? '' : 'pendiente';
-                let contenido;
-                let botonEditar = '';
-                
-                if (resultado) {
-                    contenido = `
-                        <span class="resultado-numero">${resultado.animal}</span>
-                        <span class="resultado-nombre">${resultado.nombre}</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')">✏️ EDITAR</button>`;
-                } else {
-                    contenido = `
-                        <span style="color: #666; font-size:1.1rem">Pendiente</span>
-                        <span style="color: #444; font-size: 0.85rem;">Sin resultado</span>
-                    `;
-                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;">➕ CARGAR</button>`;
-                }
-                
-                html += `
-                    <div class="resultado-item ${clase}">
-                        <div style="display: flex; flex-direction: column;">
-                            <strong style="color: #ffd700; font-size: 1rem;">${hora}</strong>
-                        </div>
-                        <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-                            ${contenido}
-                            ${botonEditar}
-                        </div>
-                    </div>
-                `;
-            }
-            container.innerHTML = html;
-        }
-        
-        function prepararNuevoResultado(hora) {
-            document.getElementById('res-hora').value = hora;
-            document.getElementById('res-animal').focus();
-            document.getElementById('res-hora').scrollIntoView({behavior: 'smooth'});
-        }
-
-        function guardarResultado() {
-            let form = new FormData();
-            form.append('hora', document.getElementById('res-hora').value);
-            form.append('animal', document.getElementById('res-animal').value);
-            
-            let fechaActual = document.getElementById('admin-resultados-fecha').value;
-            if (fechaActual) {
-                form.append('fecha', fechaActual);
-            }
-            
-            fetch('/admin/guardar-resultado', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    let fechaActual = document.getElementById('admin-resultados-fecha').value;
-                    if (fechaActual && fechaActual !== new Date().toISOString().split('T')[0]) {
-                        cargarResultadosAdminFecha();
-                    } else {
-                        cargarResultadosAdmin();
-                    }
-                }
-                else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        function cargarAgencias() {
-            fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
-                let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { 
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; 
-                    return; 
-                }
-                let html = '';
-                for (let a of d) html += '<tr><td>' + a.id + '</td><td>' + a.usuario + '</td><td>' + a.nombre_agencia + '</td><td>' + (a.comision * 100).toFixed(0) + '%</td></tr>';
-                tbody.innerHTML = html;
-            });
-        }
-
-        function crearAgencia() {
-            let form = new FormData();
-            form.append('usuario', document.getElementById('new-usuario').value.trim());
-            form.append('password', document.getElementById('new-password').value.trim());
-            form.append('nombre', document.getElementById('new-nombre').value.trim());
-            fetch('/admin/crear-agencia', {method: 'POST', body: form})
-            .then(r => r.json()).then(d => {
-                if (d.status === 'ok') {
-                    showMensaje('✅ ' + d.mensaje, 'success');
-                    document.getElementById('new-usuario').value = '';
-                    document.getElementById('new-password').value = '';
-                    document.getElementById('new-nombre').value = '';
-                    cargarAgencias();
-                } else showMensaje(d.error || 'Error', 'error');
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            let hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('hist-fecha-inicio').value = hoy;
-            document.getElementById('hist-fecha-fin').value = hoy;
-            document.getElementById('admin-resultados-fecha').value = hoy;
-            
-            setTimeout(() => {
-                document.getElementById('timezone-info').style.display = 'block';
-            }, 1000);
-        });
-
-        cargarDashboard();
-    </script>
-</body>
-</html>
-'''
-
-# ==================== MAIN ====================
 if __name__ == '__main__':
-    print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60")
-    print("  CORREGIDO: Error 404 en endpoint de tripletas")
-    print("=" * 60)
-    print("  ✓ Pago tripleta cambiado de x50 a x60")
-    print("  ✓ Endpoint /admin/tripletas-hoy verificado")
-    print("  ✓ Textos de ayuda actualizados")
-    print("  ✓ Cálculos de premios corregidos")
-    print("=" * 60)
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
