@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZOOLO CASINO CLOUD v6.1 - TRIPLETA x60 CORREGIDA
+ZOOLO CASINO CLOUD v6.2 - ADMIN FIX
 """
 
 import os
@@ -176,7 +176,7 @@ def supabase_request(table, method="GET", data=None, filters=None, timeout=30):
                 filter_params.append(f"{k}=eq.{urllib.parse.quote(str(v))}")
         url += "?" + "&".join(filter_params)
     
-    # IMPORTANTE: El límite SOLO se aplica al GET, de lo contrario rompe los POST/PATCH
+    # IMPORTANTE: El limite SOLO se aplica al GET, de lo contrario rompe los POST/PATCH
     if method == "GET":
         if "?" in url:
             url += "&limit=5000"
@@ -278,7 +278,7 @@ def login():
             else:
                 error = "Usuario o clave incorrecta"
         except Exception as e:
-            error = f"Error de conexión: {str(e)}"
+            error = f"Error de conexion: {str(e)}"
     return render_template_string(LOGIN_HTML, error=error)
 
 @app.route('/logout')
@@ -318,7 +318,7 @@ def resultados_hoy():
         resultados_list = supabase_request("resultados", filters={"fecha": hoy})
         
         resultados_dict = {}
-        # Validar que sí es una lista y no un error dict de Supabase
+        # Validar que si es una lista y no un error dict de Supabase
         if isinstance(resultados_list, list):
             for r in resultados_list:
                 animal_str = str(r.get('animal', ''))
@@ -480,7 +480,7 @@ def procesar_venta():
         lineas.append("------------------------")
         lineas.append(f"*TOTAL: S/{formatear_monto(total)}*")
         lineas.append("")
-        lineas.append("Buena Suerte! 🍀")
+        lineas.append("Buena Suerte! ")
         lineas.append("El ticket vence a los 3 dias")
         
         texto_whatsapp = "\n".join(lineas)
@@ -670,7 +670,7 @@ def consultar_ticket_detalle():
                 if gano:
                     total_premio += premio
                 jugadas_detalle.append({
-                    'hora': 'Todo el día',
+                    'hora': 'Todo el dia',
                     'tipo': 'tripleta',
                     'seleccion': f"{trip['animal1']},{trip['animal2']},{trip['animal3']}",
                     'nombre_seleccion': f"{' - '.join(nombres)}",
@@ -767,18 +767,18 @@ def anular_ticket():
                 return jsonify({'error': 'Error en fecha del ticket'})
             minutos_transcurridos = (ahora_peru() - fecha_ticket).total_seconds() / 60
             if minutos_transcurridos > 5:
-                return jsonify({'error': f'No puede anular después de 5 minutos'})
+                return jsonify({'error': f'No puede anular despues de 5 minutos'})
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             if isinstance(jugadas, list):
                 for j in jugadas:
                     if not verificar_horario_bloqueo(j['hora']):
-                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerró'})
+                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya cerro'})
         else:
             jugadas = supabase_request("jugadas", filters={"ticket_id": ticket['id']})
             if isinstance(jugadas, list):
                 for j in jugadas:
                     if not verificar_horario_bloqueo(j['hora']):
-                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya está cerrado'})
+                        return jsonify({'error': f'No se puede anular, el sorteo {j["hora"]} ya esta cerrado'})
         url = f"{SUPABASE_URL}/rest/v1/tickets?id=eq.{urllib.parse.quote(str(ticket['id']))}"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -981,7 +981,7 @@ def guardar_resultado():
         animal = request.form.get('animal')
         fecha_input = request.form.get('fecha')
         if animal not in ANIMALES:
-            return jsonify({'error': f'Animal inválido: {animal}'}), 400
+            return jsonify({'error': f'Animal invalido: {animal}'}), 400
         if fecha_input:
             try:
                 fecha_obj = datetime.strptime(fecha_input, "%Y-%m-%d")
@@ -1356,7 +1356,7 @@ def exportar_csv():
         writer.writerow(['REPORTE ZOOLO CASINO - AGENCIAS'])
         writer.writerow([f'Periodo: {fecha_inicio} al {fecha_fin}'])
         writer.writerow([])
-        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comisión (S/)', 'Balance (S/)', '% Participación'])
+        writer.writerow(['Agencia', 'Usuario', 'Tickets', 'Ventas (S/)', 'Premios (S/)', 'Comision (S/)', 'Balance (S/)', '% Participacion'])
         total_ventas = sum(s['ventas'] for s in stats_por_agencia.values())
         for ag_id, stats in sorted(stats_por_agencia.items(), key=lambda x: x[1]['ventas'], reverse=True):
             if stats['tickets'] > 0:
@@ -1445,7 +1445,7 @@ def riesgo():
         agencia_id = request.args.get('agencia_id')
         nombre_agencia = "TODAS LAS AGENCIAS"
         if not sorteo_objetivo:
-            return jsonify({'riesgo': {}, 'sorteo_objetivo': None, 'mensaje': 'No hay más sorteos disponibles para hoy', 'agencia_nombre': nombre_agencia})
+            return jsonify({'riesgo': {}, 'sorteo_objetivo': None, 'mensaje': 'No hay mas sorteos disponibles para hoy', 'agencia_nombre': nombre_agencia})
         url = f"{SUPABASE_URL}/rest/v1/tickets?fecha=like.{urllib.parse.quote(hoy)}%25&anulado=eq.false"
         if agencia_id:
             url += f"&agencia_id=eq.{urllib.parse.quote(str(agencia_id))}"
@@ -1668,7 +1668,7 @@ LOGIN_HTML = '''
 </head>
 <body>
     <div class="login-box">
-        <h2>🦁 ZOOLO CASINO</h2>
+        <h2> ZOOLO CASINO</h2>
         {% if error %}<div class="error">{{error}}</div>{% endif %}
         <form method="POST">
             <div class="form-group">
@@ -1679,9 +1679,9 @@ LOGIN_HTML = '''
                 <label>Contraseña</label>
                 <input type="password" name="password" required>
             </div>
-            <button type="submit" class="btn-login">INICIAR SESIÓN</button>
+            <button type="submit" class="btn-login">INICIAR SESION</button>
         </form>
-        <div class="info">Sistema ZOOLO CASINO v6.1<br>Tripleta x60 + Nuevos Horarios Perú</div>
+        <div class="info">Sistema ZOOLO CASINO v6.2<br>Admin Fix</div>
     </div>
 </body>
 </html>
@@ -1801,7 +1801,7 @@ POS_HTML = """
 <body>
     <div class="header">
         <div class="header-info">
-            <h3>🦁 {{agencia}}</h3>
+            <h3> {{agencia}}</h3>
             <p id="reloj">--</p>
         </div>
         <div class="monto-box">
@@ -1811,7 +1811,7 @@ POS_HTML = """
     </div>
     
     <div class="tripleta-info" id="tripleta-banner">
-        🎯 MODO TRIPLETA: Selecciona 3 animalitos (Paga x60 si salen hoy)
+         MODO TRIPLETA: Selecciona 3 animalitos (Paga x60 si salen hoy)
     </div>
     
     <div class="main-container">
@@ -1848,10 +1848,10 @@ POS_HTML = """
                 <button class="btn-resultados" onclick="verResultados()">RESULTADOS</button>
                 <button class="btn-caja" onclick="abrirCaja()">CAJA</button>
                 <button class="btn-pagar" onclick="pagar()">PAGAR</button>
-                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()">🎯 TRIPLETA</button>
+                <button class="btn-tripleta" id="btn-tripleta" onclick="toggleModoTripleta()"> TRIPLETA</button>
                 <button class="btn-anular" onclick="anular()">ANULAR</button>
                 <button class="btn-borrar" onclick="borrarTodo()">BORRAR TODO</button>
-                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESIÓN</button>
+                <button class="btn-salir" onclick="location.href='/logout'">CERRAR SESION</button>
             </div>
         </div>
     </div>
@@ -1864,16 +1864,16 @@ POS_HTML = """
             </div>
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab(event,'hoy')">Hoy</button>
-                <button class="tab-btn" onclick="switchTab(event,'historico')">Histórico</button>
+                <button class="tab-btn" onclick="switchTab(event,'historico')">Historico</button>
             </div>
             <div id="tab-hoy" class="tab-content active">
                 <div class="stats-box">
                     <div class="stat-row"><span class="stat-label">Ventas:</span><span class="stat-value" id="caja-ventas">S/0.00</span></div>
                     <div class="stat-row"><span class="stat-label">Premios Pagados:</span><span class="stat-value negative" id="caja-premios">S/0.00</span></div>
-                    <div class="stat-row"><span class="stat-label">Tu Comisión:</span><span class="stat-value" id="caja-comision">S/0.00</span></div>
+                    <div class="stat-row"><span class="stat-label">Tu Comision:</span><span class="stat-value" id="caja-comision">S/0.00</span></div>
                     <div class="stat-row"><span class="stat-label">Balance:</span><span class="stat-value" id="caja-balance">S/0.00</span></div>
                 </div>
-                <div id="alerta-pendientes" class="alert-box" style="display:none;"><strong>⚠️ Tickets por Cobrar:</strong><div id="info-pendientes"></div></div>
+                <div id="alerta-pendientes" class="alert-box" style="display:none;"><strong> Tickets por Cobrar:</strong><div id="info-pendientes"></div></div>
             </div>
             <div id="tab-historico" class="tab-content">
                 <div class="form-group"><label>Desde:</label><input type="date" id="hist-fecha-inicio"></div>
@@ -1911,7 +1911,7 @@ POS_HTML = """
 
     <div class="modal" id="modal-mis-tickets">
         <div class="modal-content">
-            <div class="modal-header"><h3>🎫 MIS TICKETS VENDIDOS</h3><button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button></div>
+            <div class="modal-header"><h3> MIS TICKETS VENDIDOS</h3><button class="btn-close" onclick="cerrarModal('modal-mis-tickets')">X</button></div>
             <div class="filter-row">
                 <input type="date" id="mis-tickets-fecha-inicio">
                 <input type="date" id="mis-tickets-fecha-fin">
@@ -1925,8 +1925,8 @@ POS_HTML = """
 
     <div class="modal" id="modal-buscar-ticket">
         <div class="modal-content">
-            <div class="modal-header"><h3>🔎 BUSCAR TICKET POR SERIAL</h3><button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button></div>
-            <div class="form-group"><label>Ingrese el número de serial:</label><input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center;"></div>
+            <div class="modal-header"><h3> BUSCAR TICKET POR SERIAL</h3><button class="btn-close" onclick="cerrarModal('modal-buscar-ticket')">X</button></div>
+            <div class="form-group"><label>Ingrese el numero de serial:</label><input type="text" id="buscar-serial-input" placeholder="Ej: 1234567890" style="font-size: 1.2rem; text-align: center;"></div>
             <button class="btn-consultar" onclick="buscarTicketEspecifico()">BUSCAR TICKET</button>
             <div id="resultado-busqueda-ticket" style="margin-top: 20px;"></div>
         </div>
@@ -1934,7 +1934,7 @@ POS_HTML = """
 
     <div class="modal" id="modal-calculadora">
         <div class="modal-content">
-            <div class="modal-header"><h3>🧮 CALCULADORA DE PREMIOS</h3><button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button></div>
+            <div class="modal-header"><h3> CALCULADORA DE PREMIOS</h3><button class="btn-close" onclick="cerrarModal('modal-calculadora')">X</button></div>
             <div class="form-group"><label>Monto Apostado (S/):</label><input type="number" id="calc-monto" value="10" min="1"></div>
             <div class="form-group"><label>Tipo de Apuesta:</label>
                 <select id="calc-tipo" onchange="calcularPremio()">
@@ -1954,7 +1954,7 @@ POS_HTML = """
 
     <div class="modal" id="modal-pendientes">
         <div class="modal-content">
-            <div class="modal-header"><h3>💰 MIS TICKETS POR COBRAR</h3><button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button></div>
+            <div class="modal-header"><h3> MIS TICKETS POR COBRAR</h3><button class="btn-close" onclick="cerrarModal('modal-pendientes')">X</button></div>
             <div id="pendientes-info" style="margin-bottom: 15px; color: #ffd700; font-weight: bold; text-align: center;">Cargando...</div>
             <div id="lista-pendientes" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
@@ -2047,7 +2047,7 @@ POS_HTML = """
         function toggleHora(hora, id) {
             if (modoTripleta) { showToast('Las tripletas no necesitan horario', 'info'); return; }
             let btn = document.getElementById('hora-' + id);
-            if (btn.classList.contains('expired')) { showToast('Este sorteo ya cerró', 'error'); return; }
+            if (btn.classList.contains('expired')) { showToast('Este sorteo ya cerro', 'error'); return; }
             let idx = horariosSel.indexOf(hora);
             if (idx >= 0) { horariosSel.splice(idx, 1); btn.classList.remove('active'); }
             else { horariosSel.push(hora); btn.classList.add('active'); }
@@ -2061,7 +2061,7 @@ POS_HTML = """
             for (let item of carrito) {
                 let nom = item.tipo === 'animal' ? item.nombre.substring(0,10) : item.tipo === 'tripleta' ? 'TRIP' : item.seleccion;
                 let color = item.tipo === 'animal' ? '#ffd700' : item.tipo === 'tripleta' ? '#FFA500' : '#3498db';
-                let horaTxt = item.tipo === 'tripleta' ? 'Todo el día' : item.hora;
+                let horaTxt = item.tipo === 'tripleta' ? 'Todo el dia' : item.hora;
                 html += `<tr><td style="color:#aaa; font-size:0.75rem">${horaTxt}</td><td style="color:${color}; font-weight:bold; font-size:0.8rem">${item.seleccion} ${nom}</td><td style="text-align:right; font-weight:bold">${item.monto}</td></tr>`;
                 total += item.monto;
             }
@@ -2079,7 +2079,7 @@ POS_HTML = """
                 let monto = parseFloat(document.getElementById('monto').value) || 5;
                 let nums = seleccionTripleta.map(a => a.k).join(',');
                 let nombres = seleccionTripleta.map(a => a.nombre).join('-');
-                carrito.push({hora: 'Todo el día', seleccion: nums, nombre: nombres, monto: monto, tipo: 'tripleta'});
+                carrito.push({hora: 'Todo el dia', seleccion: nums, nombre: nombres, monto: monto, tipo: 'tripleta'});
                 seleccionTripleta = [];
                 document.querySelectorAll('.animal-card.tripleta-seleccionado').forEach(el => el.classList.remove('tripleta-seleccionado'));
                 showToast('Tripleta agregada al ticket (Paga x60)', 'success');
@@ -2098,10 +2098,10 @@ POS_HTML = """
         }
         
         async function vender() {
-            if (carrito.length === 0) { showToast('Carrito vacío', 'error'); return; }
+            if (carrito.length === 0) { showToast('Carrito vacio', 'error'); return; }
             const btn = document.querySelector('.btn-vender');
             const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Procesando...'; btn.disabled = true;
+            btn.innerHTML = 'Procesando...'; btn.disabled = true;
             try {
                 let jugadas = carrito.map(c => ({hora: c.hora, seleccion: c.seleccion, monto: c.monto, tipo: c.tipo}));
                 const response = await fetch('/api/procesar-venta', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({jugadas: jugadas})});
@@ -2110,9 +2110,9 @@ POS_HTML = """
                 else {
                     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) window.location.href = data.url_whatsapp;
                     else window.open(data.url_whatsapp, '_blank');
-                    carrito = []; updateTicket(); showToast('¡Ticket generado! Redirigiendo a WhatsApp...', 'success');
+                    carrito = []; updateTicket(); showToast('Ticket generado! Redirigiendo a WhatsApp...', 'success');
                 }
-            } catch (e) { showToast('Error de conexión. Intenta de nuevo.', 'error'); }
+            } catch (e) { showToast('Error de conexion. Intenta de nuevo.', 'error'); }
             finally { btn.innerHTML = originalText; btn.disabled = false; }
         }
 
@@ -2141,7 +2141,7 @@ POS_HTML = """
                     }
                 } else { html = '<p style="color: #888; text-align: center; padding: 20px;">No hay resultados disponibles</p>'; }
                 container.innerHTML = html;
-            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>'; });
+            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>'; });
         }
 
         function cerrarModal(modalId) { document.getElementById(modalId).style.display = 'none'; }
@@ -2159,7 +2159,7 @@ POS_HTML = """
                 if (d.tickets_pendientes > 0) { alertaDiv.style.display = 'block'; document.getElementById('info-pendientes').innerHTML = `Tienes <strong>${d.tickets_pendientes}</strong> ticket(s) ganador(es) sin cobrar.`; }
                 else { alertaDiv.style.display = 'none'; }
                 document.getElementById('modal-caja').style.display = 'block';
-            }).catch(e => showToast('Error de conexión', 'error'));
+            }).catch(e => showToast('Error de conexion', 'error'));
             let hoy = new Date().toISOString().split('T')[0];
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
@@ -2170,19 +2170,6 @@ POS_HTML = """
             const multiplicador = parseInt(document.getElementById('calc-tipo').value);
             document.getElementById('calc-total').textContent = 'S/' + (monto * multiplicador).toFixed(2);
             document.getElementById('calc-resultado').style.display = 'block';
-        }
-        
-        function abrirCaja() {
-            fetch('/api/caja').then(r => r.json()).then(d => {
-                if (d.error) { showToast(d.error, 'error'); return; }
-                document.getElementById('caja-ventas').textContent = 'S/' + d.ventas.toFixed(2);
-                document.getElementById('caja-premios').textContent = 'S/' + d.premios.toFixed(2);
-                document.getElementById('caja-comision').textContent = 'S/' + d.comision.toFixed(2);
-                let balanceEl = document.getElementById('caja-balance');
-                balanceEl.textContent = 'S/' + d.balance.toFixed(2);
-                balanceEl.className = 'stat-value ' + (d.balance >= 0 ? 'positive' : 'negative');
-                document.getElementById('modal-caja').style.display = 'block';
-            }).catch(e => showToast('Error de conexión', 'error'));
         }
         
         function consultarHistoricoCaja() {
@@ -2205,7 +2192,7 @@ POS_HTML = """
                     html += `<tr><td>${dia.fecha}</td><td>${dia.tickets}</td><td>S/${dia.ventas.toFixed(0)}</td><td style="color:${color}; font-weight:bold">S/${dia.balance.toFixed(0)}</td></tr>`;
                 });
                 tbody.innerHTML = html;
-            }).catch(e => showToast('Error de conexión', 'error'));
+            }).catch(e => showToast('Error de conexion', 'error'));
         }
         
         function switchTab(event, tab) {
@@ -2238,7 +2225,7 @@ POS_HTML = """
                     </div>`;
                 });
                 container.innerHTML = html;
-            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>'; });
+            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>'; });
         }
         
         function buscarTicketEspecifico() {
@@ -2259,7 +2246,7 @@ POS_HTML = """
                         <div class="stat-row"><span class="stat-label">Premio Total:</span><span class="stat-value" style="color: ${t.premio_total > 0 ? '#27ae60' : '#888'}; font-size: 1.2rem;">S/${t.premio_total.toFixed(2)}</span></div>
                     </div></div>`;
                 container.innerHTML = html;
-            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>'; });
+            }).catch(e => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>'; });
         }
         
         function verDetalleTicket(serial) {
@@ -2277,9 +2264,9 @@ POS_HTML = """
                 document.getElementById('pendientes-info').innerHTML = `Total Pendiente: <span style="color: #27ae60; font-size: 1.3rem;">S/${d.total_pendiente.toFixed(2)}</span> (${d.tickets.length} tickets)`;
                 if (d.tickets.length === 0) { document.getElementById('lista-pendientes').innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No tienes tickets pendientes por cobrar</p>'; return; }
                 let html = '';
-                d.tickets.forEach(t => { html += `<div class="ticket-item ganador"><div class="ticket-serial">#${t.serial}</div><div class="ticket-info">${t.fecha} • Apostado: S/${t.total}</div><div class="ticket-premio">💰 Ganancia: S/${t.premio.toFixed(2)}</div></div>`; });
+                d.tickets.forEach(t => { html += `<div class="ticket-item ganador"><div class="ticket-serial">#${t.serial}</div><div class="ticket-info">${t.fecha} Apostado: S/${t.total}</div><div class="ticket-premio"> Ganancia: S/${t.premio.toFixed(2)}</div></div>`; });
                 document.getElementById('lista-pendientes').innerHTML = html;
-            }).catch(e => { document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexión</p>'; });
+            }).catch(e => { document.getElementById('lista-pendientes').innerHTML = '<p style="color: #c0392b; text-align: center;">Error de conexion</p>'; });
         }
         
         async function pagar() {
@@ -2292,9 +2279,9 @@ POS_HTML = """
                 let total = d.total_ganado;
                 if (total > 0 && confirm(`TOTAL GANADO: S/${total.toFixed(2)}\\n\\n¿CONFIRMA PAGO?`)) {
                     await fetch('/api/pagar-ticket', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ticket_id: d.ticket_id})});
-                    showToast('✅ Ticket pagado correctamente', 'success');
+                    showToast('Ticket pagado correctamente', 'success');
                 } else if (total === 0) { showToast('Ticket no ganador', 'info'); }
-            } catch (e) { showToast('Error de conexión', 'error'); }
+            } catch (e) { showToast('Error de conexion', 'error'); }
         }
         
         async function anular() {
@@ -2304,8 +2291,8 @@ POS_HTML = """
             try {
                 const response = await fetch('/api/anular-ticket', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({serial: serial})});
                 const d = await response.json();
-                if (d.error) { showToast(d.error, 'error'); } else { showToast('✅ ' + d.mensaje, 'success'); }
-            } catch (e) { showToast('Error de conexión', 'error'); }
+                if (d.error) { showToast(d.error, 'error'); } else { showToast(d.mensaje, 'success'); }
+            } catch (e) { showToast('Error de conexion', 'error'); }
         }
         
         function borrarTodo() {
@@ -2429,8 +2416,8 @@ ADMIN_HTML = """
 <body>
     <div class="modal" id="modal-editar">
         <div class="modal-box">
-            <h3>✏️ EDITAR RESULTADO</h3>
-            <div class="warning-box" id="editar-advertencia">⚠️ Este sorteo tiene tickets vendidos. Cambiar el resultado afectará quién gana o pierde.</div>
+            <h3> EDITAR RESULTADO</h3>
+            <div class="warning-box" id="editar-advertencia"> Este sorteo tiene tickets vendidos. Cambiar el resultado afectara quien gana o pierde.</div>
             <div style="margin-bottom: 15px;">
                 <label style="display: block; color: #888; margin-bottom: 5px;">Fecha:</label>
                 <input type="text" id="editar-fecha-display" readonly style="width: 100%; padding: 10px; background: #222; border: 1px solid #444; color: #ffd700; border-radius: 6px; font-weight: bold;">
@@ -2453,27 +2440,27 @@ ADMIN_HTML = """
     </div>
 
     <div class="admin-header">
-        <div class="admin-title">👑 PANEL ADMIN - ZOOLO CASINO</div>
+        <div class="admin-title"> PANEL ADMIN - ZOOLO CASINO</div>
         <button onclick="location.href='/logout'" class="logout-btn">SALIR</button>
     </div>
 
     <div class="admin-tabs">
-        <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
-        <button class="admin-tab" onclick="showTab('resultados')">📋 Resultados</button>
-        <button class="admin-tab" onclick="showTab('riesgo')">⚠️ Riesgo</button>
-        <button class="admin-tab" onclick="showTab('tripletas')">🎯 Tripletas</button>
-        <button class="admin-tab" onclick="showTab('reporte')">🏢 Reporte</button>
-        <button class="admin-tab" onclick="showTab('historico')">📈 Histórico</button>
-        <button class="admin-tab" onclick="showTab('agencias')">🏪 Agencias</button>
-        <button class="admin-tab" onclick="showTab('operaciones')">⚙️ Operaciones</button>
+        <button class="admin-tab active" onclick="showTab('dashboard')"> Dashboard</button>
+        <button class="admin-tab" onclick="showTab('resultados')"> Resultados</button>
+        <button class="admin-tab" onclick="showTab('riesgo')"> Riesgo</button>
+        <button class="admin-tab" onclick="showTab('tripletas')"> Tripletas</button>
+        <button class="admin-tab" onclick="showTab('reporte')"> Reporte</button>
+        <button class="admin-tab" onclick="showTab('historico')"> Historico</button>
+        <button class="admin-tab" onclick="showTab('agencias')"> Agencias</button>
+        <button class="admin-tab" onclick="showTab('operaciones')"> Operaciones</button>
     </div>
 
     <div class="content">
         <div id="mensaje" class="mensaje"></div>
-        <div class="info-pago">💰 REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60</div>
+        <div class="info-pago"> REGLAS: Animales (00-39) = x35 | Lechuza (40) = x70 | Especiales = x2 | Tripleta = x60</div>
 
         <div id="dashboard" class="tab-content active">
-            <h3 style="color: #ffd700; margin-bottom: 15px;">📊 RESUMEN DE HOY</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px;"> RESUMEN DE HOY</h3>
             <div class="stats-grid">
                 <div class="stat-card"><h3>VENTAS</h3><p id="stat-ventas">S/0</p></div>
                 <div class="stat-card"><h3>PREMIOS PAGADOS</h3><p id="stat-premios">S/0</p></div>
@@ -2481,10 +2468,10 @@ ADMIN_HTML = """
                 <div class="stat-card"><h3>BALANCE</h3><p id="stat-balance">S/0</p></div>
             </div>
             <div class="form-box">
-                <h3>⚡ ACCIONES RÁPIDAS</h3>
+                <h3> ACCIONES RAPIDAS</h3>
                 <div class="btn-group">
                     <button class="btn-submit" onclick="showTab('riesgo')">Ver Riesgo</button>
-                    <button class="btn-tripleta" onclick="showTab('tripletas')">🎯 Ver Tripletas</button>
+                    <button class="btn-tripleta" onclick="showTab('tripletas')"> Ver Tripletas</button>
                     <button class="btn-secondary" onclick="showTab('resultados')">Cargar Resultados</button>
                     <button class="btn-csv" onclick="showTab('reporte')">Reporte Agencias</button>
                 </div>
@@ -2493,18 +2480,18 @@ ADMIN_HTML = """
 
         <div id="riesgo" class="tab-content">
             <div class="agencia-selector">
-                <label for="riesgo-agencia-select">🏢 SELECCIONAR AGENCIA:</label>
+                <label for="riesgo-agencia-select"> SELECCIONAR AGENCIA:</label>
                 <select id="riesgo-agencia-select" onchange="cambiarAgenciaRiesgo()"><option value="">TODAS LAS AGENCIAS</option></select>
             </div>
-            <div class="sorteo-actual-box"><h4>🎯 SORTEO EN CURSO / PRÓXIMO</h4><p id="sorteo-objetivo">Cargando...</p></div>
-            <h3 style="color: #ffd700; margin-bottom: 15px;">💸 APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span></h3>
+            <div class="sorteo-actual-box"><h4> SORTEO EN CURSO / PROXIMO</h4><p id="sorteo-objetivo">Cargando...</p></div>
+            <h3 style="color: #ffd700; margin-bottom: 15px;"> APUESTAS: <span id="total-apostado-sorteo" style="color: white;">S/0</span></h3>
             <div id="lista-riesgo"><p style="color: #888;">Cargando...</p></div>
         </div>
 
         <div id="tripletas" class="tab-content">
-            <h3 style="color: #ffd700; margin-bottom: 15px;">🎯 TRIPLETAS DE HOY (Paga x60)</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px;"> TRIPLETAS DE HOY (Paga x60)</h3>
             <div class="form-box">
-                <button class="btn-tripleta" onclick="cargarTripletas()">🔄 Actualizar</button>
+                <button class="btn-tripleta" onclick="cargarTripletas()"> Actualizar</button>
                 <div class="stats-grid" style="margin: 15px 0;">
                     <div class="stat-card" style="border-color: #FFD700;"><h3>TOTAL</h3><p id="trip-total" style="color: #FFD700;">0</p></div>
                     <div class="stat-card" style="border-color: #27ae60;"><h3>GANADORAS</h3><p id="trip-ganadoras" style="color: #27ae60;">0</p></div>
@@ -2516,7 +2503,7 @@ ADMIN_HTML = """
 
         <div id="reporte" class="tab-content">
             <div class="form-box">
-                <h3>🏢 REPORTE POR AGENCIAS</h3>
+                <h3> REPORTE POR AGENCIAS</h3>
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; color: #888; margin-bottom: 6px;">Filtrar por Agencia:</label>
                     <select id="reporte-agencia-select" onchange="cambiarFiltroAgencia()" style="width: 100%; padding: 12px; background: #000; border: 1px solid #444; color: white; border-radius: 8px;"><option value="">TODAS LAS AGENCIAS</option></select>
@@ -2529,22 +2516,22 @@ ADMIN_HTML = """
                 <div class="btn-group">
                     <button class="btn-secondary" onclick="setRangoReporte('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRangoReporte('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRangoReporte('semana')">7 días</button>
-                    <button class="btn-csv" onclick="exportarCSV()">📊 CSV</button>
+                    <button class="btn-secondary" onclick="setRangoReporte('semana')">7 dias</button>
+                    <button class="btn-csv" onclick="exportarCSV()"> CSV</button>
                 </div>
                 <div id="reporte-agencias-resumen" style="display:none; margin-top: 25px;">
-                    <h4 style="color: #ffd700; margin-bottom: 15px;">📈 TOTALES <span id="titulo-filtro-agencia"></span></h4>
+                    <h4 style="color: #ffd700; margin-bottom: 15px;"> TOTALES <span id="titulo-filtro-agencia"></span></h4>
                     <div class="stats-grid" id="stats-agencias-totales"></div>
                     <div class="form-box" style="background: rgba(255,215,0,0.05);">
-                        <h4 style="color: #ffd700; margin-bottom: 10px;">💰 DESGLOSE DE PREMIOS</h4>
+                        <h4 style="color: #ffd700; margin-bottom: 10px;"> DESGLOSE DE PREMIOS</h4>
                         <div class="stat-row"><span class="stat-label">Premios Pagados:</span><span class="stat-value" id="reporte-premios-pagados" style="color: #27ae60;">S/0</span></div>
                         <div class="stat-row"><span class="stat-label">Premios Pendientes:</span><span class="stat-value" id="reporte-premios-pendientes" style="color: #f39c12;">S/0</span></div>
                         <div class="stat-row"><span class="stat-label">Total en Premios:</span><span class="stat-value" id="reporte-premios-total" style="color: #ffd700;">S/0</span></div>
                         <div class="stat-row"><span class="stat-label">Tickets sin Cobrar:</span><span class="stat-value" id="reporte-tickets-pendientes" style="color: #f39c12;">0</span></div>
                     </div>
-                    <h4 style="color: #ffd700; margin: 25px 0 15px;">🏆 TOP 5 AGENCIAS</h4>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px;"> TOP 5 AGENCIAS</h4>
                     <div id="ranking-agencias"></div>
-                    <h4 style="color: #ffd700; margin: 25px 0 15px;">📋 DETALLE COMPLETO</h4>
+                    <h4 style="color: #ffd700; margin: 25px 0 15px;"> DETALLE COMPLETO</h4>
                     <div class="table-container">
                         <table id="tabla-detalle-agencias">
                             <thead><tr><th>#</th><th>Agencia</th><th>Tickets</th><th>Ventas</th><th>Premios Pagados</th><th>Pendientes</th><th>Balance</th><th>%</th></tr></thead>
@@ -2557,7 +2544,7 @@ ADMIN_HTML = """
 
         <div id="resultados" class="tab-content">
             <div class="form-box">
-                <h3>🔍 CONSULTAR RESULTADOS</h3>
+                <h3> CONSULTAR RESULTADOS</h3>
                 <div class="form-row">
                     <input type="date" id="admin-resultados-fecha" onchange="cargarResultadosAdminFecha()">
                     <button class="btn-submit" onclick="cargarResultadosAdminFecha()">CONSULTAR</button>
@@ -2566,23 +2553,23 @@ ADMIN_HTML = """
                 <div id="admin-resultados-titulo" style="margin-top: 15px; color: #ffd700; font-weight: bold; text-align: center;"></div>
             </div>
             <div class="form-box">
-                <h3>📋 RESULTADOS CARGADOS</h3>
+                <h3> RESULTADOS CARGADOS</h3>
                 <div id="lista-resultados-admin" style="max-height: 400px; overflow-y: auto;"><p style="color: #888; text-align: center; padding: 20px;">Seleccione una fecha...</p></div>
             </div>
             <div class="form-box">
-                <h3>✏️ CARGAR/EDITAR RESULTADO</h3>
+                <h3> CARGAR/EDITAR RESULTADO</h3>
                 <div class="form-row">
                     <select id="res-hora" style="flex: 1.5;">{% for h in horarios %}<option value="{{h}}">{{h}}</option>{% endfor %}</select>
                     <select id="res-animal" style="flex: 2;">{% for k, v in animales.items() %}<option value="{{k}}">{{k}} - {{v}}</option>{% endfor %}</select>
                     <button class="btn-submit" onclick="guardarResultado()">GUARDAR</button>
                 </div>
-                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;">ℹ️ Atajos: Presiona <strong>N</strong> para seleccionar Delfín (0) | <strong>M</strong> para Ballena (00)</div>
+                <div style="margin-top: 10px; font-size: 0.85rem; color: #888;"> Atajos: Presiona <strong>N</strong> para seleccionar Delfin (0) | <strong>M</strong> para Ballena (00)</div>
             </div>
         </div>
 
         <div id="historico" class="tab-content">
             <div class="form-box">
-                <h3>📅 CONSULTA HISTÓRICA</h3>
+                <h3> CONSULTA HISTORICA</h3>
                 <div class="form-row">
                     <input type="date" id="hist-fecha-inicio">
                     <input type="date" id="hist-fecha-fin">
@@ -2591,7 +2578,7 @@ ADMIN_HTML = """
                 <div class="btn-group">
                     <button class="btn-secondary" onclick="setRango('hoy')">Hoy</button>
                     <button class="btn-secondary" onclick="setRango('ayer')">Ayer</button>
-                    <button class="btn-secondary" onclick="setRango('semana')">7 días</button>
+                    <button class="btn-secondary" onclick="setRango('semana')">7 dias</button>
                     <button class="btn-secondary" onclick="setRango('mes')">Mes</button>
                 </div>
                 <div id="historico-resumen" style="display:none;">
@@ -2601,11 +2588,11 @@ ADMIN_HTML = """
                         <div class="stat-card"><h3>TICKETS</h3><p id="hist-total-tickets">0</p></div>
                         <div class="stat-card"><h3>BALANCE</h3><p id="hist-total-balance">S/0</p></div>
                     </div>
-                    <h3 style="color: #ffd700; margin: 25px 0 15px;">📋 DETALLE POR DÍA</h3>
+                    <h3 style="color: #ffd700; margin: 25px 0 15px;"> DETALLE POR DIA</h3>
                     <div class="table-container">
                         <table><thead><tr><th>Fecha</th><th>Tickets</th><th>Ventas</th><th>Premios</th><th>Balance</th></tr></thead><tbody id="tabla-historico"></tbody></table>
                     </div>
-                    <h3 style="color: #ffd700; margin: 25px 0 15px;">🔥 TOP ANIMALES</h3>
+                    <h3 style="color: #ffd700; margin: 25px 0 15px;"> TOP ANIMALES</h3>
                     <div id="top-animales-hist"></div>
                 </div>
             </div>
@@ -2613,7 +2600,7 @@ ADMIN_HTML = """
 
         <div id="operaciones" class="tab-content">
             <div class="form-box">
-                <h3>💰 PAGAR TICKET</h3>
+                <h3> PAGAR TICKET</h3>
                 <div class="form-row">
                     <input type="text" id="pagar-serial-admin" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
                     <button class="btn-submit" onclick="pagarTicketAdmin()">VERIFICAR Y PAGAR</button>
@@ -2621,7 +2608,7 @@ ADMIN_HTML = """
                 <div id="resultado-pago-admin" style="margin-top: 15px;"></div>
             </div>
             <div class="form-box">
-                <h3>❌ ANULAR TICKET</h3>
+                <h3> ANULAR TICKET</h3>
                 <div class="form-row">
                     <input type="text" id="anular-serial" placeholder="Ingrese SERIAL del ticket" style="flex: 2;">
                     <button class="btn-danger" onclick="anularTicketAdmin()">ANULAR</button>
@@ -2632,19 +2619,19 @@ ADMIN_HTML = """
 
         <div id="agencias" class="tab-content">
             <div class="form-box">
-                <h3>➕ CREAR NUEVA AGENCIA</h3>
+                <h3> CREAR NUEVA AGENCIA</h3>
                 <div class="form-row">
                     <input type="text" id="new-usuario" placeholder="Usuario">
-                    <input type="password" id="new-password" placeholder="Contraseña">
+                    <input type="password" id="new-password" placeholder="Contrasena">
                 </div>
                 <div class="form-row">
                     <input type="text" id="new-nombre" placeholder="Nombre de la Agencia" style="flex: 2;">
                     <button class="btn-submit" onclick="crearAgencia()">CREAR AGENCIA</button>
                 </div>
             </div>
-            <h3 style="color: #ffd700; margin-bottom: 15px;">🏢 AGENCIAS EXISTENTES</h3>
+            <h3 style="color: #ffd700; margin-bottom: 15px;"> AGENCIAS EXISTENTES</h3>
             <div class="table-container">
-                <table><thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comisión</th></tr></thead><tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody></table>
+                <table><thead><tr><th>ID</th><th>Usuario</th><th>Nombre</th><th>Comision</th></tr></thead><tbody id="tabla-agencias"><tr><td colspan="4" style="text-align:center;color:#888; padding: 20px;">Cargando...</td></tr></tbody></table>
             </div>
         </div>
     </div>
@@ -2664,13 +2651,28 @@ ADMIN_HTML = """
             const target = document.getElementById(tab);
             if (target) target.classList.add('active');
             const buttons = document.querySelectorAll('.admin-tab');
-            buttons.forEach(btn => { if (btn.getAttribute('onclick').includes("'" + tab + "'")) btn.classList.add('active'); });
+            buttons.forEach(btn => { 
+                if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tab)) {
+                    btn.classList.add('active'); 
+                }
+            });
+            
             if (tab === 'riesgo') { cargarAgenciasSelect(); cargarRiesgo(); }
             if (tab === 'tripletas') cargarTripletas();
-            if (tab === 'reporte') { let hoy = new Date().toISOString().split('T')[0]; document.getElementById('reporte-fecha-inicio').value = hoy; document.getElementById('reporte-fecha-fin').value = hoy; cargarAgenciasReporte(); consultarReporteAgencias(); }
+            if (tab === 'reporte') { 
+                let hoy = new Date().toISOString().split('T')[0]; 
+                document.getElementById('reporte-fecha-inicio').value = hoy; 
+                document.getElementById('reporte-fecha-fin').value = hoy; 
+                cargarAgenciasReporte(); 
+                consultarReporteAgencias(); 
+            }
             if (tab === 'agencias') cargarAgencias();
             if (tab === 'dashboard') cargarDashboard();
-            if (tab === 'resultados') { let hoy = new Date().toISOString().split('T')[0]; document.getElementById('admin-resultados-fecha').value = hoy; cargarResultadosAdmin(); }
+            if (tab === 'resultados') { 
+                let hoy = new Date().toISOString().split('T')[0]; 
+                document.getElementById('admin-resultados-fecha').value = hoy; 
+                cargarResultadosAdmin(); 
+            }
         }
 
         function showMensaje(msg, tipo) {
@@ -2711,7 +2713,7 @@ ADMIN_HTML = """
                 let select = document.getElementById('riesgo-agencia-select');
                 select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
                 d.forEach(ag => { select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia} (${ag.usuario})</option>`; });
-            });
+            }).catch(e => console.error(e));
         }
 
         function cargarAgenciasReporte() {
@@ -2720,11 +2722,17 @@ ADMIN_HTML = """
                 let select = document.getElementById('reporte-agencia-select');
                 select.innerHTML = '<option value="">TODAS LAS AGENCIAS</option>';
                 d.forEach(ag => { select.innerHTML += `<option value="${ag.id}">${ag.nombre_agencia}</option>`; });
-            });
+            }).catch(e => console.error(e));
         }
 
-        function cambiarFiltroAgencia() { filtroAgenciaActual = document.getElementById('reporte-agencia-select').value; consultarReporteAgencias(); }
-        function cambiarAgenciaRiesgo() { cargarRiesgo(); }
+        function cambiarFiltroAgencia() { 
+            filtroAgenciaActual = document.getElementById('reporte-agencia-select').value; 
+            consultarReporteAgencias(); 
+        }
+        
+        function cambiarAgenciaRiesgo() { 
+            cargarRiesgo(); 
+        }
 
         function cargarTripletas() {
             fetch('/admin/tripletas-hoy').then(r => r.json()).then(d => {
@@ -2733,7 +2741,10 @@ ADMIN_HTML = """
                 document.getElementById('trip-ganadoras').textContent = d.ganadoras;
                 document.getElementById('trip-premios').textContent = 'S/' + d.total_premios.toFixed(2);
                 let container = document.getElementById('lista-tripletas');
-                if (!d.tripletas || d.tripletas.length === 0) { container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tripletas jugadas hoy</p>'; return; }
+                if (!d.tripletas || d.tripletas.length === 0) { 
+                    container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No hay tripletas jugadas hoy</p>'; 
+                    return; 
+                }
                 let html = '';
                 d.tripletas.forEach(trip => {
                     let claseGanadora = trip.gano ? 'ganadora' : '';
@@ -2747,7 +2758,7 @@ ADMIN_HTML = """
                             <div class="tripleta-animal"><div class="num">${trip.animal3}</div><div class="name">${trip.nombres[2]}</div></div>
                         </div>
                         <div style="text-align: center; color: #aaa;">Apostado: S/${trip.monto} | Paga x60</div>
-                        ${trip.gano ? `<div class="tripleta-premio">💰 Premio: S/${trip.premio}</div>` : ''}
+                        ${trip.gano ? `<div class="tripleta-premio"> Premio: S/${trip.premio}</div>` : ''}
                     </div>`;
                 });
                 container.innerHTML = html;
@@ -2759,37 +2770,51 @@ ADMIN_HTML = """
             if (!serial) { showMensaje('Ingrese un serial', 'error'); return; }
             fetch('/api/verificar-ticket', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({serial: serial})})
             .then(r => r.json()).then(d => {
-                if (d.error) { document.getElementById('resultado-pago-admin').innerHTML = `<div style="color: #c0392b; padding: 15px; background: rgba(192,57,43,0.1); border-radius: 8px;">${d.error}</div>`; return; }
+                if (d.error) { 
+                    document.getElementById('resultado-pago-admin').innerHTML = `<div style="color: #c0392b; padding: 15px; background: rgba(192,57,43,0.1); border-radius: 8px;">${d.error}</div>`; 
+                    return; 
+                }
                 let html = `<div style="background: rgba(39,174,96,0.1); padding: 20px; border-radius: 10px; border: 1px solid #27ae60;">
                     <p style="font-size: 1.3rem; color: #ffd700; margin-bottom: 15px;">Total Ganado: S/${d.total_ganado.toFixed(2)}</p>
                     ${d.total_ganado > 0 ? `<button onclick="confirmarPagoAdmin('${d.ticket_id}')" class="btn-submit" style="width: 100%;">CONFIRMAR PAGO</button>` : '<p style="color: #888;">Ticket no ganador</p>'}
                 </div>`;
                 document.getElementById('resultado-pago-admin').innerHTML = html;
-            });
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function confirmarPagoAdmin(ticketId) {
             fetch('/api/pagar-ticket', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ticket_id: ticketId})})
             .then(r => r.json()).then(d => {
-                if (d.status === 'ok') { showMensaje('✅ Ticket pagado correctamente', 'success'); document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;">✅ Pago realizado con éxito</div>'; }
+                if (d.status === 'ok') { 
+                    showMensaje('Ticket pagado correctamente', 'success'); 
+                    document.getElementById('resultado-pago-admin').innerHTML = '<div style="color: #27ae60; text-align: center; padding: 20px;"> Pago realizado con exito</div>'; 
+                }
                 else { showMensaje(d.error || 'Error al pagar', 'error'); }
-            });
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function anularTicketAdmin() {
             let serial = document.getElementById('anular-serial').value.trim();
             if (!serial) { showMensaje('Ingrese un serial', 'error'); return; }
-            if (!confirm('¿Está seguro de anular el ticket ' + serial + '?')) return;
+            if (!confirm('Esta seguro de anular el ticket ' + serial + '?')) return;
             fetch('/api/anular-ticket', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({serial: serial})})
             .then(r => r.json()).then(d => {
                 let resultadoDiv = document.getElementById('resultado-anular');
-                if (d.error) { resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold">❌ ' + d.error + '</span>'; showMensaje(d.error, 'error'); }
-                else { resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold">✅ ' + d.mensaje + '</span>'; showMensaje(d.mensaje, 'success'); document.getElementById('anular-serial').value = ''; }
-            }).catch(e => showMensaje('Error de conexión', 'error'));
+                if (d.error) { 
+                    resultadoDiv.innerHTML = '<span style="color: #c0392b; font-weight:bold"> ' + d.error + '</span>'; 
+                    showMensaje(d.error, 'error'); 
+                }
+                else { 
+                    resultadoDiv.innerHTML = '<span style="color: #27ae60; font-weight:bold"> ' + d.mensaje + '</span>'; 
+                    showMensaje(d.mensaje, 'success'); 
+                    document.getElementById('anular-serial').value = ''; 
+                }
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function abrirModalEditar(hora, fecha, animalActual) {
-            editandoHora = hora; editandoFecha = fecha;
+            editandoHora = hora; 
+            editandoFecha = fecha;
             document.getElementById('editar-fecha-display').value = fecha;
             document.getElementById('editar-hora-display').value = hora;
             document.getElementById('editar-animal-select').value = animalActual;
@@ -2797,28 +2822,45 @@ ADMIN_HTML = """
             document.getElementById('modal-editar').classList.add('active');
         }
 
-        function cerrarModalEditar() { document.getElementById('modal-editar').classList.remove('active'); editandoFecha = null; editandoHora = null; }
+        function cerrarModalEditar() { 
+            document.getElementById('modal-editar').classList.remove('active'); 
+            editandoFecha = null; 
+            editandoHora = null; 
+        }
 
         function verificarTicketsSorteo(fecha, hora) {
             fetch('/admin/verificar-tickets-sorteo', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fecha: fecha, hora: hora})})
             .then(r => r.json()).then(d => {
                 let advertencia = document.getElementById('editar-advertencia');
-                if (d.tickets_count > 0) { advertencia.style.display = 'block'; advertencia.innerHTML = `⚠️ <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.`; }
-                else { advertencia.style.display = 'none'; }
+                if (d.tickets_count > 0) { 
+                    advertencia.style.display = 'block'; 
+                    advertencia.innerHTML = ` <strong>ADVERTENCIA:</strong> Este sorteo tiene <strong>${d.tickets_count} ticket(s)</strong> vendidos por un total de <strong>S/${d.total_apostado}</strong>.`; 
+                }
+                else { 
+                    advertencia.style.display = 'none'; 
+                }
             }).catch(e => console.error(e));
         }
 
         function confirmarEdicion() {
             let nuevoAnimal = document.getElementById('editar-animal-select').value;
-            if (!confirm(`¿Está seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal}?`)) return;
+            if (!confirm(`Esta seguro de cambiar el resultado de ${editandoHora} a ${nuevoAnimal}?`)) return;
             let partes = editandoFecha.split('/');
             let fechaISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
             let form = new FormData();
-            form.append('hora', editandoHora); form.append('animal', nuevoAnimal); form.append('fecha', fechaISO);
+            form.append('hora', editandoHora); 
+            form.append('animal', nuevoAnimal); 
+            form.append('fecha', fechaISO);
             fetch('/admin/guardar-resultado', {method: 'POST', body: form}).then(r => r.json()).then(d => {
-                if (d.status === 'ok') { showMensaje('✅ ' + d.mensaje, 'success'); cerrarModalEditar(); cargarResultadosAdmin(); }
-                else { showMensaje(d.error || 'Error al guardar', 'error'); }
-            }).catch(e => showMensaje('Error de conexión', 'error'));
+                if (d.status === 'ok') { 
+                    showMensaje(d.mensaje, 'success'); 
+                    cerrarModalEditar(); 
+                    cargarResultadosAdmin(); 
+                }
+                else { 
+                    showMensaje(d.error || 'Error al guardar', 'error'); 
+                }
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function getNombreAnimal(numero) {
@@ -2846,7 +2888,7 @@ ADMIN_HTML = """
                 });
                 tbody.innerHTML = html;
                 cargarTopAnimalesHistorico(inicio, fin);
-            }).catch(e => showMensaje('Error de conexión', 'error'));
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function consultarReporteAgencias() {
@@ -2873,9 +2915,9 @@ ADMIN_HTML = """
                 document.getElementById('reporte-tickets-pendientes').textContent = totales.tickets_pendientes_count;
                 let htmlRanking = '';
                 d.agencias.slice(0, 5).forEach((ag, idx) => {
-                    let medalla = ['🥇','🥈','🥉','4°','5°'][idx];
+                    let medalla = ['','','','4','5'][idx];
                     let colorBalance = ag.balance >= 0 ? '#27ae60' : '#c0392b';
-                    htmlRanking += `<div class="ranking-item"><div class="ranking-pos">${medalla}</div><div class="ranking-info"><div class="ranking-nombre">${ag.nombre}</div><div class="ranking-detalle">${ag.tickets} tickets • ${ag.porcentaje_ventas}%</div></div><div><div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div><div style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div></div></div>`;
+                    htmlRanking += `<div class="ranking-item"><div class="ranking-pos">${medalla}</div><div class="ranking-info"><div class="ranking-nombre">${ag.nombre}</div><div class="ranking-detalle">${ag.tickets} tickets  ${ag.porcentaje_ventas}%</div></div><div><div class="ranking-ventas">S/${ag.ventas.toFixed(0)}</div><div style="color: ${colorBalance}">S/${ag.balance.toFixed(0)}</div></div></div>`;
                 });
                 document.getElementById('ranking-agencias').innerHTML = htmlRanking;
                 let tbody = document.querySelector('#tabla-detalle-agencias tbody');
@@ -2886,7 +2928,10 @@ ADMIN_HTML = """
                     htmlTabla += `<tr><td>${idx + 1}</td><td><strong>${ag.nombre}</strong><br><small style="color:#888">${ag.usuario}</small></td><td>${ag.tickets}</td><td>S/${ag.ventas.toFixed(0)}</td><td style="color:#27ae60">S/${ag.premios_pagados.toFixed(0)}</td><td>${pendienteBadge}</td><td style="color:${colorBalance}; font-weight:bold">S/${ag.balance.toFixed(0)}</td><td>${ag.porcentaje_ventas}%</td></tr>`;
                 });
                 tbody.innerHTML = htmlTabla;
-            }).catch(e => { console.error(e); showMensaje('Error de conexión', 'error'); });
+            }).catch(e => { 
+                console.error(e); 
+                showMensaje('Error de conexion', 'error'); 
+            });
         }
 
         function exportarCSV() {
@@ -2896,8 +2941,13 @@ ADMIN_HTML = """
             fetch('/admin/exportar-csv', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})})
             .then(r => r.blob()).then(blob => {
                 let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a'); a.href = url; a.download = `reporte_agencias_${inicio}_${fin}.csv`;
-                document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a);
+                let a = document.createElement('a'); 
+                a.href = url; 
+                a.download = `reporte_agencias_${inicio}_${fin}.csv`;
+                document.body.appendChild(a); 
+                a.click(); 
+                window.URL.revokeObjectURL(url); 
+                document.body.removeChild(a);
                 showMensaje('CSV descargado correctamente', 'success');
             }).catch(e => showMensaje('Error al exportar', 'error'));
         }
@@ -2906,14 +2956,17 @@ ADMIN_HTML = """
             fetch('/admin/top-animales-rango', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fecha_inicio: inicio, fecha_fin: fin})})
             .then(r => r.json()).then(d => {
                 let container = document.getElementById('top-animales-hist');
-                if (!d.top_animales || d.top_animales.length === 0) { container.innerHTML = '<p style="color: #888;">No hay datos</p>'; return; }
+                if (!d.top_animales || d.top_animales.length === 0) { 
+                    container.innerHTML = '<p style="color: #888;">No hay datos</p>'; 
+                    return; 
+                }
                 let html = '';
                 d.top_animales.slice(0, 10).forEach((a, idx) => {
-                    let medalla = idx < 3 ? ['🥇','🥈','🥉'][idx] : (idx + 1);
-                    html += `<div class="riesgo-item"><b>${medalla} ${a.numero} - ${a.nombre}</b><br><small>Apostado: S/${a.total_apostado} • Si sale pagaría: S/${a.pago_potencial}</small></div>`;
+                    let medalla = idx < 3 ? ['','',''][idx] : (idx + 1);
+                    html += `<div class="riesgo-item"><b>${medalla} ${a.numero} - ${a.nombre}</b><br><small>Apostado: S/${a.total_apostado} • Si sale pagaria: S/${a.pago_potencial}</small></div>`;
                 });
                 container.innerHTML = html;
-            });
+            }).catch(e => console.error(e));
         }
 
         function cargarDashboard() {
@@ -2931,14 +2984,17 @@ ADMIN_HTML = """
             let agenciaId = document.getElementById('riesgo-agencia-select').value;
             let url = '/admin/riesgo' + (agenciaId ? '?agencia_id=' + agenciaId : '');
             fetch(url).then(r => r.json()).then(d => {
-                document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo || 'No hay más sorteos hoy';
+                document.getElementById('sorteo-objetivo').textContent = d.sorteo_objetivo || 'No hay mas sorteos hoy';
                 document.getElementById('total-apostado-sorteo').textContent = 'S/' + (d.total_apostado || 0).toFixed(2);
                 let container = document.getElementById('lista-riesgo');
-                if (!d.riesgo || Object.keys(d.riesgo).length === 0) { container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; return; }
+                if (!d.riesgo || Object.keys(d.riesgo).length === 0) { 
+                    container.innerHTML = '<p style="color:#888; text-align: center; padding: 20px;">No hay apuestas para este sorteo</p>'; 
+                    return; 
+                }
                 let html = '';
                 for (let [k, v] of Object.entries(d.riesgo)) {
                     let clase = v.es_lechuza ? 'riesgo-item lechuza' : 'riesgo-item';
-                    html += `<div class="${clase}"><b>${k}${v.es_lechuza ? ' ⚠️ ALTO RIESGO (x70)' : ''}</b><br>Apostado: S/${v.apostado.toFixed(2)} • Pagaría: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total</div>`;
+                    html += `<div class="${clase}"><b>${k}${v.es_lechuza ? '  ALTO RIESGO (x70)' : ''}</b><br>Apostado: S/${v.apostado.toFixed(2)} • Pagaria: S/${v.pagaria.toFixed(2)} • ${v.porcentaje}% del total</div>`;
                 }
                 container.innerHTML = html;
             }).catch(e => showMensaje('Error cargando riesgo', 'error'));
@@ -2951,17 +3007,27 @@ ADMIN_HTML = """
             container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Cargando...</p>';
             fetch('/api/resultados-fecha', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fecha: fecha})})
             .then(r => r.json()).then(d => {
-                if (d.error) { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>'; return; }
+                if (d.error) { 
+                    container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error: ' + d.error + '</p>'; 
+                    return; 
+                }
                 renderizarResultadosAdmin(d.resultados, d.fecha_consulta);
-            }).catch(() => { container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>'; });
+            }).catch(() => { 
+                container.innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>'; 
+            });
         }
 
         function cargarResultadosAdmin() {
             fetch('/admin/resultados-hoy').then(r => r.json()).then(d => {
-                if (d.error) { document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>'; return; }
+                if (d.error) { 
+                    document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error al cargar</p>'; 
+                    return; 
+                }
                 document.getElementById('admin-resultados-titulo').textContent = 'HOY - ' + new Date().toLocaleDateString('es-PE');
                 renderizarResultadosAdmin(d.resultados, d.fecha);
-            }).catch(() => { document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexión</p>'; });
+            }).catch(() => { 
+                document.getElementById('lista-resultados-admin').innerHTML = '<p style="color: #c0392b; text-align: center; padding: 20px;">Error de conexion</p>'; 
+            });
         }
 
         function renderizarResultadosAdmin(resultados, fechaStr) {
@@ -2973,10 +3039,10 @@ ADMIN_HTML = """
                 let contenido, botonEditar;
                 if (resultado) {
                     contenido = `<span class="resultado-numero">${resultado.animal}</span><span class="resultado-nombre">${resultado.nombre}</span>`;
-                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')">✏️ EDITAR</button>`;
+                    botonEditar = `<button class="btn-editar" onclick="abrirModalEditar('${hora}', '${fechaStr}', '${resultado.animal}')"> EDITAR</button>`;
                 } else {
                     contenido = `<span style="color: #666;">Pendiente</span>`;
-                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;">➕ CARGAR</button>`;
+                    botonEditar = `<button class="btn-editar" onclick="prepararNuevoResultado('${hora}')" style="background: #27ae60;"> CARGAR</button>`;
                 }
                 html += `<div class="resultado-item ${clase}"><strong style="color: #ffd700;">${hora}</strong><div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">${contenido}${botonEditar}</div></div>`;
             }
@@ -2986,7 +3052,7 @@ ADMIN_HTML = """
         function prepararNuevoResultado(hora) {
             document.getElementById('res-hora').value = hora;
             document.getElementById('res-animal').focus();
-            document.querySelector('[onclick="showTab('resultados')"]').click();
+            showTab('resultados');
             setTimeout(() => document.getElementById('res-hora').scrollIntoView({behavior: 'smooth'}), 300);
         }
 
@@ -2997,19 +3063,25 @@ ADMIN_HTML = """
             let fechaActual = document.getElementById('admin-resultados-fecha').value;
             if (fechaActual) form.append('fecha', fechaActual);
             fetch('/admin/guardar-resultado', {method: 'POST', body: form}).then(r => r.json()).then(d => {
-                if (d.status === 'ok') { showMensaje('✅ ' + d.mensaje, 'success'); cargarResultadosAdmin(); }
+                if (d.status === 'ok') { 
+                    showMensaje(d.mensaje, 'success'); 
+                    cargarResultadosAdmin(); 
+                }
                 else showMensaje(d.error || 'Error', 'error');
-            });
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         function cargarAgencias() {
             fetch('/admin/lista-agencias').then(r => r.json()).then(d => {
                 let tbody = document.getElementById('tabla-agencias');
-                if (!d || d.length === 0) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; return; }
+                if (!d || d.length === 0) { 
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">No hay agencias</td></tr>'; 
+                    return; 
+                }
                 let html = '';
                 for (let a of d) html += `<tr><td>${a.id}</td><td>${a.usuario}</td><td>${a.nombre_agencia}</td><td>${(a.comision * 100).toFixed(0)}%</td></tr>`;
                 tbody.innerHTML = html;
-            });
+            }).catch(e => console.error(e));
         }
 
         function crearAgencia() {
@@ -3018,9 +3090,15 @@ ADMIN_HTML = """
             form.append('password', document.getElementById('new-password').value.trim());
             form.append('nombre', document.getElementById('new-nombre').value.trim());
             fetch('/admin/crear-agencia', {method: 'POST', body: form}).then(r => r.json()).then(d => {
-                if (d.status === 'ok') { showMensaje('✅ ' + d.mensaje, 'success'); document.getElementById('new-usuario').value = ''; document.getElementById('new-password').value = ''; document.getElementById('new-nombre').value = ''; cargarAgencias(); }
+                if (d.status === 'ok') { 
+                    showMensaje(d.mensaje, 'success'); 
+                    document.getElementById('new-usuario').value = ''; 
+                    document.getElementById('new-password').value = ''; 
+                    document.getElementById('new-nombre').value = ''; 
+                    cargarAgencias(); 
+                }
                 else showMensaje(d.error || 'Error', 'error');
-            });
+            }).catch(e => showMensaje('Error de conexion', 'error'));
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -3028,25 +3106,26 @@ ADMIN_HTML = """
             document.getElementById('hist-fecha-inicio').value = hoy;
             document.getElementById('hist-fecha-fin').value = hoy;
             document.getElementById('admin-resultados-fecha').value = hoy;
+            
+            // Inicializar dashboard
+            cargarDashboard();
         });
 
-        // ==================== CAMBIO 4: SHORTCUTS N y M ====================
+        // Atajos de teclado
         document.addEventListener('keydown', function(e) {
             let selectAnimal = document.getElementById('res-animal');
             if (!selectAnimal) return;
-            // No activar si el usuario está escribiendo en otro lado
+            // No activar si el usuario esta escribiendo en otro lado
             if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
             
             if (e.key.toLowerCase() === 'n') {
-                selectAnimal.value = "0"; // Selecciona el Delfín
+                selectAnimal.value = "0"; // Selecciona el Delfin
                 showMensaje('Seleccionado: 0 - Delfin', 'success');
             } else if (e.key.toLowerCase() === 'm') {
                 selectAnimal.value = "00"; // Selecciona la Ballena
                 showMensaje('Seleccionado: 00 - Ballena', 'success');
             }
         });
-
-        cargarDashboard();
     </script>
 </body>
 </html>
@@ -3055,13 +3134,13 @@ ADMIN_HTML = """
 # ==================== MAIN ====================
 if __name__ == '__main__':
     print("=" * 60)
-    print("  ZOOLO CASINO CLOUD v6.1 - CORREGIDO")
+    print("  ZOOLO CASINO CLOUD v6.2 - ADMIN FIX")
     print("=" * 60)
-    print("  ✓ supabase_request: limit SOLO en GET (fix POST/PATCH)")
-    print("  ✓ resultados_hoy: isinstance check")
-    print("  ✓ resultados_fecha: isinstance check")
-    print("  ✓ admin_resultados_hoy: isinstance check")
-    print("  ✓ Shortcuts N=Delfin, M=Ballena en admin")
+    print("  Correcciones aplicadas:")
+    print("  - Error de sintaxis JS en prepararNuevoResultado")
+    print("  - Selector de tabs corregido")
+    print("  - Eliminados emojis problematicos")
+    print("  - Mejor manejo de errores en fetch")
     print("=" * 60)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
